@@ -774,6 +774,7 @@ setInterval(() => { if (!document.hidden && S.view === "main" && $("#sheet").hid
 
 // ---------- boot ----------
 (async function boot() {
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
   const params = new URLSearchParams(location.search);
   const restore = params.get("me");
   const invite = params.get("g");
@@ -799,5 +800,4 @@ setInterval(() => { if (!document.hidden && S.view === "main" && $("#sheet").hid
     S.view = "welcome";
     render();
   }
-  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
