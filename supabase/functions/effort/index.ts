@@ -104,7 +104,20 @@ function publicGroup(g: Record<string, unknown>) {
   return rest;
 }
 
-const PUBLIC_PLAYER_COLS = "id,name,emoji,color,platform,daily_goal,steps_synced_at,steps_source,scroll_synced_at,scroll_source,created_at";
+const PUBLIC_PLAYER_COLS = "id,name,emoji,color,platform,daily_goal,steps_synced_at,steps_source,scroll_synced_at,scroll_source,created_at,character,equipped";
+
+// Quiz answers that draw the player's walker. Only known keys, short values.
+const CHARACTER_KEYS = ["time", "pace", "land", "carry", "creature", "morning", "laugh", "hat", "hue", "month", "number", "word"];
+function cleanCharacter(c: unknown) {
+  if (!c || typeof c !== "object") return null;
+  const out: Record<string, string | number> = {};
+  for (const k of CHARACTER_KEYS) {
+    const v = (c as Record<string, unknown>)[k];
+    if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.round(v);
+    else if (typeof v === "string" && v.trim()) out[k] = v.trim().slice(0, 30);
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 function newPlayerRow(body: Record<string, any>) {
   const name = clip(body.name, 24);
@@ -117,6 +130,7 @@ function newPlayerRow(body: Record<string, any>) {
     platform: PLATFORMS.includes(body.platform) ? body.platform : "other",
     tz: clip(body.tz, 60) || "Europe/London",
     is_public: body.is_public !== false,
+    character: cleanCharacter(body.character),
   };
 }
 
@@ -405,6 +419,8 @@ Deno.serve(async (req) => {
         if (PLATFORMS.includes(body.platform)) patch.platform = body.platform;
         if (typeof body.is_public === "boolean") patch.is_public = body.is_public;
         if (clip(body.tz, 60)) patch.tz = clip(body.tz, 60);
+        if ("character" in body) patch.character = cleanCharacter(body.character);
+        if ("equipped" in body) patch.equipped = typeof body.equipped === "string" && /^[a-z-]{2,20}$/.test(body.equipped) ? body.equipped : null;
         if (body.code && "team" in body) {
           const g = await groupByCode(body.code);
           if (g) await db.from("memberships").update({ team: g.teams.includes(body.team) ? body.team : null }).eq("player_id", player.id).eq("group_id", g.id);

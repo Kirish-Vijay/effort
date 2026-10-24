@@ -2,10 +2,13 @@
 
 Walk more, scroll less. A step + screen-time game for friend groups and a public league. Works on iPhone and Android as an installable web app (no app store).
 
-- **App** (`docs/`): PWA hosted on GitHub Pages. `engine.js` holds every game rule (`RULES` at the top), `app.js` is the UI.
+- **App** (`docs/`): PWA hosted on GitHub Pages. `engine.js` holds every game rule (`RULES` at the top), `character.js` draws each player's walker from their quiz answers, `app.js` is the UI.
 - **API** (`supabase/functions/effort`): Supabase Edge Function + Postgres.
 
 ## The game
+
+Each player answers a 12-question quiz that generates a unique hand-drawn **walker** (870 billion+ combinations before the free-text word, which then varies proportions and details). Daily effort is **fuel** that moves the walker along an endless trail of landmarks, regions and collectable gear. Scrolling over budget builds **fog** that greys the walker out and slows it by up to 50%. Each group fights a weekly boss, **The Scroll**: steps damage it, over-budget scrolling heals it.
+
 
 | Layer | What it is | Resets? |
 | --- | --- | --- |

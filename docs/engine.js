@@ -27,7 +27,49 @@ const RULES = {
   seasonWeeks: 6, seasonEpoch: "2026-10-19",
   leagueUp: 750, leagueDown: 450,
   leagueManualShare: 0.5,
+
+  // Trail + boss
+  landmarkEvery: 100,        // trail units between landmarks (~a day of decent walking)
+  landmarksPerRegion: 10,
+  fogFullAt: 300,            // over-budget scroll minutes in 7 days for full fog…
+  fogSlow: 0.5,              // …which halves your walker's speed
+  bossHpPer: 450,            // weekly boss HP per group member
+  bossHealPerMin: 2,         // each over-budget scroll minute heals it by 2
 };
+
+const BIOMES = [
+  { key: "meadow", land: null, nouns: ["Meadows", "Fields", "Downs"] },
+  { key: "forest", land: "forest", nouns: ["Woods", "Thicket", "Grove"] },
+  { key: "coast", land: "coast", nouns: ["Shore", "Cove", "Bay"] },
+  { key: "mountains", land: "mountains", nouns: ["Peaks", "Ridge", "Pass"] },
+  { key: "desert", land: "desert", nouns: ["Dunes", "Flats", "Mesa"] },
+  { key: "tundra", land: "tundra", nouns: ["Drifts", "Glacier", "Tundra"] },
+  { key: "city", land: "city", nouns: ["Rooftops", "Alleys", "Arcade"] },
+  { key: "marsh", land: null, nouns: ["Marsh", "Fen", "Reeds"] },
+];
+const ADJ = ["Mossy", "Windy", "Golden", "Hidden", "Misty", "Sunny", "Crooked", "Quiet", "Bramble", "Lantern", "Pebble", "Cloudy", "Hollow", "Rusty", "Velvet", "Thistle"];
+const SPOTS = ["Old Oak", "Wishing Well", "Rope Bridge", "Lighthouse", "Stone Circle", "Lookout", "Waterfall", "Tea Hut", "Signpost",
+  "Abandoned Bus", "Giant Mushroom", "Fox Den", "Windmill", "Hot Spring", "Cave Mouth", "Lantern Post", "Picnic Rock", "Owl Tree"];
+const GEAR_BY_RARITY = { 1: ["pine-cap", "party-hat", "scarf", "bandana", "shades", "specs"], 2: ["explorer", "medal", "pet-snail", "pet-bird", "balloon", "flag"], 3: ["crown", "monocle", "pet-shroom"], 4: ["halo"] };
+const BOSS_NAMES = ["The Endless Feed", "Doomscroll Hydra", "The Algorithm", "Lord Swipe", "The Reel Beast", "Autoplay Wyrm", "Captain Notification", "The For You Fiend"];
+
+// Landmark i on a player's trail, fixed by their seed so it never changes once reached.
+function landmark(seed, i, firstBiome) {
+  const regionIdx = Math.floor(i / RULES.landmarksPerRegion);
+  const r = window.Walker ? window.Walker.rng(seed + i * 7919) : Math.random;
+  const rr = window.Walker ? window.Walker.rng(seed + regionIdx * 104729) : Math.random;
+  const biome = BIOMES[(firstBiome + regionIdx) % BIOMES.length];
+  const region = `${ADJ[Math.floor(rr() * ADJ.length)]} ${biome.nouns[Math.floor(rr() * biome.nouns.length)]}`;
+  let item = null;
+  const roll = r();
+  if (i > 0 && (i % 3 === 0 || roll < 0.15)) {
+    const q = r();
+    const rarity = q < 0.03 ? 4 : q < 0.15 ? 3 : q < 0.45 ? 2 : 1;
+    const pool = GEAR_BY_RARITY[rarity];
+    item = pool[Math.floor(r() * pool.length)];
+  }
+  return { i, name: SPOTS[Math.floor(r() * SPOTS.length)], region, biome: biome.key, item };
+}
 
 const TITLES = [[1, "Couch Potato"], [3, "Stroller"], [5, "Walker"], [8, "Hiker"], [12, "Trekker"], [16, "Ranger"],
   [20, "Explorer"], [25, "Pathfinder"], [30, "Legend"], [40, "Mythic"]];
@@ -344,7 +386,77 @@ function build({ players, steps, scroll, today, league = false }) {
     ];
   }
 
-  return { RULES, ids, byId, day, par, form, week, streak, xp, seasonScore, seasonResults, rivals, legend, trophies, tier, badges, eligible };
+  // ---------- The trail (personal game) ----------
+  // Each day's positive effort is fuel. Fuel moves your walker along an endless trail, but fog from the last
+  // 7 days of over-budget scrolling slows it down (up to half speed). A landmark every 100 trail units, a new
+  // region every 10 landmarks, and some landmarks drop gear.
+  const overBudget = (r) => (r.scrollSrc === "none" ? 0 : Math.max(0, r.scrollMin - r.budget));
+  function fogOn(pid, d) {
+    let m = 0;
+    for (let i = 0; i < 7; i++) m += overBudget(day(pid, addDays(d, -i)));
+    return Math.min(1, m / RULES.fogFullAt);
+  }
+
+  function trail(pid) {
+    return cache(`trail|${pid}`, () => {
+      const p = byId.get(pid);
+      const start = startDay(p);
+      let dist = 0, todayDist = 0;
+      for (let d = start; d <= today; d = addDays(d, 1)) {
+        const r = day(pid, d);
+        const step = Math.max(0, r.total) * (1 - RULES.fogSlow * fogOn(pid, d));
+        dist += step;
+        if (d === today) todayDist = step;
+      }
+      const seed = window.Walker ? window.Walker.hash(String(pid)) : 1;
+      const firstBiome = Math.max(0, BIOMES.findIndex((b) => b.land === p.character?.land));
+      const count = Math.floor(dist / RULES.landmarkEvery);
+      const marks = [];
+      for (let i = 0; i < count + 1; i++) marks.push(landmark(seed, i, firstBiome));
+      const items = [...new Set(marks.slice(0, count).map((m) => m.item).filter(Boolean))];
+      return {
+        dist: Math.round(dist), todayDist: Math.round(todayDist), fog: fogOn(pid, today),
+        reached: count, into: dist - count * RULES.landmarkEvery, next: marks[count],
+        recent: marks.slice(Math.max(0, count - 8), count).reverse(), items,
+        region: marks[count].region, biome: marks[count].biome,
+      };
+    });
+  }
+
+  // ---------- The Scroll (weekly group boss) ----------
+  // HP scales with the group. Everyone's step points hit it; everyone's over-budget scroll minutes heal it.
+  function boss(ws) {
+    return cache(`boss|${ws}`, () => {
+      const members = ids.filter((id) => startDay(byId.get(id)) <= addDays(ws, 6));
+      const hp = RULES.bossHpPer * Math.max(1, members.length);
+      let left = hp, defeatedOn = null;
+      const hits = new Map(), heals = new Map();
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(ws, i);
+        if (d > today) break;
+        for (const id of members) {
+          const r = day(id, d);
+          const dmg = r.stepPts, heal = overBudget(r) * RULES.bossHealPerMin;
+          hits.set(id, (hits.get(id) || 0) + dmg); heals.set(id, (heals.get(id) || 0) + heal);
+          if (!defeatedOn) left = left - dmg + heal;
+        }
+        if (!defeatedOn && left <= 0) defeatedOn = d;
+      }
+      left = Math.max(0, Math.min(hp * 1.5, left));
+      const top = (m) => [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])[0];
+      const n = Math.floor(daysBetween(RULES.seasonEpoch, ws) / 7);
+      return { ws, hp, left, pct: left / hp, defeatedOn, name: BOSS_NAMES[((n % BOSS_NAMES.length) + BOSS_NAMES.length) % BOSS_NAMES.length], hitter: top(hits), healer: top(heals), members: members.length };
+    });
+  }
+
+  function bossWins() {
+    let wins = 0;
+    const first = players.reduce((a, p) => (startDay(p) < a ? startDay(p) : a), today);
+    for (let ws = weekStart(first); ws < weekStart(today); ws = addDays(ws, 7)) if (boss(ws).defeatedOn) wins++;
+    return wins;
+  }
+
+  return { RULES, ids, byId, day, par, form, week, streak, xp, seasonScore, seasonResults, rivals, legend, trophies, tier, badges, eligible, trail, fogOn, boss, bossWins };
 }
 
 window.Effort = { build, RULES, TIERS, levelInfo, seasonOf, weekStart, addDays, parseDay, iso, daysBetween };

@@ -3,8 +3,15 @@
 const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const KM_PER_STEP = 0.000762;
-const EMOJIS = ["🚶", "🏃", "👟", "🦵", "🐆", "🐢", "🦄", "🐉", "🦊", "🐼", "🐸", "🦁", "🐙", "🚀", "⚡", "🔥", "👑", "🍕"];
-const COLORS = ["#6d5efc", "#ff5fa2", "#14a86b", "#f08a24", "#0ea5e9", "#e5484d", "#a855f7", "#eab308"];
+// Everyone is drawn as their walker. Players without quiz answers get a stable look derived from their id.
+const charOf = (p) => (p && p.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x"));
+const headCache = new Map();
+function avatar(p, cls = "") {
+  const key = `${p.id}|${p.equipped || ""}|${JSON.stringify(p.character || {})}`;
+  if (!headCache.has(key)) headCache.set(key, Walker.svg(charOf(p), { crop: "head", gear: p.equipped, label: p.name }));
+  return `<span class="avatar ${cls}">${headCache.get(key)}</span>`;
+}
+const colorOf = (p) => Walker.traits(charOf(p)).pal.body;
 const JOURNEYS = [
   ["London to Paris", 460],
   ["Land's End to John o' Groats", 1407],
@@ -69,7 +76,10 @@ const S = {
   mode: store.get("mode") || "week",
   adminKeys: store.get("adminKeys") || {},
   invite: null,               // { code, name, members } when arriving via ?g=
-  draft: { emoji: EMOJIS[0], color: COLORS[0], platform: detectPlatform() },
+  draft: { platform: detectPlatform() },
+  answers: store.get("draftAnswers") || {}, // quiz answers in progress
+  qi: 0,
+  retake: false,
   logDay: null,
 };
 let installPrompt = null;
@@ -168,27 +178,69 @@ const ICON = {
 
 // ---------- rendering ----------
 function render() {
-  const views = { loading: viewLoading, welcome: viewWelcome, onboard: viewOnboard, main: viewMain };
+  const views = { loading: viewLoading, welcome: viewWelcome, quiz: viewQuiz, reveal: viewReveal, onboard: viewOnboard, main: viewMain };
   app.innerHTML = (views[S.view] || viewWelcome)();
 }
 
-const viewLoading = () => `<div class="empty" style="padding-top:30vh"><span class="e">⚡</span>Loading…</div>`;
+const viewLoading = () => `<div class="empty" style="padding-top:30vh"><span class="e">🥾</span>Lacing up…</div>`;
 
 function rulesCards() {
   return `<div class="feature-list">
-    <div><span class="e">🚶</span><span><b>Walk = points</b><br><span class="muted small">Steps sync from your phone automatically.</span></span></div>
-    <div><span class="e">📵</span><span><b>Scrolling costs points</b><br><span class="muted small">Every 1,000 steps earns 5 min of TikTok, Reels or Shorts. Go over and you lose points.</span></span></div>
-    <div><span class="e">🎯</span><span><b>Beat your own par</b><br><span class="muted small">Each week is won by whoever beats their own average day by the most, so anyone can win from day one.</span></span></div>
-    <div><span class="e">🏆</span><span><b>Levels, streaks and seasons</b><br><span class="muted small">Your level and badges are forever. Every 6 weeks a new season starts.</span></span></div>
+    <div><span class="e">🧪</span><span><b>Answer 12 questions, get your walker</b><br><span class="muted small">Your answers build a character nobody else has.</span></span></div>
+    <div><span class="e">🥾</span><span><b>Steps are fuel</b><br><span class="muted small">Every step moves your walker along an endless trail, past landmarks with gear to find.</span></span></div>
+    <div><span class="e">🌫️</span><span><b>Scrolling brings the fog</b><br><span class="muted small">Go over your scroll budget and your walker slows down and goes grey.</span></span></div>
+    <div><span class="e">📱</span><span><b>Beat The Scroll together</b><br><span class="muted small">A weekly boss your group fights with steps. Doomscrolling heals it.</span></span></div>
   </div>`;
+}
+
+// ----- Character quiz -----
+const QUESTIONS = Walker.QUESTIONS;
+function quizPreview(mood = "ok") {
+  return Walker.svg(S.answers, { mood, label: "Your walker so far" });
+}
+
+function viewQuiz() {
+  const i = S.qi, q = QUESTIONS[i], a = S.answers;
+  const back = `<button class="icon-btn" data-act="quiz-back" aria-label="Back">‹</button>`;
+  const head = `<div class="quiz-top">${back}<div class="bar"><i style="width:${(100 * i) / QUESTIONS.length}%"></i></div><span class="small muted num">${i + 1}/${QUESTIONS.length}</span></div>`;
+  if (q.type === "intro") {
+    return `${head}<h1 class="quiz-q">First, what should we call you?</h1>
+      <form class="card" data-form="quiz-intro">
+        <label class="field"><span>Your name</span><input name="name" required maxlength="24" placeholder="What your friends call you" value="${esc(a.name || "")}" autocomplete="given-name"></label>
+        <label class="field"><span>Your phone</span></label>
+        <div class="toggle" style="margin-bottom:16px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<button type="button" data-platform="${v}" aria-pressed="${v === S.draft.platform}">${l}</button>`).join("")}</div>
+        <button class="btn block">Build my walker</button>
+      </form>
+      <p class="note" style="display:block;text-align:center">12 quick questions. Answer honestly, it's more fun.</p>`;
+  }
+  let body;
+  if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>`;
+  else if (q.type === "hue") body = `<input type="range" class="hue-slider" min="0" max="359" value="${a.hue ?? 30}" data-hue aria-label="Colour"><button class="btn block" data-act="quiz-next">This one</button>`;
+  else if (q.type === "number") body = `<form data-form="quiz-value"><input name="v" type="number" inputmode="numeric" min="1" max="99" required class="big-input" value="${esc(a.number ?? "")}" placeholder="7" aria-label="Lucky number"><button class="btn block" style="margin-top:12px">Next</button></form>`;
+  else body = `<form data-form="quiz-value"><input name="v" maxlength="30" required class="big-input" style="font-size:26px!important" value="${esc(a.word ?? "")}" placeholder="${esc(q.placeholder)}" autocomplete="off" aria-label="${esc(q.q)}"><button class="btn block" style="margin-top:12px">Make my walker</button></form>`;
+  return `${head}<div class="quiz-preview" id="quiz-preview">${quizPreview()}</div>
+    <h1 class="quiz-q">${esc(q.q)}</h1>${body}`;
+}
+
+function viewReveal() {
+  const a = S.answers;
+  const odds = Walker.COMBOS;
+  return `<section class="reveal">
+    <p class="note" style="font-size:26px">ta-da!</p>
+    <div class="walker-big">${Walker.svg(a, { mood: "fresh", label: `${a.name}'s walker` })}</div>
+    <h1 class="ob-title" style="margin-top:18px">This is you, ${esc(a.name || "walker")}.</h1>
+    <p class="muted">Your answers made it. Change one answer and you'd look different.</p>
+    <p class="odds">1 of ${odds.toLocaleString("en-GB")} possible walkers, before your word even counts</p>
+    <div class="btn-row"><button class="btn ghost" data-act="quiz-restart">Change answers</button><button class="btn" data-act="quiz-done">${S.retake ? "Save my new look" : "That's me, let's walk"}</button></div>
+  </section>`;
 }
 
 function viewWelcome() {
   const inv = S.invite;
   return `<section class="welcome">
-    <img class="logo" src="icon.svg" alt="">
+    <div class="logo">${Walker.svg(Walker.fallbackAnswers("welcome-" + new Date().getDate()), { mood: "fresh", label: "A walker" })}</div>
     <h1>Effort</h1>
-    <p class="lead">Walk more. Scroll less. Beat your friends.</p>
+    <p class="lead">Walk more. Scroll less. Grow a little walker with your friends.</p>
     ${inv ? `<div class="callout" style="text-align:left;margin-bottom:16px">You're invited to <b>${esc(inv.name)}</b> (${inv.members} ${inv.members === 1 ? "player" : "players"}).</div>` : ""}
     ${rulesCards()}
     <button class="btn block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Get started"}</button>
@@ -197,21 +249,9 @@ function viewWelcome() {
   </section>`;
 }
 
-// Onboarding: 0 profile → 1 steps → 2 scrolling → done
+// Onboarding after the quiz: 1 steps → 2 scrolling → done
 function viewOnboard() {
   const dots = `<div class="dots">${[0, 1, 2].map((i) => `<i class="${i <= S.step ? "on" : ""}"></i>`).join("")}</div>`;
-  if (S.step === 0) {
-    const d = S.draft;
-    return `${dots}<h1 class="ob-title">Who are you?</h1>
-    <form class="card" data-form="profile-new">
-      <div class="row" style="margin-bottom:14px"><div class="avatar lg" style="--c:${d.color}">${d.emoji}</div><label class="field grow" style="margin:0"><span>Your name</span><input name="name" required maxlength="24" placeholder="What your friends call you" value="${esc(d.name || "")}" autocomplete="given-name"></label></div>
-      <div class="picker" style="margin-bottom:12px">${EMOJIS.map((e) => `<button type="button" data-emoji="${e}" aria-pressed="${e === d.emoji}">${e}</button>`).join("")}</div>
-      <div class="swatches" style="margin-bottom:16px">${COLORS.map((c) => `<button type="button" data-color="${c}" style="background:${c}" aria-pressed="${c === d.color}" aria-label="Colour ${c}"></button>`).join("")}</div>
-      <label class="field"><span>Your phone</span></label>
-      <div class="toggle" style="margin-bottom:16px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<button type="button" data-platform="${v}" aria-pressed="${v === d.platform}">${l}</button>`).join("")}</div>
-      <button class="btn block">Next</button>
-    </form>`;
-  }
   const which = S.step === 1 ? "steps" : "scroll";
   return `${dots}<h1 class="ob-title">${which === "steps" ? "Connect your steps" : "Track your scrolling"}</h1>
     <p class="muted" style="margin-top:-4px">${which === "steps" ? "Set it up once and your steps sync on their own. About 3 minutes." : "Optional, but it's how you earn bonus points for staying under your scroll budget. Without it we assume 30 min a day."}</p>
@@ -234,18 +274,23 @@ function todayCard(E, id) {
   const r = E.day(id, t);
   const par = E.par(id, t);
   const pct = r.active ? Math.max(0, Math.round((100 * r.total) / par.value)) : 0;
-  const ringPct = Math.min(1, pct / 100);
-  const R = 46, C = 2 * Math.PI * R;
   const budgetLeft = r.budget - (r.scrollSrc === "assumed" ? RULES.assumedScrollMin : r.scrollMin);
   const scrollLabel = r.scrollSrc === "assumed" ? `~${RULES.assumedScrollMin} min assumed` : r.scrollSrc === "none" ? "not tracked" : `${fmt(r.scrollMin)} min`;
-  return `<section class="hero">
-    <div class="ring"><svg viewBox="0 0 108 108"><circle cx="54" cy="54" r="${R}" stroke="rgba(255,255,255,.22)" stroke-width="10" fill="none"/><circle cx="54" cy="54" r="${R}" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - ringPct)}"/></svg>
-      <div class="center"><div><div class="pct num">${pct}%</div><div class="lbl">of par</div></div></div></div>
-    <div class="grow">
-      <div class="small" style="opacity:.85">Today's effort</div>
-      <div class="big num">${signed(r.total)}</div>
-      <div class="meta">${par.placement ? "Placement: setting your par" : `Your par is ${fmt(par.value)}`}</div>
-    </div>
+  const tr = E.trail(id);
+  const mood = tr.fog > 0.45 ? "foggy" : pct >= 100 ? "fresh" : "ok";
+  const say = mood === "foggy" ? pick(["my brain is soup", "can't see the path…", "one more video… no!"])
+    : mood === "fresh" ? pick(["let's gooo", "legs feel great", "onwards!"])
+    : r.steps < 2000 ? pick(["walk me?", "is it walk o'clock?", "boots are on…"]) : pick(["nice pace", "keep going", "smell that air"]);
+  return `<section class="card stage">
+    ${Walker.scene(tr.biome, Walker.hash(id))}
+    <div class="tag-today"><span>Today</span><b class="num">${signed(r.total)}</b><span>${par.placement ? "setting your par" : `${pct}% of par`}</span></div>
+    <div class="tag-region">📍 ${esc(tr.region)}</div>
+    <div class="bubble">${esc(say)}</div>
+    <div class="walker-wrap">${Walker.svg(charOf(S.me), { mood, fog: tr.fog, gear: S.me.equipped, label: `${S.me.name}'s walker` })}</div>
+    <button class="trail-bar" data-act="open-trail" style="display:block;width:calc(100% - 24px);text-align:left;cursor:pointer;color:var(--ink)">
+      <div class="row spread small"><b>Next: ${esc(tr.next.name)}</b><span class="num muted">${fmt(RULES.landmarkEvery - tr.into)} fuel to go ${ICON.chev}</span></div>
+      <div class="bar" style="margin-top:6px"><i style="width:${(100 * tr.into) / RULES.landmarkEvery}%"></i></div>
+    </button>
   </section>
   <section class="card split">
     <div><div class="small muted">🚶 Steps</div><b class="num">${fmt(r.steps)}</b><span class="pts good">${signed(r.stepPts)}</span></div>
@@ -253,6 +298,31 @@ function todayCard(E, id) {
     <div class="budget"><div class="row spread small"><span>Scroll budget</span><span class="num">${budgetLeft >= 0 ? `${fmt(budgetLeft)} of ${r.budget} min left` : `${fmt(-budgetLeft)} min over`}</span></div>
       <div class="bar"><i style="width:${r.budget ? Math.min(100, (100 * Math.max(0, budgetLeft)) / RULES.budgetCap) : 0}%;--c:var(--good)"></i></div>
       <div class="small muted" style="margin-top:4px">Every 1,000 steps earns 5 min (up to ${RULES.budgetCap}).</div></div>
+    <div class="fog-meter"><div class="row spread small"><span>🌫️ Fog</span><span>${tr.fog < 0.05 ? "Clear skies" : tr.fog < 0.45 ? "A bit hazy" : "Thick fog"}${tr.fog >= 0.05 ? ` · walker ${Math.round(RULES.fogSlow * tr.fog * 100)}% slower` : ""}</span></div>
+      <div class="bar"><i style="width:${Math.round(tr.fog * 100)}%"></i></div>
+      <div class="small muted" style="margin-top:4px">Builds up from the last 7 days of scrolling over budget. Clears as you stay under it.</div></div>
+  </section>`;
+}
+
+const pick = (arr) => arr[Math.floor(Date.now() / 36e5) % arr.length]; // changes hourly, stable between renders
+
+function bossCard(B) {
+  if (!B || S.boardKey === "public" || B.E.ids.length < 2) return "";
+  const b = B.E.boss(weekStart(today()));
+  const won = !!b.defeatedOn;
+  const hitter = b.hitter && B.E.byId.get(b.hitter[0]);
+  const healer = b.healer && B.E.byId.get(b.healer[0]);
+  return `<section class="card boss-card ${won ? "won" : ""}">
+    <div class="boss-row">
+      <div>${Walker.boss(b.pct, won)}</div>
+      <div>
+        <div class="small muted">This week's boss</div>
+        <h2 style="margin:2px 0 8px">${esc(b.name)}</h2>
+        ${won ? `<p class="small" style="margin:0"><b>Beaten on ${dayLabel(b.defeatedOn, { weekday: "long" })}!</b> Your group has slain ${B.E.bossWins() + 1} so far.</p>`
+          : `<div class="hp"><div class="bar"><i style="width:${Math.round(b.pct * 100)}%"></i></div><div class="row spread small" style="margin-top:4px"><span class="num"><b>${fmt(b.left)}</b> / ${fmt(b.hp)} HP</span><span class="muted">ends Sunday</span></div></div>`}
+      </div>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">Everyone's steps hit it. Scrolling over budget heals it 2 HP a minute.${hitter ? ` Top hitter: <b>${esc(hitter.name)}</b>.` : ""}${healer ? ` Healing it most: <b>${esc(healer.name)}</b> 👀` : ""}</p>
   </section>`;
 }
 
@@ -289,9 +359,9 @@ function rivalCard(B) {
   return `<section class="card rival" data-profile="${rid}">
     <div class="small muted">⚔️ Your rival this week</div>
     <div class="row" style="margin-top:8px">
-      <span class="avatar" style="--c:${S.me.color}">${esc(S.me.emoji)}</span><b class="num grow">${fmt(mine)}</b>
+      ${avatar(S.me)}<b class="num grow">${fmt(mine)}</b>
       <span class="vs">vs</span>
-      <b class="num grow" style="text-align:right">${fmt(theirs)}</b><span class="avatar" style="--c:${them.color}">${esc(them.emoji)}</span>
+      <b class="num grow" style="text-align:right">${fmt(theirs)}</b>${avatar(them)}
     </div>
     <p class="small" style="margin:8px 0 0">${lead > 0 ? `You're <b>${fmt(lead)}</b> ahead of ${esc(them.name)}.` : lead < 0 ? `${esc(them.name)} is <b>${fmt(-lead)}</b> ahead. Go for a walk.` : `Dead level with ${esc(them.name)}.`}</p>
   </section>`;
@@ -306,7 +376,7 @@ function miniBoard(B) {
   if (myRank > 2) show.push(rows[myRank]);
   return `<section class="card" data-tab="board" style="cursor:pointer">
     <div class="row spread"><h2 style="margin:0">${esc(boardName(S.boardKey))}</h2><span class="small muted">${myRank >= 0 ? `You're #${myRank + 1} of ${rows.length}` : ""} ${ICON.chev}</span></div>
-    ${show.map((r) => { const p = B.E.byId.get(r.id); const i = rows.indexOf(r); return `<div class="row mini"><span class="rank r${i + 1}">${i + 1}</span><span class="avatar sm" style="--c:${p.color}">${esc(p.emoji)}</span><span class="grow ${r.id === S.me.id ? "b" : ""}">${esc(p.name)}</span><b class="num">${fmt(r.v)}</b></div>`; }).join("")}
+    ${show.map((r) => { const p = B.E.byId.get(r.id); const i = rows.indexOf(r); return `<div class="row mini"><span class="rank r${i + 1}">${i + 1}</span>${avatar(p, "sm")}<span class="grow ${r.id === S.me.id ? "b" : ""}">${esc(p.name)}</span><b class="num">${fmt(r.v)}</b></div>`; }).join("")}
   </section>`;
 }
 
@@ -333,6 +403,7 @@ function tabHome() {
   ${todayCard(E, id)}
   ${nags()}
   ${recapCard()}
+  ${bossCard(B)}
   ${weekCard(E, id)}
   ${rivalCard(B)}
   ${miniBoard(B)}
@@ -369,9 +440,9 @@ function tabBoard() {
     const p = E.byId.get(r.id);
     const st = E.streak(r.id), lv = E.xp(r.id), par = E.par(r.id, t);
     const w = E.week(r.id, ws);
-    return `<li class="${r.id === S.me.id ? "me" : ""}" data-profile="${r.id}" style="--c:${p.color}">
+    return `<li class="${r.id === S.me.id ? "me" : ""}" data-profile="${r.id}" style="--c:${colorOf(p)}">
       <span class="rank r${i + 1}">${i < 3 && r.v > 0 ? ["🥇", "🥈", "🥉"][i] : i + 1}</span>
-      <span class="avatar">${esc(p.emoji)}</span>
+      ${avatar(p)}
       <span class="who"><span class="name">${esc(p.name)} ${legend?.id === r.id ? "👑" : ""}</span>
         <span class="tags"><span class="lvl-chip">Lv ${lv.level}</span>${st.weeks ? `<span>🔥${st.weeks}w</span>` : ""}${par.placement ? "<span>📏 placing</span>" : ""}${S.mode === "week" ? `<span>${w.atPar}/7 at par</span>` : ""}${p.team ? `<span>${esc(p.team)}</span>` : ""}</span>
         <span class="bar"><i style="width:${(Math.max(0, r.v) / max) * 100}%"></i></span></span>
@@ -434,7 +505,7 @@ function forfeitCard(E, g) {
     <div class="row spread"><h2 style="margin:0">😬 Forfeit watch</h2><span class="pill">${daysLeft ? `${daysLeft} day${daysLeft > 1 ? "s" : ""} left` : "Wheel at 6pm"}</span></div>
     <p class="muted small" style="margin:6px 0 10px">Lowest score on Sunday night spins the wheel. ${slices.length ? `${slices.length} forfeit${slices.length === 1 ? "" : "s"} on it.` : `Right now it can only land on: <b style="color:var(--text)">${esc(g.forfeit || "Buys the first round")}</b>.`}</p>
     ${rows.length < 2 ? `<p class="small muted">Kicks in once two people have finished their placement week.</p>`
-      : `<div class="row" style="margin-bottom:12px"><span class="avatar" style="--c:${bottom.color}">${esc(bottom.emoji)}</span><div class="grow"><div class="loser">${esc(bottom.name)}</div><div class="small muted num">${fmt(rows[0].v)} pts · ${fmt(rows[1].v - rows[0].v)} behind ${esc(E.byId.get(rows[1].id).name)}</div></div></div>`}
+      : `<div class="row" style="margin-bottom:12px">${avatar(bottom)}<div class="grow"><div class="loser">${esc(bottom.name)}</div><div class="small muted num">${fmt(rows[0].v)} pts · ${fmt(rows[1].v - rows[0].v)} behind ${esc(E.byId.get(rows[1].id).name)}</div></div></div>`}
     ${wheelArea}
     <button class="btn sm ghost" data-act="edit-wheel" style="margin-top:10px">${slices.length < 2 ? "Add forfeits to the wheel" : "See or add forfeits"}</button>
   </section>`;
@@ -473,7 +544,7 @@ function seasonCard(E) {
   const res = E.seasonResults(s).slice(0, 3);
   return `<section class="card"><div class="row spread"><h2 style="margin:0">🏆 ${s.name}</h2><span class="pill">${left} day${left === 1 ? "" : "s"} left</span></div>
     <p class="small muted" style="margin:6px 0 8px">Top 3 when the season ends win a trophy that stays on their profile forever.</p>
-    ${res.length ? res.map((r, i) => { const p = E.byId.get(r.id); return `<div class="row mini"><span>${["🥇", "🥈", "🥉"][i]}</span><span class="avatar sm" style="--c:${p.color}">${esc(p.emoji)}</span><span class="grow">${esc(p.name)}</span><b class="num">${fmt(r.score)}</b></div>`; }).join("") : '<p class="small muted" style="margin:0">No scores yet this season.</p>'}
+    ${res.length ? res.map((r, i) => { const p = E.byId.get(r.id); return `<div class="row mini"><span>${["🥇", "🥈", "🥉"][i]}</span>${avatar(p, "sm")}<span class="grow">${esc(p.name)}</span><b class="num">${fmt(r.score)}</b></div>`; }).join("") : '<p class="small muted" style="margin:0">No scores yet this season.</p>'}
   </section>`;
 }
 
@@ -512,7 +583,8 @@ function profileBody(E, id) {
     const r = E.day(id, d);
     total += r.steps; best = Math.max(best, r.steps); if (r.active) active++;
   }
-  return `<div class="row" style="margin-bottom:14px"><span class="avatar lg" style="--c:${p.color}">${esc(p.emoji)}</span><div class="grow"><h2 style="margin:0;font-size:22px">${esc(p.name)}</h2><div class="small muted">Level ${x.level} · ${esc(x.title)}${p.team ? " · " + esc(p.team) : ""}</div></div></div>
+  const tr = E.trail(id);
+  return `<div class="profile-hero"><div class="walker-box">${Walker.svg(charOf(p), { gear: p.equipped, fog: tr.fog, mood: tr.fog > 0.45 ? "foggy" : "ok", label: `${p.name}'s walker` })}</div><div><h2>${esc(p.name)}</h2><div class="small muted">Level ${x.level} · ${esc(x.title)}${p.team ? " · " + esc(p.team) : ""}</div><div class="small" style="margin-top:6px">📍 ${esc(tr.region)} · <b class="num">${fmt(tr.reached)}</b> landmarks</div></div></div>
   <section class="card"><h2>Last 14 days</h2>${chart(E, id)}<p class="small muted" style="margin:4px 0 0">Daily effort. Dashed line is par; solid bars beat it.</p></section>
   <section class="card"><div class="stats">
     <div class="stat"><b class="num">${par.placement ? "—" : fmt(par.value)}</b><span>par</span></div>
@@ -538,7 +610,7 @@ function chart(E, id, days = 14) {
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Last ${days} days">
     <line class="goal" x1="0" x2="${W}" y1="${y(par)}" y2="${y(par)}"/>
     <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>
-    ${vals.map((v, i) => `<rect x="${4 + i * bw + 2}" y="${Math.min(y(v), y(0))}" width="${bw - 4}" height="${Math.abs(y(0) - y(v))}" rx="4" fill="${v < 0 ? "var(--bad)" : p.color}" opacity="${v >= par ? 1 : 0.45}"><title>${dayLabel(list[i])}: ${signed(v)}</title></rect>`).join("")}
+    ${vals.map((v, i) => `<rect x="${4 + i * bw + 2}" y="${Math.min(y(v), y(0))}" width="${bw - 4}" height="${Math.abs(y(0) - y(v))}" rx="4" fill="${v < 0 ? "var(--bad)" : colorOf(p)}" opacity="${v >= par ? 1 : 0.45}"><title>${dayLabel(list[i])}: ${signed(v)}</title></rect>`).join("")}
     ${list.map((d, i) => (i % 2 === (days - 1) % 2 ? `<text x="${4 + i * bw + bw / 2}" y="${H - 4}" text-anchor="middle">${parseDay(d).toLocaleDateString("en-GB", { weekday: "narrow" })}</text>` : "")).join("")}
   </svg>`;
 }
@@ -554,6 +626,9 @@ function tabMe() {
     ${row("setup-scroll", "📵", "Scroll tracking", S.me.scroll_synced_at ? `Last ${ago(S.me.scroll_synced_at)} (${S.me.scroll_source === "auto" ? "automatic" : "typed in"})` : "Not set up, 30 min/day assumed")}
     ${row("group-menu", "👥", "Groups", S.groups.length ? S.groups.map((g) => esc(g.name)).join(", ") : "Create or join one")}
     <label class="list-row"><span class="e">🌍</span><span class="grow"><b>Public league</b><br><span class="small muted">Compete with everyone on Effort, in leagues matched to your level</span></span><input type="checkbox" class="switch" data-act="toggle-public" ${S.me.is_public ? "checked" : ""}></label>
+    ${row("open-trail", "🥾", "Your trail", "Landmarks, regions and fuel")}
+    ${row("open-gear", "🎒", "Gear", S.me.equipped ? `Wearing: ${esc(Walker.GEAR[S.me.equipped]?.name || "")}` : "Found on the trail")}
+    ${row("retake", "🧪", "Retake the quiz", "Get a new look")}
     ${row("open-recap", "📊", "Weekly recap", "A shareable card of your week")}
     ${row("how", "❓", "How scoring works")}
     ${row("restore", "🔑", "Copy restore link", "Keep it safe: it logs you in on a new phone")}
@@ -641,7 +716,11 @@ function setupSheet(kind) {
 
 function howSheet() {
   const R = RULES;
-  openSheet(`${sheetHead("How scoring works")}
+  openSheet(`${sheetHead("How it works")}
+  <section class="card"><h2>🥾 Your walker and the trail</h2>
+    <p class="small">Every point of effort is <b>fuel</b>. Fuel walks your walker along an endless trail: a landmark every ${R.landmarkEvery} fuel (roughly 10,000 steps), a new region every ${R.landmarksPerRegion} landmarks, and gear to find and wear along the way.</p>
+    <p class="small" style="margin:0"><b>Fog:</b> scrolling over your budget in the last 7 days builds fog. Your walker goes grey and slows down, up to ${Math.round(R.fogSlow * 100)}% slower. Stay under budget and it clears.</p></section>
+  <section class="card"><h2>📱 The Scroll (group boss)</h2><p class="small" style="margin:0">A new boss every Monday with ${R.bossHpPer} HP per player. Everyone's step points hit it; every minute anyone scrolls over budget heals it by ${R.bossHealPerMin}. Beat it by Sunday night.</p></section>
   <section class="card"><h2>🚶 Effort (every day)</h2>
     <p class="small"><b>+1 point per 100 steps</b> (half rate after ${fmt(R.fullRateUntil)}, max ${fmt(R.stepCap)} steps).</p>
     <p class="small"><b>Scroll budget:</b> every 1,000 steps earns ${R.budgetPer1000} free minutes of TikTok/Reels/Shorts (up to ${R.budgetCap}). Each minute <b>over</b> budget costs 1 point. Each minute you <b>don't</b> use is worth +0.5 (if you track scrolling).</p>
@@ -664,18 +743,56 @@ function profileSheet(id) {
 
 function editProfileSheet() {
   const m = S.me;
-  S.edit = { emoji: m.emoji, color: m.color };
   const g = cur()?.data?.group;
   const myTeam = S.groups.find((x) => "g:" + x.code === S.boardKey)?.team;
   openSheet(`${sheetHead("Edit profile")}
   <form class="card" data-form="profile">
     <label class="field"><span>Name</span><input name="name" maxlength="24" value="${esc(m.name)}" required></label>
-    <div class="picker" style="margin-bottom:12px">${EMOJIS.map((e) => `<button type="button" data-edit-emoji="${e}" aria-pressed="${e === m.emoji}">${e}</button>`).join("")}</div>
-    <div class="swatches" style="margin-bottom:16px">${COLORS.map((c) => `<button type="button" data-edit-color="${c}" style="background:${c}" aria-pressed="${c === m.color}" aria-label="Colour ${c}"></button>`).join("")}</div>
     ${g && g.teams.length ? `<label class="field"><span>Team in ${esc(g.name)}</span><select name="team"><option value="">No team</option>${g.teams.map((t) => `<option ${t === myTeam ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>` : ""}
     <label class="field"><span>Phone</span><select name="platform">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<option value="${v}" ${v === m.platform ? "selected" : ""}>${l}</option>`).join("")}</select></label>
     <button class="btn block">Save</button>
-  </form>`);
+  </form>
+  <button class="btn ghost block" data-act="retake">Retake the quiz (new look)</button>`);
+}
+
+// ----- Trail & gear -----
+function trailSheet() {
+  const tr = S.mine.trail(S.me.id);
+  const G = Walker.GEAR;
+  openSheet(`${sheetHead("Your trail")}
+    <section class="card stage" style="min-height:150px">${Walker.scene(tr.biome, Walker.hash(S.me.id))}
+      <div class="tag-region" style="left:12px;right:auto;max-width:70%">📍 ${esc(tr.region)}</div>
+      <div class="trail-bar" style="position:absolute;left:0;right:0;bottom:0;margin:12px">
+        <div class="row spread small"><b>Next: ${esc(tr.next.name)}</b><span class="num muted">${fmt(RULES.landmarkEvery - tr.into)} fuel</span></div>
+        <div class="bar" style="margin-top:6px"><i style="width:${(100 * tr.into) / RULES.landmarkEvery}%"></i></div>
+        ${tr.next.item ? `<div class="small" style="margin-top:6px">🎁 Something's waiting there…</div>` : ""}
+      </div></section>
+    <section class="card"><div class="stats">
+      <div class="stat"><b class="num">${fmt(tr.dist)}</b><span>fuel burned</span></div>
+      <div class="stat"><b class="num">${fmt(tr.reached)}</b><span>landmarks</span></div>
+      <div class="stat"><b class="num">${tr.items.length}/${Object.keys(G).length}</b><span>gear found</span></div>
+    </div></section>
+    <section class="card"><h2>Recent landmarks</h2>
+      ${tr.recent.length ? `<ul class="landmarks">${tr.recent.map((m) => `<li><span class="pin">${m.i}</span><span class="grow"><b>${esc(m.name)}</b><br><span class="small muted">${esc(m.region)}</span></span>${m.item ? `<span class="pill warn">🎁 ${esc(G[m.item].name)}</span>` : ""}</li>`).join("")}</ul>`
+        : `<p class="small muted" style="margin:0">Nothing yet. Every ${RULES.landmarkEvery} fuel (about 10,000 steps) gets you to the next landmark.</p>`}
+    </section>
+    <button class="btn block" data-act="open-gear">Wear your gear</button>
+    <p class="small muted" style="text-align:center">Every 1 point of effort is 1 fuel. Fog from scrolling slows you down by up to ${Math.round(RULES.fogSlow * 100)}%.</p>`);
+}
+
+function gearSheet() {
+  const tr = S.mine.trail(S.me.id);
+  const owned = new Set(tr.items);
+  const G = Walker.GEAR;
+  const ch = charOf(S.me);
+  const rare = ["", "Common", "Uncommon", "Rare", "Legendary"];
+  const tiles = Object.entries(G).sort((a, b) => a[1].rarity - b[1].rarity).map(([id, g]) => owned.has(id)
+    ? `<button data-equip="${id}" aria-pressed="${S.me.equipped === id}">${Walker.svg(ch, { gear: id, crop: g.slot === "pet" ? "full" : "head", label: g.name })}${esc(g.name)}<br><span class="muted" style="font-weight:600">${rare[g.rarity]}</span></button>`
+    : `<div class="locked" title="Not found yet">?</div>`).join("");
+  openSheet(`${sheetHead("Gear")}
+    <p class="muted" style="margin-top:-4px">Found on your trail. Tap to wear one${S.me.equipped ? ", tap again to take it off" : ""}.</p>
+    <div class="gear-grid">${tiles}</div>
+    <p class="small muted" style="text-align:center;margin-top:14px">${owned.size} of ${Object.keys(G).length} found. Rarer gear turns up further along the trail.</p>`);
 }
 
 function groupMenuSheet() {
@@ -730,7 +847,7 @@ function groupSettingsSheet(members) {
   </form>
   <section class="card"><h2>Players</h2>
     <p class="small muted">Copy someone's restore link if they lost their phone. Removing someone takes them out of this group only.</p>
-    ${members.map((m) => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)"><span>${esc(m.emoji)}</span><div class="grow"><b>${esc(m.name)}</b><div class="small muted">${m.steps_synced_at ? "synced " + ago(m.steps_synced_at) : "never synced"}</div></div>
+    ${members.map((m) => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">${avatar(m, "sm")}<div class="grow"><b>${esc(m.name)}</b><div class="small muted">${m.steps_synced_at ? "synced " + ago(m.steps_synced_at) : "never synced"}</div></div>
       <button class="btn sm ghost" data-copy="${esc(APP_URL + "?me=" + m.token)}" data-label="Restore link copied">Link</button>
       <button class="btn sm danger" data-remove="${m.id}" data-name="${esc(m.name)}">✕</button></div>`).join("")}
   </section>
@@ -749,7 +866,7 @@ function standingsText() {
 }
 
 // ---------- forfeit wheel ----------
-const WHEEL_COLORS = ["#6d5efc", "#ff5fa2", "#14a86b", "#f08a24", "#0ea5e9", "#a855f7", "#e5484d", "#eab308"];
+const WHEEL_COLORS = ["#f2611d", "#2f7d4f", "#f5c542", "#74b6e0", "#d9483b", "#8c6bb1", "#e98fb0", "#5a8a3a"];
 
 function wheelSvg(slices) {
   const n = slices.length, R = 150, C = 160;
@@ -774,7 +891,7 @@ function wheelSheet(ws) {
   const slices = spin ? spin.slices : g.forfeits.length ? g.forfeits : [g.forfeit || "Buys the first round"];
   const weekLabel = ws === weekStart(today()) ? "this week" : `week of ${dayLabel(ws, { day: "numeric", month: "short" })}`;
   openSheet(`${sheetHead("Forfeit wheel")}
-    <p class="muted" style="margin-top:-4px">${loser ? `<b style="color:var(--text)">${esc(loser.emoji)} ${esc(loser.name)}</b> came last ${weekLabel}.` : ""} One spin per week, and it's final.</p>
+    <p class="muted" style="margin-top:-4px">${loser ? `<b style="color:var(--ink)">${esc(loser.name)}</b> came last ${weekLabel}.` : ""} One spin per week, and it's final.</p>
     <div class="wheel-wrap"><div class="wheel-pointer" aria-hidden="true"></div><div class="wheel" id="wheel">${wheelSvg(slices)}</div></div>
     <p id="wheel-result" class="wheel-result" aria-live="polite"></p>
     <div class="btn-row">${spin ? `<button class="btn" data-act="replay-spin" data-ws="${ws}">Replay the spin</button>` : `<button class="btn" data-act="spin" data-ws="${ws}" data-loser="${loser?.id || ""}">Spin it</button>`}</div>`);
@@ -874,38 +991,44 @@ function recapHeadline(r) {
 }
 
 async function drawRecap(r, groupName, spin) {
-  try { await Promise.all([document.fonts.load("800 120px Outfit"), document.fonts.load("600 40px Outfit")]); } catch { /* fall back to system font */ }
+  try { await Promise.all([document.fonts.load("800 120px 'Bricolage Grotesque'"), document.fonts.load("700 40px Figtree"), document.fonts.load("700 48px Caveat")]); } catch { /* fall back to system font */ }
   const W = 1080, H = 1350;
+  const PAPER = "#eceee4", CARD = "#fbfbf6", INK = "#1f2a24", ORANGE = "#f2611d", SUN = "#f5c542", SKY = "#cfe6f2", MUTED = "#5b6a5f";
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
   const x = c.getContext("2d");
-  const font = (w, s) => `${w} ${s}px Outfit, "Segoe UI", system-ui, sans-serif`;
+  const font = (w, s, fam = "'Bricolage Grotesque'") => `${w} ${s}px ${fam}, "Segoe UI", system-ui, sans-serif`;
   const rr = (X, Y, w, h, rad) => { x.beginPath(); if (x.roundRect) x.roundRect(X, Y, w, h, rad); else x.rect(X, Y, w, h); };
-  const bg = x.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, "#5b4cf0"); bg.addColorStop(0.55, "#8f6bff"); bg.addColorStop(1, "#ff5fa2");
-  x.fillStyle = bg; x.fillRect(0, 0, W, H);
-  x.fillStyle = "rgba(255,255,255,.06)";
-  for (let i = 0; i < 6; i++) { x.beginPath(); x.arc(W - 120 + i * 30, 160 - i * 10, 260 - i * 38, 0, Math.PI * 2); x.fill(); }
+  const sticker = (X, Y, w, h, rad, fill) => { x.fillStyle = INK; rr(X + 8, Y + 10, w, h, rad); x.fill(); x.fillStyle = fill; rr(X, Y, w, h, rad); x.fill(); x.lineWidth = 5; x.strokeStyle = INK; x.stroke(); };
+  x.fillStyle = PAPER; x.fillRect(0, 0, W, H);
+  // topo lines, like the app background
+  x.strokeStyle = "rgba(31,42,36,.07)"; x.lineWidth = 3;
+  for (let i = 0; i < 9; i++) { x.beginPath(); x.moveTo(-40, 140 + i * 150); x.bezierCurveTo(260, 60 + i * 150, 620, 230 + i * 150, 1120, 120 + i * 150); x.stroke(); }
 
-  x.fillStyle = "#fff"; x.textBaseline = "alphabetic";
-  x.font = font(800, 40); x.fillText("⚡ EFFORT", 80, 120);
-  x.textAlign = "right"; x.font = font(600, 34); x.globalAlpha = 0.85;
-  x.fillText(`${dayLabel(r.ws, { day: "numeric", month: "short" })} – ${dayLabel(addDays(r.ws, 6), { day: "numeric", month: "short" })}`, W - 80, 120);
-  x.globalAlpha = 1; x.textAlign = "left";
+  x.textBaseline = "alphabetic";
+  x.fillStyle = ORANGE; x.font = font(800, 46); x.fillText("effort", 80, 112);
+  x.fillStyle = MUTED; x.textAlign = "right"; x.font = font(700, 32, "Figtree");
+  x.fillText(`${dayLabel(r.ws, { day: "numeric", month: "short" })} – ${dayLabel(addDays(r.ws, 6), { day: "numeric", month: "short" })}`, W - 80, 110);
+  x.textAlign = "left";
 
-  x.font = font(400, 96); x.fillText(r.p.emoji, 80, 290);
-  x.font = font(800, 64); x.fillText(r.p.name, 210, 262);
-  x.font = font(600, 34); x.globalAlpha = 0.85; x.fillText(`Level ${r.level.level} · ${r.level.title}`, 210, 312); x.globalAlpha = 1;
+  // the walker, in its own sticker
+  sticker(640, 150, 360, 410, 40, SKY);
+  try {
+    const svgStr = Walker.svg(charOf(r.p), { mood: "fresh", gear: r.p.equipped, standalone: true }).replace("<svg ", '<svg width="360" height="414" ');
+    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml" })); });
+    x.drawImage(img, 652, 156, 336, 386);
+  } catch { /* card still works without the drawing */ }
 
-  x.font = font(800, 220); x.fillText(fmt(r.form), 72, 560);
-  const sw = x.measureText(fmt(r.form)).width;
-  x.font = font(600, 40); x.globalAlpha = 0.9; x.fillText("pts this week", 90 + sw, 560); x.globalAlpha = 1;
+  x.fillStyle = INK; x.font = font(800, 72); x.fillText(r.p.name, 80, 240);
+  x.fillStyle = MUTED; x.font = font(700, 32, "Figtree"); x.fillText(`Level ${r.level.level} · ${r.level.title}`, 82, 290);
+  x.fillStyle = INK; x.font = font(800, 210); x.fillText(fmt(r.form), 68, 490);
+  x.fillStyle = ORANGE; x.font = font(700, 54, "Caveat"); x.save(); x.translate(84, 548); x.rotate(-0.035); x.fillText("points this week!", 0, 0); x.restore();
   if (r.of > 1) {
     const pill = `#${r.rank} of ${r.of} in ${groupName}`;
-    x.font = font(700, 34);
-    const pw = x.measureText(pill).width + 48;
-    x.fillStyle = "rgba(255,255,255,.22)"; rr(80, 600, pw, 64, 32); x.fill();
-    x.fillStyle = "#fff"; x.fillText(pill, 104, 644);
+    x.font = font(700, 32, "Figtree");
+    const pw = Math.min(520, x.measureText(pill).width + 44);
+    sticker(80, 584, pw, 60, 30, SUN);
+    x.fillStyle = INK; x.fillText(pill, 102, 625, pw - 44);
   }
 
   const tiles = [
@@ -915,22 +1038,22 @@ async function drawRecap(r, groupName, spin) {
     [r.best.d ? fmt(r.best.steps) : "—", r.best.d ? `best day (${dayLabel(r.best.d, { weekday: "short" })})` : "best day"],
   ];
   tiles.forEach(([big, small], i) => {
-    const X = 80 + (i % 2) * 470, Y = 700 + Math.floor(i / 2) * 180;
-    x.fillStyle = "rgba(255,255,255,.16)"; rr(X, Y, 450, 160, 32); x.fill();
-    x.fillStyle = "#fff"; x.font = font(800, 60); x.fillText(big, X + 32, Y + 82);
-    x.font = font(600, 29); x.globalAlpha = 0.85; x.fillText(small, X + 32, Y + 128); x.globalAlpha = 1;
+    const X = 80 + (i % 2) * 470, Y = 690 + Math.floor(i / 2) * 186;
+    sticker(X, Y, 440, 158, 30, CARD);
+    x.fillStyle = INK; x.font = font(800, 58); x.fillText(big, X + 30, Y + 80);
+    x.fillStyle = MUTED; x.font = font(700, 28, "Figtree"); x.fillText(small, X + 30, Y + 126);
   });
 
-  x.font = font(700, 38);
+  x.fillStyle = INK; x.font = font(800, 38);
   const y = wrapText(x, recapHeadline(r), 80, 1112, W - 160, 48);
   const extras = [];
   if (r.streak) extras.push(`🔥 ${r.streak}-week streak`);
   if (r.rival) extras.push(`⚔️ ${r.rival.mine > r.rival.theirs ? "beat" : r.rival.mine < r.rival.theirs ? "lost to" : "tied"} ${r.rival.p.name} ${fmt(r.rival.mine)}–${fmt(r.rival.theirs)}`);
   if (spin) extras.push(`🎡 ${spin.loser}'s forfeit: ${spin.forfeit}`);
   else if (r.winner && r.of > 1) extras.push(`🏆 ${r.winner.name} won the week`);
-  x.font = font(600, 31); x.globalAlpha = 0.92;
-  wrapText(x, extras.join("   ·   "), 80, y + 58, W - 160, 42);
-  x.globalAlpha = 0.7; x.font = font(600, 26); x.fillText(APP_URL.replace(/^https?:\/\//, "").replace(/\/$/, ""), 80, H - 40);
+  x.fillStyle = MUTED; x.font = font(700, 30, "Figtree");
+  wrapText(x, extras.join("   ·   "), 80, y + 56, W - 160, 42);
+  x.fillStyle = MUTED; x.font = font(700, 26, "Figtree"); x.fillText(APP_URL.replace(/^https?:\/\//, "").replace(/\/$/, ""), 80, H - 40);
   x.globalAlpha = 1;
   return c;
 }
@@ -994,15 +1117,33 @@ function recapCard() {
 }
 
 // ---------- flows ----------
-async function finishProfile(f) {
-  const body = { name: f.name, emoji: S.draft.emoji, color: S.draft.color, platform: S.draft.platform, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
+// The quiz is done: create the player (or save a retaken look) with their answers.
+async function finishQuiz() {
+  const { name, ...character } = S.answers;
+  if (S.retake) {
+    await call("update_me", { token: S.token, character });
+    S.retake = false;
+    store.del("draftAnswers");
+    S.view = "main"; S.tab = "me";
+    await refresh();
+    toast("New look saved");
+    return;
+  }
+  const body = { name, character, platform: S.draft.platform, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const r = S.invite ? await call("join", { ...body, code: S.invite.code }) : await call("signup", body);
   saveToken(r.player);
   S.me = r.player;
+  store.del("draftAnswers");
   if (S.invite) { S.boardKey = "g:" + S.invite.code; store.set("board", S.boardKey); }
   S.invite = null;
-  S.step = 1;
-  render();
+  S.view = "onboard"; S.step = 1;
+  render(); scrollTo(0, 0);
+}
+
+function quizAdvance() {
+  store.set("draftAnswers", S.answers);
+  if (S.qi < QUESTIONS.length - 1) { S.qi++; render(); scrollTo(0, 0); }
+  else { S.view = "reveal"; render(); scrollTo(0, 0); }
 }
 
 async function joinGroup(code) {
@@ -1037,12 +1178,21 @@ document.addEventListener("click", async (e) => {
     render(); return;
   }
   if (d.profile) return profileSheet(d.profile);
-  if (d.emoji) { S.draft.emoji = d.emoji; S.draft.name = $("[name=name]")?.value; render(); return; }
-  if (d.color) { S.draft.color = d.color; S.draft.name = $("[name=name]")?.value; render(); return; }
-  if (d.platform) { S.draft.platform = d.platform; S.draft.name = $("[name=name]")?.value; render(); return; }
+  if (d.answer !== undefined && S.view === "quiz") {
+    S.answers[QUESTIONS[S.qi].id] = d.answer;
+    t.parentElement.querySelectorAll(".opt").forEach((b) => b.setAttribute("aria-pressed", b === t));
+    const pv = $("#quiz-preview"); if (pv) pv.innerHTML = quizPreview("fresh");
+    setTimeout(quizAdvance, 380);
+    return;
+  }
+  if (d.platform) { S.draft.platform = d.platform; S.answers.name = $("[name=name]")?.value ?? S.answers.name; render(); return; }
   if (d.setup) { S.setupPlatform = d.setup; if (S.view === "onboard") render(); else setupSheet(d.kind); return; }
-  if (d.editEmoji) { S.edit.emoji = d.editEmoji; t.parentElement.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b === t)); return; }
-  if (d.editColor) { S.edit.color = d.editColor; t.parentElement.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b === t)); return; }
+  if (d.equip) {
+    const next = S.me.equipped === d.equip ? null : d.equip;
+    try { await call("update_me", { token: S.token, equipped: next }); S.me.equipped = next; headCache.clear(); await refresh(true); gearSheet(); toast(next ? `Wearing: ${Walker.GEAR[next].name}` : "Gear off"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   if (d.invite) return inviteSheet(d.invite, d.name);
   if (d.shareInvite) return share(`Join ${d.name} on Effort ⚡ Walk more, scroll less. Code ${d.shareInvite}`, `${APP_URL}?g=${d.shareInvite}`);
   if (d.remove) {
@@ -1060,7 +1210,19 @@ document.addEventListener("click", async (e) => {
 
   switch (d.act) {
     case "start":
-      S.view = "onboard"; S.step = 0; render(); break;
+      S.view = "quiz"; S.qi = 0; render(); break;
+    case "quiz-back":
+      if (S.qi > 0) { S.qi--; render(); } else if (S.retake) { S.retake = false; S.view = "main"; render(); } else { S.view = "welcome"; render(); }
+      break;
+    case "quiz-next": quizAdvance(); break;
+    case "quiz-restart": S.view = "quiz"; S.qi = 1; render(); break;
+    case "quiz-done": t.disabled = true; try { await finishQuiz(); } catch (err) { toast(err.message); t.disabled = false; } break;
+    case "retake":
+      closeSheet();
+      S.retake = true; S.answers = { ...charOf(S.me), name: S.me.name }; S.qi = 1; S.view = "quiz"; render(); scrollTo(0, 0);
+      break;
+    case "open-trail": trailSheet(); break;
+    case "open-gear": gearSheet(); break;
     case "ob-next":
       if (S.step < 2) { S.step++; S.setupPlatform = null; render(); scrollTo(0, 0); }
       else { S.view = "loading"; render(); await refresh(); }
@@ -1152,6 +1314,15 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// Colour question: repaint the walker live as the slider moves.
+document.addEventListener("input", (e) => {
+  if (e.target.matches("[data-hue]")) {
+    S.answers.hue = Number(e.target.value);
+    const pv = $("#quiz-preview");
+    if (pv) pv.innerHTML = quizPreview();
+  }
+});
+
 document.addEventListener("change", (e) => {
   if (e.target.dataset.act === "log-day") { S.logDay = e.target.value; render(); }
   if (e.target.name === "journey" && e.target.value) {
@@ -1174,8 +1345,13 @@ document.addEventListener("submit", async (e) => {
       if (f.code.trim().length < 4) { toast("Enter the 6-character code"); return; }
       S.invite = await lookupInvite(f.code);
       render();
-    } else if (kind === "profile-new") {
-      await finishProfile(f);
+    } else if (kind === "quiz-intro") {
+      S.answers.name = f.name.trim();
+      quizAdvance();
+    } else if (kind === "quiz-value") {
+      const q = QUESTIONS[S.qi];
+      S.answers[q.id] = q.type === "number" ? Math.max(1, Math.min(99, Number(f.v) || 7)) : f.v.trim().slice(0, 30);
+      quizAdvance();
     } else if (kind === "join-code") {
       if (f.code.trim().length < 4) { toast("Enter the 6-character code"); return; }
       await joinGroup(f.code.trim().toUpperCase());
@@ -1193,7 +1369,7 @@ document.addEventListener("submit", async (e) => {
       toast(r.message);
       await refresh(true);
     } else if (kind === "profile") {
-      await call("update_me", { token: S.token, name: f.name, platform: f.platform, emoji: S.edit.emoji, color: S.edit.color, ...(f.team !== undefined ? { code: S.boardKey.slice(2), team: f.team } : {}) });
+      await call("update_me", { token: S.token, name: f.name, platform: f.platform, ...(f.team !== undefined ? { code: S.boardKey.slice(2), team: f.team } : {}) });
       closeSheet();
       await refresh();
       toast("Saved");
