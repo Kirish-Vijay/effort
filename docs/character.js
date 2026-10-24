@@ -6,34 +6,34 @@
 
 const QUESTIONS = [
   { id: "name", type: "intro" },
-  { id: "time", q: "When do you feel most alive?", type: "choice", options: [
-    ["dawn", "Sunrise", "🌅"], ["noon", "Midday", "☀️"], ["golden", "Golden hour", "🌇"], ["night", "Midnight", "🌙"]] },
-  { id: "pace", q: "How do you walk?", type: "choice", options: [
-    ["amble", "Ambling", "🐌"], ["stroll", "Strolling", "🚶"], ["march", "Marching", "🥁"],
-    ["strut", "Strutting", "💃"], ["wander", "Wandering", "🍃"], ["dash", "Always late, always dashing", "💨"]] },
-  { id: "land", q: "Pick a place to get lost in", type: "choice", options: [
-    ["mountains", "Mountains", "⛰️"], ["coast", "The coast", "🌊"], ["forest", "A forest", "🌲"],
-    ["city", "A city at night", "🏙️"], ["desert", "A desert", "🏜️"], ["tundra", "Somewhere snowy", "❄️"]] },
-  { id: "carry", q: "What do you never leave home without?", type: "choice", options: [
-    ["backpack", "A bag of everything", "🎒"], ["umbrella", "An umbrella, just in case", "☂️"], ["camera", "A camera", "📷"],
-    ["headphones", "Headphones", "🎧"], ["book", "Something to read", "📖"], ["stick", "A good stick", "🦯"], ["none", "Nothing. Free as a bird", "🕊️"]] },
-  { id: "creature", q: "Which creature would you befriend?", type: "choice", options: [
-    ["fox", "Fox", "🦊"], ["owl", "Owl", "🦉"], ["frog", "Frog", "🐸"], ["cat", "Cat", "🐈"],
-    ["crow", "Crow", "🐦‍⬛"], ["snail", "Snail", "🐌"], ["bear", "Bear", "🐻"], ["moth", "Moth", "🦋"]] },
-  { id: "morning", q: "How do you start your day?", type: "choice", options: [
-    ["coffee", "Coffee first", "☕"], ["out", "Straight out the door", "🚪"], ["snooze", "Snooze, snooze, snooze", "😴"],
-    ["music", "Music on", "🎶"], ["stretch", "A long stretch", "🧘"], ["scroll", "Scrolling in bed, honestly", "📱"]] },
-  { id: "laugh", q: "What's your laugh like?", type: "choice", options: [
-    ["giggle", "A giggle", "🤭"], ["snort", "A snort", "🐷"], ["cackle", "A cackle", "🧙"],
-    ["silent", "Silent shaking", "🫨"], ["boom", "Loud and booming", "📣"], ["wheeze", "A wheeze", "😹"]] },
-  { id: "hat", q: "Pick a hat", type: "choice", options: [
-    ["beanie", "Beanie", "🧶"], ["cap", "Cap", "🧢"], ["bucket", "Bucket hat", "🎣"], ["flowers", "Flower crown", "🌼"],
-    ["wizard", "Wizard hat", "🔮"], ["band", "Sweatband", "🎾"], ["none", "No hat", "💇"]] },
-  { id: "hue", q: "Choose your colour", type: "hue" },
-  { id: "month", q: "Which month were you born in?", type: "choice", compact: true, options:
+  { id: "time", q: "When are you least insufferable?", type: "choice", options: [
+    ["dawn", "Before anyone else is up", "🌅"], ["noon", "After I've eaten", "🍽️"], ["golden", "Golden hour, for the photos", "🌇"], ["night", "3am, achieving nothing", "🌙"]] },
+  { id: "pace", q: "Walking pace. Be honest.", type: "choice", options: [
+    ["amble", "Nowhere to be, ever", "🐌"], ["stroll", "Aggressively average", "🚶"], ["march", "Late for court", "⏱️"],
+    ["strut", "Like there's a camera on me", "🕶️"], ["wander", "No idea where I'm going", "🧭"], ["dash", "Away from my problems", "💨"]] },
+  { id: "land", q: "Where do you go to disappear?", type: "choice", options: [
+    ["mountains", "Up a mountain, no signal", "⛰️"], ["coast", "The sea, to stare at it", "🌊"], ["forest", "The woods. Don't follow me", "🌲"],
+    ["city", "A city at 2am", "🏙️"], ["desert", "Somewhere hot and empty", "🏜️"], ["tundra", "Somewhere cold enough to feel something", "🧊"]] },
+  { id: "carry", q: "What's on you at all times?", type: "choice", options: [
+    ["backpack", "A bag of stuff I never use", "🎒"], ["umbrella", "An umbrella. Trust issues", "☂️"], ["camera", "A camera, for the content", "📷"],
+    ["headphones", "Headphones, so nobody talks to me", "🎧"], ["book", "A book I'm not reading", "📖"], ["stick", "A stick. Found it, kept it", "🪵"], ["none", "Just my phone, sadly", "📱"]] },
+  { id: "creature", q: "Pick your familiar", type: "choice", options: [
+    ["fox", "Fox. Shady", "🦊"], ["owl", "Owl. Up too late", "🦉"], ["frog", "Frog. Unbothered", "🐸"], ["cat", "Cat. Doesn't care", "🐈"],
+    ["crow", "Crow. Holds grudges", "🐦‍⬛"], ["snail", "Snail. Gets there eventually", "🐌"], ["bear", "Bear. Hibernates", "🐻"], ["moth", "Moth. Drawn to screens", "🦋"]] },
+  { id: "morning", q: "First thing you do when you wake up?", type: "choice", options: [
+    ["coffee", "Caffeine, then personality", "☕"], ["out", "Out the door, no thoughts", "🚪"], ["snooze", "Snooze until it's a problem", "😴"],
+    ["music", "Music, too loud", "🔊"], ["stretch", "Stretch like a cat", "🧘"], ["scroll", "Check my phone. Obviously", "📱"]] },
+  { id: "laugh", q: "Your laugh, described by your friends", type: "choice", options: [
+    ["giggle", "Polite. Suspicious", "🤭"], ["snort", "A snort, then shame", "🐷"], ["cackle", "Villain origin story", "🦹"],
+    ["silent", "Silent, shaking, crying", "🫨"], ["boom", "The whole room hears it", "📣"], ["wheeze", "Wheezing, needs help", "😮‍💨"]] },
+  { id: "hat", q: "Pick a hat. It says a lot.", type: "choice", options: [
+    ["beanie", "Beanie, indoors", "🧶"], ["cap", "Cap, backwards", "🧢"], ["bucket", "Bucket hat, festival scars", "🎣"], ["flowers", "Flower crown, unironically", "🌼"],
+    ["wizard", "Wizard hat. Don't ask", "🔮"], ["band", "Sweatband, never sweats", "🎾"], ["none", "No hat. The hair is the personality", "💇"]] },
+  { id: "hue", q: "The colour you own way too much of", type: "hue" },
+  { id: "month", q: "Birth month. For the astrology people.", type: "choice", compact: true, options:
     ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((m, i) => [String(i), m, ""]) },
-  { id: "number", q: "Pick a lucky number", type: "number", min: 1, max: 99 },
-  { id: "word", q: "Type a word that makes you happy", type: "text", placeholder: "pancakes, sea, Saturday…" },
+  { id: "number", q: "Number between 1 and 99. Don't overthink it.", type: "number", min: 1, max: 99 },
+  { id: "word", q: "One word for your gravestone", type: "text", placeholder: "unbothered, snacks, why…" },
 ];
 
 // ---------- seeded randomness ----------

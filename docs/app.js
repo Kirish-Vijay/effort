@@ -113,7 +113,7 @@ async function share(textToShare, url) {
 // ---------- data ----------
 function buildBoard(key, data) {
   const players = data.players.map((p) => ({ ...p }));
-  const E = Effort.build({ players, steps: data.steps, scroll: data.scroll, today: today(), league: key === "public" });
+  const E = Effort.build({ players, steps: data.steps, scroll: data.scroll, hunts: data.hunts || [], today: today(), league: key === "public" });
   S.boards[key] = { data, E };
 }
 
@@ -121,7 +121,7 @@ async function loadMe() {
   const r = await call("me", { token: S.token });
   S.me = r.player;
   S.groups = r.groups;
-  S.mine = Effort.build({ players: [r.player], steps: r.steps, scroll: r.scroll, today: today() });
+  S.mine = Effort.build({ players: [r.player], steps: r.steps, scroll: r.scroll, hunts: r.hunts || [], today: today() });
   const keys = [...S.groups.map((g) => "g:" + g.code), ...(S.me.is_public ? ["public"] : [])];
   if (!keys.includes(S.boardKey)) S.boardKey = keys[0] || null;
   store.set("board", S.boardKey);
@@ -137,6 +137,8 @@ async function refresh(silent) {
   try {
     await loadMe();
     await loadBoard(S.boardKey);
+    // Background refreshes must never pull someone out of the hunt, its results or the quiz.
+    if (["hunt", "huntEnd", "quiz", "reveal", "onboard"].includes(S.view)) return;
     S.view = "main";
     if ($("#sheet").hidden) render();
   } catch (e) {
@@ -178,7 +180,7 @@ const ICON = {
 
 // ---------- rendering ----------
 function render() {
-  const views = { loading: viewLoading, welcome: viewWelcome, quiz: viewQuiz, reveal: viewReveal, onboard: viewOnboard, main: viewMain };
+  const views = { loading: viewLoading, welcome: viewWelcome, quiz: viewQuiz, reveal: viewReveal, onboard: viewOnboard, main: viewMain, hunt: viewHunt, huntEnd: viewHuntEnd };
   app.innerHTML = (views[S.view] || viewWelcome)();
 }
 
@@ -204,20 +206,20 @@ function viewQuiz() {
   const back = `<button class="icon-btn" data-act="quiz-back" aria-label="Back">‹</button>`;
   const head = `<div class="quiz-top">${back}<div class="bar"><i style="width:${(100 * i) / QUESTIONS.length}%"></i></div><span class="small muted num">${i + 1}/${QUESTIONS.length}</span></div>`;
   if (q.type === "intro") {
-    return `${head}<h1 class="quiz-q">First, what should we call you?</h1>
+    return `${head}<h1 class="quiz-q">What do people call you?</h1>
       <form class="card" data-form="quiz-intro">
         <label class="field"><span>Your name</span><input name="name" required maxlength="24" placeholder="What your friends call you" value="${esc(a.name || "")}" autocomplete="given-name"></label>
         <label class="field"><span>Your phone</span></label>
         <div class="toggle" style="margin-bottom:16px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<button type="button" data-platform="${v}" aria-pressed="${v === S.draft.platform}">${l}</button>`).join("")}</div>
         <button class="btn block">Build my walker</button>
       </form>
-      <p class="note" style="display:block;text-align:center">12 quick questions. Answer honestly, it's more fun.</p>`;
+      <p class="note" style="display:block;text-align:center">12 questions. Lie and your walker will know.</p>`;
   }
   let body;
   if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>`;
   else if (q.type === "hue") body = `<input type="range" class="hue-slider" min="0" max="359" value="${a.hue ?? 30}" data-hue aria-label="Colour"><button class="btn block" data-act="quiz-next">This one</button>`;
   else if (q.type === "number") body = `<form data-form="quiz-value"><input name="v" type="number" inputmode="numeric" min="1" max="99" required class="big-input" value="${esc(a.number ?? "")}" placeholder="7" aria-label="Lucky number"><button class="btn block" style="margin-top:12px">Next</button></form>`;
-  else body = `<form data-form="quiz-value"><input name="v" maxlength="30" required class="big-input" style="font-size:26px!important" value="${esc(a.word ?? "")}" placeholder="${esc(q.placeholder)}" autocomplete="off" aria-label="${esc(q.q)}"><button class="btn block" style="margin-top:12px">Make my walker</button></form>`;
+  else body = `<form data-form="quiz-value"><input name="v" maxlength="30" required class="big-input" style="font-size:26px!important" value="${esc(a.word ?? "")}" placeholder="${esc(q.placeholder)}" autocomplete="off" aria-label="${esc(q.q)}"><button class="btn block" style="margin-top:12px">Make me</button></form>`;
   return `${head}<div class="quiz-preview" id="quiz-preview">${quizPreview()}</div>
     <h1 class="quiz-q">${esc(q.q)}</h1>${body}`;
 }
@@ -229,7 +231,7 @@ function viewReveal() {
     <p class="note" style="font-size:26px">ta-da!</p>
     <div class="walker-big">${Walker.svg(a, { mood: "fresh", label: `${a.name}'s walker` })}</div>
     <h1 class="ob-title" style="margin-top:18px">This is you, ${esc(a.name || "walker")}.</h1>
-    <p class="muted">Your answers made it. Change one answer and you'd look different.</p>
+    <p class="muted">Built from your answers. Change one and you look different.</p>
     <p class="odds">1 of ${odds.toLocaleString("en-GB")} possible walkers, before your word even counts</p>
     <div class="btn-row"><button class="btn ghost" data-act="quiz-restart">Change answers</button><button class="btn" data-act="quiz-done">${S.retake ? "Save my new look" : "That's me, let's walk"}</button></div>
   </section>`;
@@ -305,6 +307,95 @@ function todayCard(E, id) {
 }
 
 const pick = (arr) => arr[Math.floor(Date.now() / 36e5) % arr.length]; // changes hourly, stable between renders
+
+// ----- The Hunt (nightly tap game) -----
+function myLoadout() {
+  const t = today();
+  return Hunt.loadout(S.mine.day(S.me.id, t), S.mine.fogOn(S.me.id, t));
+}
+const huntOpen = () => new Date().getHours() >= Hunt.OPEN_HOUR;
+
+function loadoutRows(L) {
+  return `<div class="loadout">
+    <div><b class="num">${L.power}</b><span>tap power</span></div>
+    <div><b class="num">${L.hp}</b><span>health</span></div>
+    <div><b class="num">${L.minutes}m</b><span>max time</span></div>
+    <div><b class="num">${L.stomps}</b><span>stomps</span></div>
+  </div>
+  ${L.debuff >= 0.05 ? `<p class="small bad" style="margin:8px 0 0"><b>Scroll debuff ${Math.round(L.debuff * 100)}%:</b> ${Math.round((L.spawn - 1) * 100)}% more enemies, ${Math.round((L.tough - 1) * 100)}% tougher, fog on screen.</p>`
+    : `<p class="small good" style="margin:8px 0 0"><b>No debuff.</b> Clean screen, and 🌿 heals spawn.</p>`}`;
+}
+
+function huntCard() {
+  const L = myLoadout();
+  const done = S.mine.huntOn(S.me.id, today());
+  if (done) {
+    return `<section class="card hunt-card">
+      <div class="row spread"><h2 style="margin:0">Tonight's hunt</h2><span class="pill ${done.s ? "ok" : ""}">${done.s ? "Done" : "Abandoned"}</span></div>
+      <p style="margin:8px 0 0">${done.s ? `<b class="num">${fmt(done.score)}</b> pts · ${done.kills} kills · wave ${done.wave} · ${done.surv ? "survived" : "died"}. Dealt <b>${done.dmg}</b> to the boss.` : "You left mid-run. It counts as zero."} Next hunt tomorrow at ${Hunt.OPEN_HOUR}:00.</p>
+    </section>`;
+  }
+  const open = huntOpen();
+  return `<section class="card hunt-card ${open ? "live" : ""}">
+    <div class="row spread"><h2 style="margin:0">Tonight's hunt</h2><span class="pill ${open ? "warn" : ""}">${open ? "Open now" : `Opens ${Hunt.OPEN_HOUR}:00`}</span></div>
+    <p class="small muted" style="margin:6px 0 10px">${open ? "One run. Tap to kill. Your stats come from today." : "Walk more before then. Every step makes tonight easier."}</p>
+    ${loadoutRows(L)}
+    ${open ? `<button class="btn block" style="margin-top:12px" data-act="hunt-start">Start the hunt</button>` : ""}
+  </section>`;
+}
+
+function viewHunt() {
+  return `<div id="hunt-root" class="hunt-root"></div>`;
+}
+
+function viewHuntEnd() {
+  const r = S.huntResult;
+  const head = r.survived ? "You lasted the night." : r.quit ? `Gave up on wave ${r.wave}. Bold.` : `Doomscrolled to death on wave ${r.wave}.`;
+  return `<section class="reveal" style="padding-top:4vh">
+    <div class="walker-big">${Walker.svg(charOf(S.me), { mood: r.survived ? "fresh" : "foggy", fog: r.survived ? 0 : 0.6, gear: S.me.equipped })}</div>
+    <h1 class="ob-title" style="margin-top:16px">${head}</h1>
+    <section class="card" style="text-align:left"><div class="stats">
+      <div class="stat"><b class="num">${fmt(r.score)}</b><span>points</span></div>
+      <div class="stat"><b class="num">${r.kills}</b><span>kills</span></div>
+      <div class="stat"><b class="num">${r.dmg ?? Math.floor(r.score / 20)}</b><span>boss damage</span></div>
+    </div>${r.error ? `<p class="small bad" style="margin:10px 0 0">Not saved: ${esc(r.error)}</p>` : ""}</section>
+    <div class="btn-row"><button class="btn ghost" data-act="hunt-share">Share</button><button class="btn" data-act="hunt-done">Done</button></div>
+  </section>`;
+}
+
+async function startHunt() {
+  const L = myLoadout();
+  // Register the run first, so quitting or reloading mid-hunt can't buy a retry.
+  try { await call("hunt", { token: S.token, start: true }); }
+  catch (err) { toast(err.message); return; }
+  S.view = "hunt"; render(); scrollTo(0, 0);
+  Hunt.start($("#hunt-root"), {
+    loadout: L,
+    walkerSvg: Walker.svg(charOf(S.me), { mood: L.debuff > 0.45 ? "foggy" : "fresh", fog: L.debuff * 0.6, gear: S.me.equipped }),
+    onEnd: async (res) => {
+      S.huntResult = { ...res };
+      try {
+        const r = await call("hunt", { token: S.token, ...res });
+        S.huntResult.dmg = r.hunt.boss_dmg;
+        S.huntResult.score = r.hunt.score;
+      } catch (err) { S.huntResult.error = err.message; }
+      S.view = "huntEnd"; render(); scrollTo(0, 0);
+      refresh(true);
+    },
+  });
+}
+
+function huntBoardCard(E) {
+  const t = today();
+  let d = t;
+  let rows = E.ids.map((id) => ({ id, h: E.huntOn(id, d) })).filter((r) => r.h);
+  if (!rows.length) { d = addDays(t, -1); rows = E.ids.map((id) => ({ id, h: E.huntOn(id, d) })).filter((r) => r.h); }
+  if (!rows.length) return "";
+  rows.sort((a, b) => b.h.score - a.h.score);
+  return `<section class="card"><h2>${d === t ? "Tonight's" : "Last night's"} hunt</h2>
+    ${rows.slice(0, 5).map((r, i) => { const p = E.byId.get(r.id); return `<div class="row mini"><span class="rank r${i + 1}">${i + 1}</span>${avatar(p, "sm")}<span class="grow">${esc(p.name)} <span class="small muted">wave ${r.h.wave}${r.h.surv ? "" : " 💀"}</span></span><b class="num">${fmt(r.h.score)}</b></div>`; }).join("")}
+  </section>`;
+}
 
 function bossCard(B) {
   if (!B || S.boardKey === "public" || B.E.ids.length < 2) return "";
@@ -403,6 +494,7 @@ function tabHome() {
   ${todayCard(E, id)}
   ${nags()}
   ${recapCard()}
+  ${huntCard()}
   ${bossCard(B)}
   ${weekCard(E, id)}
   ${rivalCard(B)}
@@ -460,6 +552,7 @@ function tabBoard() {
     ${list}
   </section>
   ${isPublic ? "" : forfeitCard(E, g) + teamsCard(E, g, ws) + journeyCard(E, g)}
+  ${isPublic ? "" : huntBoardCard(E)}
   ${seasonCard(E)}`;
 }
 
@@ -720,6 +813,7 @@ function howSheet() {
   <section class="card"><h2>🥾 Your walker and the trail</h2>
     <p class="small">Every point of effort is <b>fuel</b>. Fuel walks your walker along an endless trail: a landmark every ${R.landmarkEvery} fuel (roughly 10,000 steps), a new region every ${R.landmarksPerRegion} landmarks, and gear to find and wear along the way.</p>
     <p class="small" style="margin:0"><b>Fog:</b> scrolling over your budget in the last 7 days builds fog. Your walker goes grey and slows down, up to ${Math.round(R.fogSlow * 100)}% slower. Stay under budget and it clears.</p></section>
+  <section class="card"><h2>🌙 The Hunt</h2><p class="small" style="margin:0">One run a night from ${Hunt.OPEN_HOUR}:00. Tap to kill. Steps set your tap power, health, time (1 min per 1,000 steps, max 15) and stomps. Scrolling over budget means more enemies, tougher enemies, weaker taps and fog. Kills damage the group boss, double on Sundays. Quit or close the app mid-run and it counts as zero.</p></section>
   <section class="card"><h2>📱 The Scroll (group boss)</h2><p class="small" style="margin:0">A new boss every Monday with ${R.bossHpPer} HP per player. Everyone's step points hit it; every minute anyone scrolls over budget heals it by ${R.bossHealPerMin}. Beat it by Sunday night.</p></section>
   <section class="card"><h2>🚶 Effort (every day)</h2>
     <p class="small"><b>+1 point per 100 steps</b> (half rate after ${fmt(R.fullRateUntil)}, max ${fmt(R.stepCap)} steps).</p>
@@ -1222,6 +1316,9 @@ document.addEventListener("click", async (e) => {
       S.retake = true; S.answers = { ...charOf(S.me), name: S.me.name }; S.qi = 1; S.view = "quiz"; render(); scrollTo(0, 0);
       break;
     case "open-trail": trailSheet(); break;
+    case "hunt-start": startHunt(); break;
+    case "hunt-done": S.view = "main"; S.tab = "home"; render(); scrollTo(0, 0); break;
+    case "hunt-share": { const r = S.huntResult; share(`🌙 Effort hunt: ${fmt(r.score)} pts, ${r.kills} kills, wave ${r.wave}. ${r.survived ? "Survived the night." : "Doomscrolled to death."}`); break; }
     case "open-gear": gearSheet(); break;
     case "ob-next":
       if (S.step < 2) { S.step++; S.setupPlatform = null; render(); scrollTo(0, 0); }

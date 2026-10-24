@@ -106,7 +106,10 @@ function seasonOf(day) {
  * players: [{id, created_at, joined_at, daily_goal, scroll_source, ...}]
  * steps:   [{p, d, s, src}]   scroll: [{p, d, o, m, am}]
  */
-function build({ players, steps, scroll, today, league = false }) {
+function build({ players, steps, scroll, hunts = [], today, league = false }) {
+  const huntMap = new Map();
+  for (const h of hunts) { if (!huntMap.has(h.p)) huntMap.set(h.p, new Map()); huntMap.get(h.p).set(h.d, h); }
+  const huntOn = (pid, d) => huntMap.get(pid)?.get(d) || null;
   const stepMap = new Map(), scrollMap = new Map(), firstAuto = new Map(), firstScroll = new Map();
   for (const r of steps) {
     if (!stepMap.has(r.p)) stepMap.set(r.p, new Map());
@@ -258,7 +261,7 @@ function build({ players, steps, scroll, today, league = false }) {
         const rookie = daysBetween(start, d) < RULES.rookieDays;
         const mult = rookie || restedLeft > 0 ? RULES.xpMult : 1;
         if (!rookie && restedLeft > 0) restedLeft--;
-        total += Math.max(0, r.total) * mult;
+        total += Math.max(0, r.total) * mult + (huntOn(pid, d)?.score || 0) / 10;
         lastActive = d;
       }
       const rookieLeft = Math.max(0, RULES.rookieDays - daysBetween(start, today));
@@ -436,7 +439,8 @@ function build({ players, steps, scroll, today, league = false }) {
         if (d > today) break;
         for (const id of members) {
           const r = day(id, d);
-          const dmg = r.stepPts, heal = overBudget(r) * RULES.bossHealPerMin;
+          const hunt = huntOn(id, d);
+          const dmg = r.stepPts + (hunt ? hunt.dmg * (i === 6 ? 2 : 1) : 0), heal = overBudget(r) * RULES.bossHealPerMin;
           hits.set(id, (hits.get(id) || 0) + dmg); heals.set(id, (heals.get(id) || 0) + heal);
           if (!defeatedOn) left = left - dmg + heal;
         }
@@ -456,7 +460,7 @@ function build({ players, steps, scroll, today, league = false }) {
     return wins;
   }
 
-  return { RULES, ids, byId, day, par, form, week, streak, xp, seasonScore, seasonResults, rivals, legend, trophies, tier, badges, eligible, trail, fogOn, boss, bossWins };
+  return { RULES, ids, byId, huntOn, day, par, form, week, streak, xp, seasonScore, seasonResults, rivals, legend, trophies, tier, badges, eligible, trail, fogOn, boss, bossWins };
 }
 
 window.Effort = { build, RULES, TIERS, levelInfo, seasonOf, weekStart, addDays, parseDay, iso, daysBetween };

@@ -11,6 +11,7 @@
 //   POST /scroll_minutes               self-reported scroll minutes from Screen Time / Digital Wellbeing
 //   POST /add_forfeit                  any member adds a forfeit to the group's wheel
 //   POST /spin                         spin the forfeit wheel for a finished week (server picks the slice)
+//   POST /hunt                         submit tonight's hunt (one per day, from 18:00 local)
 //   POST /me | /update_me              read / edit your own profile
 //   POST /admin | /admin_members | /admin_remove   group admin
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -34,6 +35,7 @@ const text = (body: string, status = 200) =>
 const fail = (msg: string, status = 400) => json({ ok: false, error: msg }, status);
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const HUNT_OPEN_HOUR = 18;
 function randomString(len: number, chars = CODE_CHARS + "abcdefghijkmnpqrstuvwxyz") {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   return Array.from(bytes, (b) => chars[b % chars.length]).join("");
@@ -140,15 +142,17 @@ async function playerGroups(playerId: string) {
 }
 
 async function dataFor(ids: string[], sinceDays: number) {
-  if (!ids.length) return { steps: [], scroll: [] };
+  if (!ids.length) return { steps: [], scroll: [], hunts: [] };
   const since = new Date(Date.now() - sinceDays * 86400000).toISOString().slice(0, 10);
-  const [st, sc] = await Promise.all([
+  const [st, sc, hu] = await Promise.all([
     db.from("daily_steps").select("player_id,day,steps,source").in("player_id", ids).gte("day", since).limit(50000),
     db.from("daily_scroll").select("player_id,day,opens,minutes,auto_minutes,apps").in("player_id", ids).gte("day", since).limit(50000),
+    db.from("hunts").select("player_id,day,score,kills,wave,seconds,survived,boss_dmg").in("player_id", ids).gte("day", since).limit(50000),
   ]);
   return {
     steps: (st.data ?? []).map((r) => ({ p: r.player_id, d: r.day, s: r.steps, src: r.source })),
     scroll: (sc.data ?? []).map((r) => ({ p: r.player_id, d: r.day, o: r.opens, m: r.minutes, am: r.auto_minutes, a: r.apps })),
+    hunts: (hu.data ?? []).map((r) => ({ p: r.player_id, d: r.day, score: r.score, kills: r.kills, wave: r.wave, s: r.seconds, surv: r.survived, dmg: r.boss_dmg })),
   };
 }
 
@@ -400,6 +404,40 @@ Deno.serve(async (req) => {
           throw error;
         }
         return json({ ok: true, spin: data });
+      }
+
+      // Tonight's hunt. {start:true} registers the run (so a reload can't buy a retry); the second call
+      // finishes it. Caps keep a tampered client honest: a run can't outscore what today's steps allow.
+      case "hunt": {
+        const player = await playerByToken(body.token);
+        if (!player) return fail("Unknown token", 401);
+        const now = new Date();
+        const day = localDate(now, player.tz);
+        const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: player.tz, hour: "2-digit", hour12: false }).format(now));
+        const { data: run } = await db.from("hunts").select("seconds,created_at").eq("player_id", player.id).eq("day", day).maybeSingle();
+        const { data: st } = await db.from("daily_steps").select("steps").eq("player_id", player.id).eq("day", day).maybeSingle();
+        const minutes = Math.min(15, Math.max(2, (st?.steps ?? 0) / 1000));
+        if (body.start === true) {
+          if (hour < HUNT_OPEN_HOUR) return fail(`The hunt opens at ${HUNT_OPEN_HOUR}:00`);
+          if (run) return fail("You've already hunted tonight");
+          const { error } = await db.from("hunts").insert({ player_id: player.id, day, score: 0, kills: 0, wave: 0, seconds: 0 });
+          if (error) return fail("You've already hunted tonight");
+          return json({ ok: true, minutes });
+        }
+        if (!run) return fail("Start the hunt first");
+        if (run.seconds > 0) return fail("You've already hunted tonight");
+        if (Date.now() - Date.parse(run.created_at) > (minutes * 60 + 300) * 1000) return fail("That run timed out");
+        const cap = Math.round(minutes * 60 * 60);
+        const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
+        const score = n(body.score, cap);
+        const row = {
+          score, kills: n(body.kills, Math.round(minutes * 150)), wave: n(body.wave, 200),
+          seconds: Math.max(1, n(body.seconds, Math.round(minutes * 60) + 30)),
+          survived: body.survived === true, boss_dmg: Math.floor(score / 20),
+        };
+        const { error } = await db.from("hunts").update(row).eq("player_id", player.id).eq("day", day).eq("seconds", 0);
+        if (error) throw error;
+        return json({ ok: true, hunt: row });
       }
 
       case "me": {

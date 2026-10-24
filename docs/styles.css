@@ -369,3 +369,50 @@ input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px color-mix(in s
   .boss-row { grid-template-columns: 84px 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .wheel-result, .sheet, .sheet .panel { transition: none; animation: none; } }
+
+/* ---------- The Hunt ---------- */
+.hunt-card.live { background: color-mix(in srgb, var(--sun) 22%, var(--card)); }
+.loadout { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.loadout > div { background: var(--card-2); border-radius: 12px; padding: 8px 4px; text-align: center; }
+.loadout b { display: block; font: 800 20px/1.1 var(--display); }
+.loadout span { font-size: 11px; font-weight: 700; color: var(--muted); }
+.hunt-root { position: fixed; inset: 0; z-index: 40; background: #141a16; color: #edf1e7; }
+.hunt { display: flex; flex-direction: column; height: 100dvh; padding: calc(env(safe-area-inset-top) + 10px) max(12px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom) + 12px) max(12px, env(safe-area-inset-left, 0px)); gap: 10px; }
+.hunt-hud { display: grid; gap: 8px; }
+.hunt-hp { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 13px; }
+.hunt-hp .bar { flex: 1; height: 16px; border-color: #0a0d0b; background: #27312a; }
+.hunt-hp .bar i { background: #ff7366; transition: width .15s; }
+.hunt-stats { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; }
+.hunt-stats b { font: 800 18px/1 var(--display); }
+.hunt-arena {
+  position: relative; flex: 1; overflow: hidden; border: 2px solid #0a0d0b; border-radius: 20px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair;
+  background: radial-gradient(ellipse at 50% 120%, #2f5a3c 0%, #1b2e22 45%, #0f1712 100%);
+}
+.hunt-arena::before { content: ""; position: absolute; inset: 0; background-image: radial-gradient(1.5px 1.5px at 20% 15%, #fff8 50%, transparent 51%), radial-gradient(1.5px 1.5px at 70% 8%, #fff6 50%, transparent 51%), radial-gradient(1px 1px at 45% 25%, #fff5 50%, transparent 51%), radial-gradient(1.5px 1.5px at 85% 30%, #fff5 50%, transparent 51%); pointer-events: none; }
+.hunt-fog { position: absolute; inset: 0; pointer-events: none; z-index: 3; background: linear-gradient(180deg, #b7c0bbcc 0%, #9aa6a099 35%, transparent 75%); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.hunt-walker { position: absolute; left: 50%; bottom: 6px; width: 120px; transform: translateX(-50%); z-index: 2; pointer-events: none; }
+.hunt-walker svg { width: 100%; height: auto; display: block; }
+.hunt-walker.hurt { animation: hurt .6s infinite; }
+@keyframes hurt { 50% { opacity: .55; } }
+.foe { position: absolute; left: 0; top: 0; z-index: 4; will-change: transform; pointer-events: none; }
+.foe svg { width: 100%; height: 100%; display: block; }
+.foe.hit svg { animation: flash .12s; }
+@keyframes flash { 50% { filter: brightness(2.2); transform: scale(.9); } }
+.foe-hp { position: absolute; left: 10%; right: 10%; top: -7px; height: 5px; background: #0a0d0b; border-radius: 3px; overflow: hidden; display: block; }
+.foe-hp b { display: block; height: 100%; background: #ff7366; }
+.foe-grass .foe-hp { display: none; }
+.hunt-pop { position: absolute; z-index: 6; pointer-events: none; font: 800 18px/1 var(--display); color: #f5c542; transform: translate(-50%, -50%); animation: pop .7s ease-out forwards; text-shadow: 0 2px 0 #0a0d0b; }
+.hunt-pop.dmg { color: #fff; font-size: 15px; }
+.hunt-pop.miss { color: #a3b0a6; font-size: 13px; }
+.hunt-pop.ouch { color: #ff7366; font-size: 22px; }
+.hunt-pop.heal { color: #5fbf83; font-size: 20px; }
+@keyframes pop { to { transform: translate(-50%, -150%); opacity: 0; } }
+.hunt-banner { position: absolute; z-index: 7; left: 50%; top: 38%; transform: translate(-50%, -50%); font: 800 34px/1.1 var(--display); color: #f5c542; text-shadow: 0 3px 0 #0a0d0b; pointer-events: none; opacity: 0; white-space: nowrap; }
+.hunt-banner.show { animation: banner 1.4s ease-out; }
+@keyframes banner { 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -70%); } }
+.hunt-arena.shake { animation: shake .25s; }
+@keyframes shake { 25% { transform: translate(-5px, 2px); } 50% { transform: translate(4px, -3px); } 75% { transform: translate(-3px, 1px); } }
+.hunt-controls { display: flex; gap: 10px; align-items: center; }
+.hunt-controls #h-stomp { flex: 1; }
+.hunt-controls .btn.ghost { background: #27312a; color: #edf1e7; }
+@media (prefers-reduced-motion: reduce) { .hunt-arena.shake, .hunt-walker.hurt { animation: none; } }
