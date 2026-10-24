@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Effort Owner</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#eceee4">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;600;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    input[type=search], input[type=password], input[type=date] {
+      width: 100%; border: 2px solid var(--edge); background: var(--card); border-radius: 12px; padding: 12px 14px; font-size: 16px; outline: none;
+    }
+    .day-row { display: grid; grid-template-columns: 92px repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; width: 100%; padding: 11px 14px; background: none; border: 0; border-bottom: 2px dashed var(--soft); text-align: left; cursor: pointer; color: var(--ink); font-size: 14px; }
+    .day-row:last-child { border-bottom: 0; }
+    .day-row.head { cursor: default; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .day-row .d { font-weight: 700; }
+    .day-row .v { font-variant-numeric: tabular-nums; }
+    .day-row .none { color: var(--muted); }
+    .day-row .src { display: block; font-size: 11px; color: var(--muted); }
+    .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+    .hint { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
+    .sec-title { font: 800 15px/1.2 var(--display); margin: 18px 0 8px; }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="2.2"/></filter></svg>
+  <main id="app" aria-live="polite"></main>
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="owner.js" defer></script>
+</body>
+</html>

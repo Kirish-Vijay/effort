@@ -14,6 +14,7 @@
 //   POST /hunt                         submit tonight's hunt (one per day, from 18:00 local)
 //   POST /me | /update_me              read / edit your own profile
 //   POST /admin | /admin_members | /admin_remove   group admin
+//   POST /owner                        app owner: read and edit any player's data (owner key in app_config)
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const db = createClient(
@@ -207,6 +208,108 @@ async function handleHealthConnect(player: Record<string, any>, body: Record<str
 
   await touchSteps(player.id, "android", tz !== player.tz ? { tz } : {});
   return json({ ok: true, days: [...dailyDays, ...chunkDays].sort() });
+}
+
+// ---------- App owner ----------
+// One key for the whole app, kept in app_config (RLS on, no policies, so only this function can read it).
+async function isOwner(key: unknown) {
+  if (typeof key !== "string" || key.length < 16) return false;
+  const { data } = await db.from("app_config").select("value").eq("key", "owner_key").maybeSingle();
+  return !!data && data.value === key;
+}
+
+const ownerDay = (d: unknown) =>
+  typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d)) && d >= "2020-01-01" &&
+  Date.parse(d) <= Date.now() + 2 * 86400000 ? d : null;
+
+async function ownerAction(op: string, body: Record<string, any>) {
+  switch (op) {
+    case "list": {
+      const [pl, gr, mem] = await Promise.all([
+        db.from("players").select("id,name,emoji,color,platform,tz,is_public,created_at,steps_synced_at,steps_source,scroll_synced_at,scroll_source,character").order("created_at", { ascending: false }).limit(5000),
+        db.from("groups").select("id,code,name,created_at").order("created_at"),
+        db.from("memberships").select("player_id,group_id"),
+      ]);
+      return json({ ok: true, players: pl.data ?? [], groups: gr.data ?? [], memberships: mem.data ?? [] });
+    }
+    case "player": {
+      const { data: player } = await db.from("players").select("*").eq("id", body.id).maybeSingle();
+      if (!player) return fail("No such player", 404);
+      const days = Math.min(730, Math.max(7, Number(body.days) || 120));
+      const [groups, data] = await Promise.all([playerGroups(player.id), dataFor([player.id], days)]);
+      return json({ ok: true, player, groups, ...data });
+    }
+    case "save_player": {
+      const patch: Record<string, unknown> = {};
+      if (clip(body.name, 24)) patch.name = clip(body.name, 24);
+      if (clip(body.emoji, 8)) patch.emoji = clip(body.emoji, 8);
+      if ("daily_goal" in body) patch.daily_goal = body.daily_goal ? clampGoal(body.daily_goal) : null;
+      if (PLATFORMS.includes(body.platform)) patch.platform = body.platform;
+      if (typeof body.is_public === "boolean") patch.is_public = body.is_public;
+      if (clip(body.tz, 60)) patch.tz = clip(body.tz, 60);
+      const { data, error } = await db.from("players").update(patch).eq("id", body.id).select().single();
+      if (error) throw error;
+      return json({ ok: true, player: data });
+    }
+    case "set_steps": {
+      const day = ownerDay(body.day);
+      if (!day) return fail("Bad date");
+      if (body.steps === null || body.steps === "") {
+        await db.from("daily_steps").delete().eq("player_id", body.id).eq("day", day);
+        return json({ ok: true, day, steps: null });
+      }
+      const steps = parseSteps(body.steps);
+      if (steps === null) return fail("Steps must be between 0 and 200,000");
+      await saveDay(body.id, day, steps, "admin");
+      return json({ ok: true, day, steps });
+    }
+    case "set_scroll": {
+      const day = ownerDay(body.day);
+      if (!day) return fail("Bad date");
+      // minutes is the override; null hands the day back to whatever the automation counted.
+      let minutes: number | null = null;
+      if (body.minutes !== null && body.minutes !== "") {
+        minutes = parseNum(body.minutes, 1440);
+        if (minutes === null) return fail("Minutes must be between 0 and 1440");
+      }
+      const { data: row } = await db.from("daily_scroll").select("opens,auto_minutes").eq("player_id", body.id).eq("day", day).maybeSingle();
+      if (minutes === null && (!row || (!row.opens && row.auto_minutes == null))) {
+        await db.from("daily_scroll").delete().eq("player_id", body.id).eq("day", day);
+      } else {
+        const { error } = await db.from("daily_scroll").upsert(
+          { player_id: body.id, day, minutes, updated_at: new Date().toISOString() },
+          { onConflict: "player_id,day" },
+        );
+        if (error) throw error;
+      }
+      return json({ ok: true, day, minutes });
+    }
+    case "set_hunt": {
+      const day = ownerDay(body.day);
+      if (!day) return fail("Bad date");
+      if (body.delete) {
+        await db.from("hunts").delete().eq("player_id", body.id).eq("day", day);
+        return json({ ok: true, day, hunt: null });
+      }
+      const n = (v: unknown, max: number) => parseNum(v, max) ?? 0;
+      const score = n(body.score, 10_000_000);
+      const row = {
+        player_id: body.id, day, score,
+        kills: n(body.kills, 1_000_000), wave: n(body.wave, 10_000), seconds: n(body.seconds, 3600),
+        survived: !!body.survived,
+        boss_dmg: body.boss_dmg === undefined || body.boss_dmg === "" ? Math.round(score / 20) : n(body.boss_dmg, 1_000_000),
+      };
+      const { error } = await db.from("hunts").upsert(row, { onConflict: "player_id,day" });
+      if (error) throw error;
+      return json({ ok: true, day, hunt: row });
+    }
+    case "delete_player": {
+      await db.from("players").delete().eq("id", body.id);
+      return json({ ok: true });
+    }
+    default:
+      return fail("Unknown owner action", 404);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -500,6 +603,12 @@ Deno.serve(async (req) => {
         if (!g) return fail("Wrong admin key", 403);
         await db.from("memberships").delete().eq("player_id", body.player_id).eq("group_id", g.id);
         return json({ ok: true });
+      }
+
+      case "owner": {
+        if (!(await isOwner(body.key))) return fail("Wrong owner key", 403);
+        if (body.op !== "list" && (typeof body.id !== "string" || !/^[0-9a-f-]{36}$/.test(body.id))) return fail("Bad player id");
+        return await ownerAction(String(body.op ?? ""), body);
       }
 
       default:
