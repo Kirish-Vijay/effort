@@ -1,5 +1,5 @@
 // Network first so updates show up straight away; cached shell only when offline.
-const CACHE = "effort-v2";
+const CACHE = "effort-v3";
 const SHELL = ["./", "index.html", "styles.css", "engine.js", "app.js", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

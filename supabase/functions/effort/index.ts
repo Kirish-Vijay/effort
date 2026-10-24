@@ -9,6 +9,8 @@
 //   GET  /scroll?t=TOKEN&ev=open|close   short-video app opened/closed (Shortcut / MacroDroid automation)
 //   GET  /scroll?t=TOKEN&minutes=42      the day's scroll minutes in one go (Tasker)
 //   POST /scroll_minutes               self-reported scroll minutes from Screen Time / Digital Wellbeing
+//   POST /add_forfeit                  any member adds a forfeit to the group's wheel
+//   POST /spin                         spin the forfeit wheel for a finished week (server picks the slice)
 //   POST /me | /update_me              read / edit your own profile
 //   POST /admin | /admin_members | /admin_remove   group admin
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -217,8 +219,11 @@ Deno.serve(async (req) => {
         if (!g) return fail("No group with that code", 404);
         const { data: mem } = await db.from("memberships").select(`team, joined_at, players(${PUBLIC_PLAYER_COLS})`).eq("group_id", g.id).order("joined_at");
         const players = (mem ?? []).map((m: any) => ({ ...m.players, team: m.team, joined_at: m.joined_at }));
-        const data = await dataFor(players.map((p) => p.id), 800);
-        return json({ ok: true, group: publicGroup(g), players, ...data });
+        const [data, spins] = await Promise.all([
+          dataFor(players.map((p) => p.id), 800),
+          db.from("forfeit_spins").select("week_start,loser_id,forfeit,slice,slices,spun_at").eq("group_id", g.id).order("week_start", { ascending: false }).limit(12),
+        ]);
+        return json({ ok: true, group: publicGroup(g), players, ...data, spins: spins.data ?? [] });
       }
 
       case "signup": {
@@ -332,6 +337,57 @@ Deno.serve(async (req) => {
         return json({ ok: true, day, minutes, message: `📵 ${minutes} min of scrolling saved for ${prettyDay(day)}` });
       }
 
+      case "add_forfeit": {
+        const player = await playerByToken(body.token);
+        const g = await groupByCode(body.code);
+        if (!player || !g) return fail("Not found", 404);
+        const { count } = await db.from("memberships").select("player_id", { count: "exact", head: true }).eq("group_id", g.id).eq("player_id", player.id);
+        if (!count) return fail("You're not in this group", 403);
+        const item = clip(body.text, 60);
+        if (!item) return fail("Write a forfeit first");
+        if (g.forfeits.length >= 12) return fail("The wheel is full (12 forfeits). Ask the admin to clear some.");
+        if (g.forfeits.some((f: string) => f.toLowerCase() === item.toLowerCase())) return fail("That one's already on the wheel");
+        const { data, error } = await db.from("groups").update({ forfeits: [...g.forfeits, item] }).eq("id", g.id).select().single();
+        if (error) throw error;
+        return json({ ok: true, group: publicGroup(data) });
+      }
+
+      // Spin the forfeit wheel for a finished week (or the current week from Sunday 18:00 in the spinner's time zone).
+      // The server picks the slice so nobody can re-roll; the first spin for a week is final.
+      case "spin": {
+        const player = await playerByToken(body.token);
+        const g = await groupByCode(body.code);
+        if (!player || !g) return fail("Not found", 404);
+        const { count } = await db.from("memberships").select("player_id", { count: "exact", head: true }).eq("group_id", g.id).eq("player_id", player.id);
+        if (!count) return fail("You're not in this group", 403);
+        const ws = clip(body.week_start, 10) ?? "";
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(ws) || new Date(ws + "T12:00:00Z").getUTCDay() !== 1) return fail("Bad week");
+        const now = new Date();
+        const today = localDate(now, player.tz);
+        const thisMonday = (() => { const d = new Date(today + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
+        const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: player.tz, hour: "2-digit", hour12: false }).format(now));
+        const sundayEvening = new Date(today + "T12:00:00Z").getUTCDay() === 0 && hour >= 18;
+        if (ws > thisMonday || (ws === thisMonday && !sundayEvening)) return fail("The wheel unlocks on Sunday at 6pm");
+        const { data: existing } = await db.from("forfeit_spins").select("*").eq("group_id", g.id).eq("week_start", ws).maybeSingle();
+        if (existing) return json({ ok: true, spin: existing, already: true });
+        const slices = g.forfeits.length ? g.forfeits : [g.forfeit || "Buys the first round"];
+        const slice = crypto.getRandomValues(new Uint32Array(1))[0] % slices.length;
+        let loserId: string | null = null;
+        if (typeof body.loser_id === "string" && /^[0-9a-f-]{36}$/i.test(body.loser_id)) {
+          const { count: inGroup } = await db.from("memberships").select("player_id", { count: "exact", head: true }).eq("group_id", g.id).eq("player_id", body.loser_id);
+          if (inGroup) loserId = body.loser_id;
+        }
+        const row = { group_id: g.id, week_start: ws, loser_id: loserId, forfeit: slices[slice], slice, slices, spun_by: player.id };
+        const { data, error } = await db.from("forfeit_spins").insert(row).select("week_start,loser_id,forfeit,slice,slices,spun_at").single();
+        if (error) {
+          // Two people spun at once: return whichever landed first.
+          const { data: first } = await db.from("forfeit_spins").select("week_start,loser_id,forfeit,slice,slices,spun_at").eq("group_id", g.id).eq("week_start", ws).maybeSingle();
+          if (first) return json({ ok: true, spin: first, already: true });
+          throw error;
+        }
+        return json({ ok: true, spin: data });
+      }
+
       case "me": {
         const player = await playerByToken(body.token);
         if (!player) return fail("Unknown token", 401);
@@ -369,6 +425,7 @@ Deno.serve(async (req) => {
         if (clip(s.challenge_name, 60)) patch.challenge_name = clip(s.challenge_name, 60);
         if (s.challenge_km) patch.challenge_km = Math.min(100000, Math.max(1, Number(s.challenge_km) || 460));
         if (Array.isArray(s.teams)) patch.teams = s.teams.map((t: unknown) => clip(t, 24)).filter(Boolean).slice(0, 8);
+        if (Array.isArray(s.forfeits)) patch.forfeits = [...new Set(s.forfeits.map((t: unknown) => clip(t, 60)).filter(Boolean))].slice(0, 12);
         for (const k of ["shortcut_url", "scroll_shortcut_url"]) {
           if (typeof s[k] === "string") patch[k] = /^https:\/\/www\.icloud\.com\/shortcuts\//.test(s[k]) ? s[k] : null;
         }

@@ -332,6 +332,7 @@ function tabHome() {
     <button class="icon-btn" data-act="refresh" aria-label="Refresh">${ICON.refresh}</button></div>
   ${todayCard(E, id)}
   ${nags()}
+  ${recapCard()}
   ${weekCard(E, id)}
   ${rivalCard(B)}
   ${miniBoard(B)}
@@ -391,23 +392,51 @@ function tabBoard() {
   ${seasonCard(E)}`;
 }
 
-function forfeitCard(E, g) {
-  const t = today(), ws = weekStart(t);
-  // Placement players and anyone who joined mid-week sit the forfeit out.
-  const rows = E.ids.filter((id) => E.eligible(id, ws) && E.byId.get(id).joined_at.slice(0, 10) <= ws)
+// Lowest weekly score first. Placement players and anyone who joined mid-week sit the forfeit out.
+function forfeitStandings(E, ws) {
+  return E.ids.filter((id) => E.eligible(id, ws) && E.byId.get(id).joined_at.slice(0, 10) <= ws)
     .map((id) => ({ id, v: E.week(id, ws).form })).sort((a, b) => a.v - b.v);
-  if (!g.forfeit && rows.length < 2) return "";
+}
+
+const WHEEL_SUGGESTIONS = ["Buys the first round", "Delete TikTok for 48 hours", "Cold shower tomorrow", "50 burpees on video",
+  "Cooks dinner for the winner", "Wears something ridiculous for a day", "Plans the next group walk", "Posts an old embarrassing photo"];
+
+// The wheel opens for last week any time, and for this week from Sunday 6pm.
+function wheelOpen(ws) {
+  const thisWs = weekStart(today());
+  if (ws < thisWs) return true;
+  const now = new Date();
+  return ws === thisWs && now.getDay() === 0 && now.getHours() >= 18;
+}
+
+const spinFor = (B, ws) => (B.data.spins || []).find((s) => s.week_start === ws);
+
+function forfeitCard(E, g) {
+  const B = cur();
+  const t = today(), ws = weekStart(t);
+  const rows = forfeitStandings(E, ws);
+  const slices = g.forfeits.length ? g.forfeits : [];
   const daysLeft = 6 - ((parseDay(t).getDay() + 6) % 7);
   const lastWs = addDays(ws, -7);
-  const last = E.ids.filter((id) => E.eligible(id, lastWs) && E.byId.get(id).joined_at.slice(0, 10) <= lastWs)
-    .map((id) => ({ id, v: E.week(id, lastWs).form })).sort((a, b) => a.v - b.v);
+  const last = forfeitStandings(E, lastWs);
   const bottom = rows[0] && E.byId.get(rows[0].id);
+  const lastSpin = spinFor(B, lastWs), nowSpin = spinFor(B, ws);
+  const spinLine = (spin, label) => {
+    const who = spin.loser_id && E.byId.get(spin.loser_id);
+    return `<div class="callout result" data-wheel="${spin.week_start}" style="cursor:pointer">🎡 ${label}: <b>${esc(who?.name || "Last place")}</b>'s forfeit is <b>${esc(spin.forfeit)}</b>. <span class="small muted">Tap to replay</span></div>`;
+  };
+  let wheelArea = "";
+  if (nowSpin) wheelArea = spinLine(nowSpin, "This week");
+  else if (rows.length >= 2 && wheelOpen(ws)) wheelArea = `<button class="btn block" data-wheel="${ws}">🎡 Spin the wheel for ${esc(bottom.name)}</button>`;
+  if (lastSpin) wheelArea += spinLine(lastSpin, "Last week");
+  else if (last.length >= 2) wheelArea += `<button class="btn block ${nowSpin || wheelOpen(ws) ? "ghost" : ""}" data-wheel="${lastWs}" style="margin-top:8px">🎡 Spin last week's wheel for ${esc(E.byId.get(last[0].id).name)}</button>`;
   return `<section class="card forfeit">
-    <div class="row spread"><h2 style="margin:0">😬 Forfeit watch</h2><span class="pill">${daysLeft ? `${daysLeft} day${daysLeft > 1 ? "s" : ""} left` : "Last day!"}</span></div>
-    <p class="muted small" style="margin:6px 0 10px">Lowest score on Sunday night: <b style="color:var(--text)">${esc(g.forfeit || "no forfeit set yet")}</b></p>
-    ${rows.length < 2 ? `<p class="small muted" style="margin:0">Kicks in once two people have finished their placement week.</p>`
-      : `<div class="row"><span class="avatar" style="--c:${bottom.color}">${esc(bottom.emoji)}</span><div class="grow"><div class="loser">${esc(bottom.name)}</div><div class="small muted num">${fmt(rows[0].v)} pts · ${fmt(rows[1].v - rows[0].v)} behind ${esc(E.byId.get(rows[1].id).name)}</div></div></div>`}
-    ${last.length >= 2 ? `<div class="callout" style="margin-bottom:0">Last week: <b>${esc(E.byId.get(last[0].id).name)}</b> owes the forfeit (${fmt(last[0].v)} pts).</div>` : ""}
+    <div class="row spread"><h2 style="margin:0">😬 Forfeit watch</h2><span class="pill">${daysLeft ? `${daysLeft} day${daysLeft > 1 ? "s" : ""} left` : "Wheel at 6pm"}</span></div>
+    <p class="muted small" style="margin:6px 0 10px">Lowest score on Sunday night spins the wheel. ${slices.length ? `${slices.length} forfeit${slices.length === 1 ? "" : "s"} on it.` : `Right now it can only land on: <b style="color:var(--text)">${esc(g.forfeit || "Buys the first round")}</b>.`}</p>
+    ${rows.length < 2 ? `<p class="small muted">Kicks in once two people have finished their placement week.</p>`
+      : `<div class="row" style="margin-bottom:12px"><span class="avatar" style="--c:${bottom.color}">${esc(bottom.emoji)}</span><div class="grow"><div class="loser">${esc(bottom.name)}</div><div class="small muted num">${fmt(rows[0].v)} pts · ${fmt(rows[1].v - rows[0].v)} behind ${esc(E.byId.get(rows[1].id).name)}</div></div></div>`}
+    ${wheelArea}
+    <button class="btn sm ghost" data-act="edit-wheel" style="margin-top:10px">${slices.length < 2 ? "Add forfeits to the wheel" : "See or add forfeits"}</button>
   </section>`;
 }
 
@@ -525,6 +554,7 @@ function tabMe() {
     ${row("setup-scroll", "📵", "Scroll tracking", S.me.scroll_synced_at ? `Last ${ago(S.me.scroll_synced_at)} (${S.me.scroll_source === "auto" ? "automatic" : "typed in"})` : "Not set up, 30 min/day assumed")}
     ${row("group-menu", "👥", "Groups", S.groups.length ? S.groups.map((g) => esc(g.name)).join(", ") : "Create or join one")}
     <label class="list-row"><span class="e">🌍</span><span class="grow"><b>Public league</b><br><span class="small muted">Compete with everyone on Effort, in leagues matched to your level</span></span><input type="checkbox" class="switch" data-act="toggle-public" ${S.me.is_public ? "checked" : ""}></label>
+    ${row("open-recap", "📊", "Weekly recap", "A shareable card of your week")}
     ${row("how", "❓", "How scoring works")}
     ${row("restore", "🔑", "Copy restore link", "Keep it safe: it logs you in on a new phone")}
     ${row("sign-out", "🚪", "Sign out on this phone")}
@@ -694,6 +724,7 @@ function groupSettingsSheet(members) {
     <label class="field"><span>Group journey (resets each season)</span><select name="journey"><option value="">Custom…</option>${journeyOpts}</select></label>
     <div class="row"><label class="field grow"><span>Journey name</span><input name="challenge_name" maxlength="60" value="${esc(g.challenge_name)}"></label><label class="field" style="width:110px"><span>km</span><input name="challenge_km" type="number" inputmode="numeric" min="1" value="${g.challenge_km}"></label></div>
     <label class="field"><span>Teams (comma separated, blank for none)</span><input name="teams" maxlength="200" value="${esc(g.teams.join(", "))}" placeholder="Hares, Tortoises"></label>
+    <label class="field"><span>Forfeit wheel (one per line, up to 12)</span><textarea name="forfeits" rows="5" maxlength="800" placeholder="Buys the first round">${esc(g.forfeits.join("\n"))}</textarea></label>
     <label class="field"><span>Shared iPhone steps Shortcut (optional)</span><input name="shortcut_url" type="url" value="${esc(g.shortcut_url || "")}" placeholder="https://www.icloud.com/shortcuts/…"></label>
     <button class="btn block">Save settings</button>
   </form>
@@ -715,6 +746,251 @@ function standingsText() {
   return `⚡ Effort · ${boardName(S.boardKey)} · this week\n` +
     rows.map((r, i) => { const p = E.byId.get(r.id); return `${medal[i] || `${i + 1}.`} ${p.name} ${fmt(r.v)}${E.streak(r.id).weeks >= 2 ? ` 🔥${E.streak(r.id).weeks}` : ""}`; }).join("\n") +
     `\n\nMe: ${km(me.steps)} km walked${me.scrollMin ? `, ${fmt(me.scrollMin)} min scrolled` : ""}.`;
+}
+
+// ---------- forfeit wheel ----------
+const WHEEL_COLORS = ["#6d5efc", "#ff5fa2", "#14a86b", "#f08a24", "#0ea5e9", "#a855f7", "#e5484d", "#eab308"];
+
+function wheelSvg(slices) {
+  const n = slices.length, R = 150, C = 160;
+  const pt = (a) => [C + R * Math.sin(a), C - R * Math.cos(a)];
+  const segs = slices.map((s, i) => {
+    const a0 = (i / n) * 2 * Math.PI, a1 = ((i + 1) / n) * 2 * Math.PI, mid = (a0 + a1) / 2;
+    const [x0, y0] = pt(a0), [x1, y1] = pt(a1);
+    const path = n === 1 ? `<circle cx="${C}" cy="${C}" r="${R}" fill="${WHEEL_COLORS[0]}"/>`
+      : `<path d="M${C},${C} L${x0},${y0} A${R},${R} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1},${y1} Z" fill="${WHEEL_COLORS[i % WHEEL_COLORS.length]}"/>`;
+    const label = s.length > 22 ? s.slice(0, 21) + "…" : s;
+    const deg = (mid * 180) / Math.PI - 90;
+    return `${path}<text transform="rotate(${deg} ${C} ${C})" x="${C + R - 12}" y="${C}" text-anchor="end" dominant-baseline="middle" font-size="${n > 8 ? 10 : 11.5}" font-weight="700" fill="#fff">${esc(label)}</text>`;
+  }).join("");
+  return `<svg viewBox="0 0 320 320" class="wheel-svg" role="img" aria-label="Forfeit wheel with ${n} forfeits">${segs}<circle cx="${C}" cy="${C}" r="22" fill="var(--card)" stroke="var(--line)" stroke-width="3"/></svg>`;
+}
+
+function wheelSheet(ws) {
+  const B = cur();
+  const E = B.E, g = B.data.group;
+  const spin = spinFor(B, ws);
+  const loser = spin?.loser_id ? E.byId.get(spin.loser_id) : E.byId.get(forfeitStandings(E, ws)[0]?.id);
+  const slices = spin ? spin.slices : g.forfeits.length ? g.forfeits : [g.forfeit || "Buys the first round"];
+  const weekLabel = ws === weekStart(today()) ? "this week" : `week of ${dayLabel(ws, { day: "numeric", month: "short" })}`;
+  openSheet(`${sheetHead("Forfeit wheel")}
+    <p class="muted" style="margin-top:-4px">${loser ? `<b style="color:var(--text)">${esc(loser.emoji)} ${esc(loser.name)}</b> came last ${weekLabel}.` : ""} One spin per week, and it's final.</p>
+    <div class="wheel-wrap"><div class="wheel-pointer" aria-hidden="true"></div><div class="wheel" id="wheel">${wheelSvg(slices)}</div></div>
+    <p id="wheel-result" class="wheel-result" aria-live="polite"></p>
+    <div class="btn-row">${spin ? `<button class="btn" data-act="replay-spin" data-ws="${ws}">Replay the spin</button>` : `<button class="btn" data-act="spin" data-ws="${ws}" data-loser="${loser?.id || ""}">Spin it</button>`}</div>`);
+  if (spin) showWheelResult(spin, loser, true);
+}
+
+function animateWheel(slice, n, instant) {
+  const el = $("#wheel");
+  if (!el) return Promise.resolve();
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const target = 360 * (instant || reduce ? 0 : 6) + (360 - ((slice + 0.5) / n) * 360) + (Math.random() - 0.5) * (300 / n) / 2;
+  el.style.transition = "none";
+  el.style.transform = "rotate(0deg)";
+  void el.offsetWidth;
+  el.style.transition = instant ? "none" : `transform ${reduce ? 0.6 : 5}s cubic-bezier(.12,.72,.08,1)`;
+  el.style.transform = `rotate(${target}deg)`;
+  return new Promise((r) => setTimeout(r, instant ? 0 : reduce ? 650 : 5100));
+}
+
+function showWheelResult(spin, loser, quiet) {
+  const out = $("#wheel-result");
+  if (!out) return;
+  animateWheel(spin.slice, spin.slices.length, quiet).then(() => {
+    out.innerHTML = `<span class="big-emoji">😬</span><b>${esc(loser?.name || "Last place")}</b>'s forfeit:<br><span class="forfeit-text">${esc(spin.forfeit)}</span>`;
+    out.classList.add("show");
+    if (!quiet) {
+      const share = document.createElement("button");
+      share.className = "btn ghost block";
+      share.style.marginTop = "10px";
+      share.textContent = "Share the result";
+      share.onclick = () => share(`🎡 Effort forfeit wheel: ${loser?.name || "Last place"}'s forfeit is "${spin.forfeit}". Better luck next week 😬`);
+      out.after(share);
+    }
+  });
+}
+
+function editWheelSheet() {
+  const B = cur();
+  const g = B.data.group;
+  const code = S.boardKey.slice(2);
+  const isAdmin = !!S.adminKeys[code];
+  const unused = WHEEL_SUGGESTIONS.filter((s) => !g.forfeits.some((f) => f.toLowerCase() === s.toLowerCase()));
+  openSheet(`${sheetHead("Forfeits on the wheel")}
+    <section class="card">
+      ${g.forfeits.length ? `<div class="wheel-list">${g.forfeits.map((f, i) => `<span class="wheel-chip" style="--c:${WHEEL_COLORS[i % WHEEL_COLORS.length]}">${esc(f)}</span>`).join("")}</div>` : `<p class="small muted">Nothing on the wheel yet. Add at least two so there's something to spin for.</p>`}
+      <form data-form="add-forfeit" class="row" style="margin-top:12px"><input name="text" maxlength="60" placeholder="Add a forfeit" class="grow" aria-label="New forfeit"><button class="btn">Add</button></form>
+      ${unused.length ? `<p class="small muted" style="margin:12px 0 6px">Ideas (tap to add):</p><div class="wheel-list">${unused.map((s) => `<button class="wheel-chip idea" data-suggest="${esc(s)}">＋ ${esc(s)}</button>`).join("")}</div>` : ""}
+    </section>
+    <p class="small muted">Anyone in the group can add forfeits, up to 12. ${isAdmin ? "You can remove them in group settings (⚙️)." : "The admin can remove them."}</p>`);
+}
+
+async function addForfeit(item) {
+  if (!item || !item.trim()) { toast("Write a forfeit first"); return; }
+  try {
+    const r = await call("add_forfeit", { token: S.token, code: S.boardKey.slice(2), text: item.trim() });
+    cur().data.group = { ...cur().data.group, ...r.group };
+    editWheelSheet();
+    toast("Added to the wheel");
+  } catch (err) { toast(err.message); }
+}
+
+// ---------- weekly recap ----------
+function recapData(E, id, ws) {
+  const t = today();
+  const p = E.byId.get(id);
+  let steps = 0, best = { steps: 0, d: null }, tracked = 0, scrollMin = 0, kept = 0, over = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(ws, i);
+    if (d > t) break;
+    const r = E.day(id, d);
+    steps += r.steps;
+    if (r.steps > best.steps) best = { steps: r.steps, d };
+    if (r.scrollSrc === "auto" || r.scrollSrc === "reported") {
+      tracked++; scrollMin += r.scrollMin;
+      kept += Math.max(0, r.budget - r.scrollMin); over += Math.max(0, r.scrollMin - r.budget);
+    }
+  }
+  const w = E.week(id, ws);
+  const ranked = E.ids.map((x) => ({ id: x, v: E.week(x, ws).form })).sort((a, b) => b.v - a.v);
+  const rivalId = E.rivals(ws).get(id);
+  return {
+    p, ws, steps, km: steps * KM_PER_STEP, best, tracked, scrollMin, kept, over,
+    form: w.form, atPar: w.atPar, rank: ranked.findIndex((r) => r.id === id) + 1, of: ranked.length,
+    winner: ranked[0] && ranked[0].v > 0 ? E.byId.get(ranked[0].id) : null,
+    rival: rivalId ? { p: E.byId.get(rivalId), mine: w.form, theirs: E.week(rivalId, ws).form } : null,
+    streak: E.streak(id).weeks, level: E.xp(id),
+  };
+}
+
+const hm = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, "0")}m` : `${Math.round(m)}m`);
+
+function recapHeadline(r) {
+  const walked = `Walked ${r.km.toFixed(r.km < 10 ? 1 : 0)} km`;
+  if (!r.tracked) return `${walked} this week.`;
+  if (r.kept >= r.over) return `${walked} and left ${hm(r.kept - r.over)} of scroll budget unused.`;
+  return `${walked} but scrolled ${hm(r.over - r.kept)} over budget.`;
+}
+
+async function drawRecap(r, groupName, spin) {
+  try { await Promise.all([document.fonts.load("800 120px Outfit"), document.fonts.load("600 40px Outfit")]); } catch { /* fall back to system font */ }
+  const W = 1080, H = 1350;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  const font = (w, s) => `${w} ${s}px Outfit, "Segoe UI", system-ui, sans-serif`;
+  const rr = (X, Y, w, h, rad) => { x.beginPath(); if (x.roundRect) x.roundRect(X, Y, w, h, rad); else x.rect(X, Y, w, h); };
+  const bg = x.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, "#5b4cf0"); bg.addColorStop(0.55, "#8f6bff"); bg.addColorStop(1, "#ff5fa2");
+  x.fillStyle = bg; x.fillRect(0, 0, W, H);
+  x.fillStyle = "rgba(255,255,255,.06)";
+  for (let i = 0; i < 6; i++) { x.beginPath(); x.arc(W - 120 + i * 30, 160 - i * 10, 260 - i * 38, 0, Math.PI * 2); x.fill(); }
+
+  x.fillStyle = "#fff"; x.textBaseline = "alphabetic";
+  x.font = font(800, 40); x.fillText("⚡ EFFORT", 80, 120);
+  x.textAlign = "right"; x.font = font(600, 34); x.globalAlpha = 0.85;
+  x.fillText(`${dayLabel(r.ws, { day: "numeric", month: "short" })} – ${dayLabel(addDays(r.ws, 6), { day: "numeric", month: "short" })}`, W - 80, 120);
+  x.globalAlpha = 1; x.textAlign = "left";
+
+  x.font = font(400, 96); x.fillText(r.p.emoji, 80, 290);
+  x.font = font(800, 64); x.fillText(r.p.name, 210, 262);
+  x.font = font(600, 34); x.globalAlpha = 0.85; x.fillText(`Level ${r.level.level} · ${r.level.title}`, 210, 312); x.globalAlpha = 1;
+
+  x.font = font(800, 220); x.fillText(fmt(r.form), 72, 560);
+  const sw = x.measureText(fmt(r.form)).width;
+  x.font = font(600, 40); x.globalAlpha = 0.9; x.fillText("pts this week", 90 + sw, 560); x.globalAlpha = 1;
+  if (r.of > 1) {
+    const pill = `#${r.rank} of ${r.of} in ${groupName}`;
+    x.font = font(700, 34);
+    const pw = x.measureText(pill).width + 48;
+    x.fillStyle = "rgba(255,255,255,.22)"; rr(80, 600, pw, 64, 32); x.fill();
+    x.fillStyle = "#fff"; x.fillText(pill, 104, 644);
+  }
+
+  const tiles = [
+    [`${r.km.toFixed(r.km < 10 ? 1 : 0)} km`, `${fmt(r.steps)} steps`],
+    [`${r.atPar}/7`, "days beating par"],
+    [r.tracked ? hm(r.scrollMin) : "—", r.tracked ? (r.kept >= r.over ? `${hm(r.kept - r.over)} under budget` : `${hm(r.over - r.kept)} over budget`) : "scrolling not tracked"],
+    [r.best.d ? fmt(r.best.steps) : "—", r.best.d ? `best day (${dayLabel(r.best.d, { weekday: "short" })})` : "best day"],
+  ];
+  tiles.forEach(([big, small], i) => {
+    const X = 80 + (i % 2) * 470, Y = 700 + Math.floor(i / 2) * 180;
+    x.fillStyle = "rgba(255,255,255,.16)"; rr(X, Y, 450, 160, 32); x.fill();
+    x.fillStyle = "#fff"; x.font = font(800, 60); x.fillText(big, X + 32, Y + 82);
+    x.font = font(600, 29); x.globalAlpha = 0.85; x.fillText(small, X + 32, Y + 128); x.globalAlpha = 1;
+  });
+
+  x.font = font(700, 38);
+  const y = wrapText(x, recapHeadline(r), 80, 1112, W - 160, 48);
+  const extras = [];
+  if (r.streak) extras.push(`🔥 ${r.streak}-week streak`);
+  if (r.rival) extras.push(`⚔️ ${r.rival.mine > r.rival.theirs ? "beat" : r.rival.mine < r.rival.theirs ? "lost to" : "tied"} ${r.rival.p.name} ${fmt(r.rival.mine)}–${fmt(r.rival.theirs)}`);
+  if (spin) extras.push(`🎡 ${spin.loser}'s forfeit: ${spin.forfeit}`);
+  else if (r.winner && r.of > 1) extras.push(`🏆 ${r.winner.name} won the week`);
+  x.font = font(600, 31); x.globalAlpha = 0.92;
+  wrapText(x, extras.join("   ·   "), 80, y + 58, W - 160, 42);
+  x.globalAlpha = 0.7; x.font = font(600, 26); x.fillText(APP_URL.replace(/^https?:\/\//, "").replace(/\/$/, ""), 80, H - 40);
+  x.globalAlpha = 1;
+  return c;
+}
+
+function wrapText(x, str, X, Y, maxW, lh) {
+  const words = str.split(" ");
+  let line = "";
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (x.measureText(test).width > maxW && line) { x.fillText(line, X, Y); Y += lh; line = w; } else line = test;
+  }
+  if (line) x.fillText(line, X, Y);
+  return Y; // baseline of the last line drawn
+}
+
+async function recapSheet(which = "auto") {
+  const t = today(), thisWs = weekStart(t);
+  const dow = parseDay(t).getDay();
+  const ws = which === "last" || (which === "auto" && (dow === 1 || dow === 2)) ? addDays(thisWs, -7) : thisWs;
+  const B = cur();
+  const E = B && B.E.byId.has(S.me.id) ? B.E : S.mine;
+  const r = recapData(E, S.me.id, ws);
+  const spinRow = B?.data?.spins && spinFor(B, ws);
+  const spin = spinRow && { loser: E.byId.get(spinRow.loser_id)?.name || "Last place", forfeit: spinRow.forfeit };
+  const groupName = boardName(S.boardKey);
+  openSheet(`${sheetHead("Your week")}
+    <div class="seg two" role="group" aria-label="Week"><button data-recap="this" aria-pressed="${ws === thisWs}">This week</button><button data-recap="last" aria-pressed="${ws !== thisWs}">Last week</button></div>
+    <div class="recap-frame"><div class="empty"><span class="e">🖼️</span>Drawing your card…</div></div>
+    <p class="small muted" style="text-align:center">${esc(recapHeadline(r))}</p>
+    <div class="btn-row"><button class="btn" data-act="share-recap">${ICON.share} Share image</button><button class="btn ghost" data-act="share-recap-text">Share as text</button></div>`);
+  const canvas = await drawRecap(r, groupName, spin);
+  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  S.recap = { blob, text: `⚡ My Effort week: ${fmt(r.form)} pts${r.of > 1 ? `, #${r.rank} of ${r.of} in ${groupName}` : ""}. ${recapHeadline(r)}${r.streak ? ` 🔥 ${r.streak}-week streak.` : ""}` };
+  const frame = $(".recap-frame");
+  if (frame) {
+    const img = new Image();
+    img.src = URL.createObjectURL(blob);
+    img.alt = `Recap card: ${S.recap.text}`;
+    frame.innerHTML = "";
+    frame.append(img);
+  }
+}
+
+async function shareRecapImage() {
+  if (!S.recap?.blob) return;
+  const file = new File([S.recap.blob], "effort-week.png", { type: "image/png" });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], text: S.recap.text }); return; } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(S.recap.blob);
+  a.download = "effort-week.png";
+  document.body.append(a); a.click(); a.remove();
+  toast("Image saved. Share it from your photos or downloads.");
+}
+
+function recapCard() {
+  const dow = new Date().getDay();
+  if (![0, 1, 2].includes(dow)) return "";
+  return `<section class="card recap-teaser row" data-act="open-recap" style="cursor:pointer;gap:12px"><span style="font-size:30px">📊</span><div class="grow"><b>${dow === 0 ? "Your week so far" : "Last week in review"}</b><br><span class="small muted">A shareable card for the group chat</span></div>${ICON.chev}</section>`;
 }
 
 // ---------- flows ----------
@@ -746,12 +1022,15 @@ async function lookupInvite(code) {
 
 // ---------- events ----------
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("button, [data-profile], [data-tab], [data-act], a");
+  const t = e.target.closest("button, [data-profile], [data-tab], [data-act], [data-wheel], a");
   if (!t) { if (e.target.id === "sheet") { closeSheet(); render(); } return; }
   const d = t.dataset;
   if (d.copy) return copy(d.copy, d.label || "Copied");
   if (d.tab && t.tagName !== "A") { closeSheet(); S.tab = d.tab; store.set("tab", S.tab); render(); scrollTo(0, 0); return; }
   if (d.mode) { S.mode = d.mode; store.set("mode", S.mode); render(); return; }
+  if (d.wheel) return wheelSheet(d.wheel);
+  if (d.recap) return recapSheet(d.recap);
+  if (d.suggest) return addForfeit(d.suggest);
   if (d.board) {
     S.boardKey = d.board; store.set("board", S.boardKey);
     if (!S.boards[d.board]) { render(); try { await loadBoard(d.board); } catch (err) { toast(err.message); } }
@@ -796,6 +1075,31 @@ document.addEventListener("click", async (e) => {
     case "share-standings": share(standingsText()); break;
     case "edit-profile": editProfileSheet(); break;
     case "group-menu": case "create-group": case "join-code": groupMenuSheet(); break;
+    case "edit-wheel": editWheelSheet(); break;
+    case "open-recap": recapSheet(); break;
+    case "share-recap": shareRecapImage(); break;
+    case "share-recap-text": if (S.recap) share(S.recap.text, APP_URL); break;
+    case "replay-spin": {
+      const B = cur(), spin = spinFor(B, d.ws);
+      if (spin) { $("#wheel-result").classList.remove("show"); $("#wheel-result").innerHTML = ""; showWheelResult(spin, B.E.byId.get(spin.loser_id), false); }
+      break;
+    }
+    case "spin": {
+      t.disabled = true;
+      const code = S.boardKey.slice(2);
+      try {
+        const r = await call("spin", { token: S.token, code, week_start: d.ws, loser_id: d.loser || null });
+        const B = cur();
+        B.data.spins = [r.spin, ...(B.data.spins || []).filter((x) => x.week_start !== r.spin.week_start)];
+        if (r.already) toast("Someone already spun this week. Here's how it landed.");
+        // Redraw with the slices the server actually used, then animate to the result.
+        const wheel = $("#wheel");
+        if (wheel) wheel.innerHTML = wheelSvg(r.spin.slices);
+        t.remove();
+        showWheelResult(r.spin, B.E.byId.get(r.spin.loser_id), false);
+      } catch (err) { toast(err.message); t.disabled = false; }
+      break;
+    }
     case "restore": copy(`${APP_URL}?me=${S.token}`, "Restore link copied. Keep it private."); break;
     case "sign-out": if (confirm("Sign out on this phone? Copy your restore link first if you want to come back.")) signOut(); break;
     case "toggle-public": {
@@ -893,8 +1197,10 @@ document.addEventListener("submit", async (e) => {
       closeSheet();
       await refresh();
       toast("Saved");
+    } else if (kind === "add-forfeit") {
+      await addForfeit(f.text);
     } else if (kind === "admin") {
-      const settings = { ...f, teams: f.teams.split(",").map((s) => s.trim()).filter(Boolean) };
+      const settings = { ...f, teams: f.teams.split(",").map((s) => s.trim()).filter(Boolean), forfeits: f.forfeits.split("\n").map((s) => s.trim()).filter(Boolean) };
       delete settings.journey;
       const code = S.boardKey.slice(2);
       await call("admin", { code, admin_key: S.adminKeys[code], settings });
