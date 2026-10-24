@@ -1,6 +1,6 @@
 // Network first so updates show up straight away; cached shell only when offline.
-const CACHE = "step-squad-v1";
-const SHELL = ["./", "index.html", "styles.css", "app.js", "icon.svg", "manifest.webmanifest"];
+const CACHE = "effort-v2";
+const SHELL = ["./", "index.html", "styles.css", "engine.js", "app.js", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

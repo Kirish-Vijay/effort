@@ -1,7 +1,7 @@
 {
-  "name": "Step Squad",
-  "short_name": "Step Squad",
-  "description": "Group step leaderboard that syncs from iPhone and Android.",
+  "name": "Effort",
+  "short_name": "Effort",
+  "description": "Walk more, scroll less. A step and screen-time game for friends.",
   "display": "standalone",
   "background_color": "#0f0d1c",
   "theme_color": "#6d5efc",
