@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Effort Setup Guide</title>
+  <meta name="description" content="How to get Effort on your phone or laptop, connect your steps and play.">
+  <meta name="theme-color" content="#eceee4">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;600;700;800&family=Caveat:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #eceee4; --card: #fbfbf6; --card-2: #e2e7da; --ink: #1f2a24; --muted: #5b6a5f; --edge: #1f2a24; --soft: #cdd4c6;
+      --orange: #f2611d; --sun: #f5c542; --fern: #2f7d4f; --sky: #74b6e0; --rose: #d9483b;
+      --pop: 3px 4px 0 var(--edge);
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --paper: #141a16; --card: #1d2520; --card-2: #27312a; --ink: #edf1e7; --muted: #a3b0a6; --edge: #0a0d0b; --soft: #34403a;
+        --orange: #ff7a3d; --fern: #5fbf83; --pop: 3px 4px 0 #050706; color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --paper: #141a16; --card: #1d2520; --card-2: #27312a; --ink: #edf1e7; --muted: #a3b0a6; --edge: #0a0d0b; --soft: #34403a;
+      --orange: #ff7a3d; --fern: #5fbf83; --pop: 3px 4px 0 #050706; color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.4 "Figtree", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; }
+    .page { max-width: 560px; margin: 0 auto; padding: 22px 16px 28px; }
+    h1, h2, h3 { font-family: "Bricolage Grotesque", system-ui, sans-serif; letter-spacing: -.02em; margin: 0; }
+
+    .hero { display: grid; grid-template-columns: 92px 1fr; gap: 12px; align-items: center; margin-bottom: 18px; }
+    .hero .walker svg { width: 92px; height: auto; display: block; }
+    .hero h1 { font-size: 46px; line-height: .9; font-weight: 800; }
+    .hero .tag { font: 700 26px/1 "Caveat", cursive; color: var(--orange); transform: rotate(-2deg); display: inline-block; margin-top: 4px; }
+    .url { display: inline-block; margin-top: 8px; background: var(--ink); color: var(--paper); border-radius: 999px; padding: 5px 12px; font-weight: 800; font-size: 13.5px; text-decoration: none; }
+
+    .sec { background: var(--card); border: 2px solid var(--edge); border-radius: 18px; box-shadow: var(--pop); padding: 14px; margin-bottom: 16px; }
+    .sec-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .n { width: 32px; height: 32px; flex: none; border-radius: 50%; border: 2px solid var(--edge); background: var(--sun); color: #1b1a0c; display: grid; place-items: center; font: 800 17px/1 "Bricolage Grotesque", sans-serif; }
+    .sec-h h2 { font-size: 21px; font-weight: 800; }
+    .sec-h .time { margin-left: auto; font-size: 12.5px; font-weight: 800; color: var(--muted); white-space: nowrap; }
+
+    .plat { display: grid; grid-template-columns: 78px 1fr; gap: 10px; padding: 9px 0; border-top: 2px dashed var(--soft); align-items: start; }
+    .plat:first-of-type { border-top: 0; padding-top: 0; }
+    .who { font: 800 13px/1.15 "Bricolage Grotesque", sans-serif; padding: 6px 4px; border: 2px solid var(--edge); border-radius: 10px; text-align: center; background: var(--card-2); }
+    .who .e { display: block; font-size: 20px; margin-bottom: 2px; }
+    .who.ios { background: color-mix(in srgb, var(--sky) 30%, var(--card)); }
+    .who.and { background: color-mix(in srgb, var(--fern) 25%, var(--card)); }
+    .who.lap { background: color-mix(in srgb, var(--sun) 35%, var(--card)); }
+    .who.any { background: var(--card-2); }
+    .do { font-size: 14.5px; }
+    .do b { font-weight: 800; }
+    .do .sub { display: block; color: var(--muted); font-size: 13px; margin-top: 3px; }
+
+    .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 2px 0 4px; }
+    .chip { border: 2px solid var(--edge); border-radius: 9px; padding: 3px 8px; font-weight: 800; font-size: 13px; background: var(--card); white-space: nowrap; }
+    .chip.me { background: var(--orange); color: #1b120c; }
+    .arr { font-weight: 800; color: var(--muted); }
+
+    .note { margin-top: 10px; background: color-mix(in srgb, var(--sun) 28%, var(--card)); border: 2px dashed var(--edge); border-radius: 12px; padding: 8px 10px; font-size: 13.5px; }
+
+    .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .tile { border: 2px solid var(--edge); border-radius: 14px; padding: 10px; background: var(--card); }
+    .tile .e { font-size: 24px; display: block; }
+    .tile h3 { font-size: 16px; margin: 3px 0 2px; }
+    .tile p { margin: 0; font-size: 13px; color: var(--muted); }
+    .tile.good { background: color-mix(in srgb, var(--fern) 16%, var(--card)); }
+    .tile.bad { background: color-mix(in srgb, var(--rose) 14%, var(--card)); }
+    .tile.night { background: color-mix(in srgb, var(--sky) 20%, var(--card)); }
+    .tile.sun { background: color-mix(in srgb, var(--sun) 30%, var(--card)); }
+
+    .foot { display: flex; gap: 10px; align-items: center; font-size: 13.5px; padding: 10px 12px; border: 2px solid var(--edge); border-radius: 14px; background: var(--card-2); }
+    .foot .e { font-size: 22px; }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="2.2"/></filter></svg>
+  <main class="page">
+    <header class="hero">
+      <div class="walker" id="walker" aria-hidden="true"></div>
+      <div>
+        <h1>Effort</h1>
+        <span class="tag">walk more, scroll less</span><br>
+        <a class="url" href="https://kirish-vijay.github.io/effort/">kirish-vijay.github.io/effort</a>
+      </div>
+    </header>
+
+    <section class="sec">
+      <div class="sec-h"><span class="n">1</span><h2>Get it</h2><span class="time">2 min</span></div>
+      <div class="plat"><div class="who ios"><span class="e">📱</span>iPhone</div>
+        <div class="do">Open my invite link in <b>Safari</b> → answer 12 questions → <b>Share ⬆</b> → <b>Add to Home Screen</b>.</div></div>
+      <div class="plat"><div class="who and"><span class="e">🤖</span>Android</div>
+        <div class="do">Open my invite link in <b>Chrome</b> → answer 12 questions → <b>⋮</b> → <b>Add to Home screen</b>.</div></div>
+      <div class="plat"><div class="who lap"><span class="e">💻</span>Laptop</div>
+        <div class="do">On your phone: <b>Me → Copy restore link</b>, open it on the laptop.
+          <span class="sub">Good for the board and the Hunt. Laptops can't count steps.</span></div></div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-h"><span class="n">2</span><h2>Connect your steps</h2><span class="time">once, 3 min</span></div>
+      <div class="plat"><div class="who ios"><span class="e">❤️</span>iPhone</div>
+        <div class="do">
+          <div class="flow"><span class="chip">Apple Health</span><span class="arr">→</span><span class="chip">Shortcuts app</span><span class="arr">→</span><span class="chip me">Effort</span></div>
+          Build one Shortcut + a daily automation.
+          <span class="sub">Syncs at 1pm, 6pm and 11:45pm by itself.</span></div></div>
+      <div class="plat"><div class="who and"><span class="e">💚</span>Android</div>
+        <div class="do">
+          <div class="flow"><span class="chip">Google Fit / Samsung Health / Fitbit</span><span class="arr">→</span><span class="chip">Health Connect</span><span class="arr">→</span><span class="chip">HC Webhook</span><span class="arr">→</span><span class="chip me">Effort</span></div>
+          Install <a href="https://play.google.com/store/apps/details?id=com.hcwebhook.app"><b>HC Webhook</b></a> (free) → allow <b>Steps</b> → paste your link.
+          <span class="sub">Syncs every hour. Set its battery to Unrestricted.</span></div></div>
+      <div class="plat"><div class="who any"><span class="e">✍️</span>No setup</div>
+        <div class="do">Type steps in the <b>Log</b> tab. <span class="sub">Works, but counts half in the public league.</span></div></div>
+      <div class="note">The app walks you through it with <b>your own links already filled in</b>. Just copy and paste.</div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-h"><span class="n">3</span><h2>Track scrolling</h2><span class="time">optional, 3 min</span></div>
+      <div class="plat"><div class="who ios"><span class="e">📱</span>iPhone</div>
+        <div class="do">Shortcuts → <b>Automation</b>: when TikTok / Instagram / YouTube <b>opens</b> and <b>closes</b>, ping Effort.</div></div>
+      <div class="plat"><div class="who and"><span class="e">🤖</span>Android</div>
+        <div class="do">Same idea with <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid"><b>MacroDroid</b></a> (free): 2 macros.</div></div>
+      <div class="plat"><div class="who any"><span class="e">✍️</span>No setup</div>
+        <div class="do">Type your Screen Time / Digital Wellbeing minutes in <b>Log</b>. <span class="sub">Skip it and you're assumed 30 min a day.</span></div></div>
+    </section>
+
+    <section class="sec">
+      <div class="sec-h"><span class="n">4</span><h2>Play</h2><span class="time">every day</span></div>
+      <div class="tiles">
+        <div class="tile good"><span class="e">🚶</span><h3>Walk</h3><p>Every 100 steps = 1 point. Beat your own average 4 days a week to keep your streak.</p></div>
+        <div class="tile bad"><span class="e">📵</span><h3>Don't doomscroll</h3><p>Every 1,000 steps buys 5 min of Reels. Go over and you lose points. Stay under for a bonus.</p></div>
+        <div class="tile night"><span class="e">🌙</span><h3>The Hunt · 6pm</h3><p>One tap-fight a night, 2–15 min. Steps make you stronger. Scrolling sends more enemies.</p></div>
+        <div class="tile sun"><span class="e">🎡</span><h3>Sunday</h3><p>Weekly recap. Last place spins the forfeit wheel.</p></div>
+      </div>
+    </section>
+
+    <div class="foot"><span class="e">🔑</span><div><b>New phone?</b> Me → <b>Copy restore link</b> and keep it somewhere safe. It logs you back in. Don't share it.</div></div>
+  </main>
+  <script src="character.js"></script>
+  <script>
+    const theme = new URLSearchParams(location.search).get("theme");
+    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    try { document.getElementById("walker").innerHTML = Walker.svg(Walker.fallbackAnswers("guide-7"), { mood: "fresh", label: "A walker" }); } catch { /* the guide reads fine without it */ }
+  </script>
+</body>
+</html>
