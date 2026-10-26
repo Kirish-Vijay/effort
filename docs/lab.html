@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Effort Lab</title>
+  <meta name="description" content="Test the new Effort game: the 7pm Taxman, the Sunday raid, gear and stats.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#eceee4">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;600;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .lab-flag { display: inline-block; font: 800 11px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; background: var(--sun); color: #1b1a0c; border: 2px solid var(--edge); border-radius: 999px; padding: 4px 8px; }
+    .wallet { text-align: right; font-weight: 800; font-size: 14px; line-height: 1.2; }
+    .wallet small { display: block; font-weight: 600; color: var(--muted); font-size: 12px; }
+    input[type=range] { width: 100%; accent-color: var(--orange); }
+    .slider-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; margin-bottom: 12px; }
+    .slider-row label { font-weight: 700; font-size: 14px; }
+    .slider-row output { font: 800 18px/1 var(--display); font-variant-numeric: tabular-nums; }
+    .slider-row input { grid-column: 1 / -1; }
+    .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 4px 0 12px; }
+    .fact { background: var(--card-2); border-radius: 12px; padding: 8px 10px; }
+    .fact b { display: block; font: 800 20px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+    .fact span { font-size: 12.5px; color: var(--muted); }
+    .fact.bad b { color: var(--bad); }
+    .fact.good b { color: var(--good); }
+    .stat-row { display: grid; grid-template-columns: 92px 1fr 34px; gap: 8px; align-items: center; margin: 6px 0; font-size: 14px; }
+    .stat-bar { height: 12px; border: 2px solid var(--edge); border-radius: 99px; background: var(--card-2); overflow: hidden; display: flex; }
+    .stat-bar i { display: block; height: 100%; background: var(--orange); }
+    .stat-bar i.gear { background: var(--sun); }
+    .stat-row .v { font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+    .me-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+    .me-head .av { width: 64px; height: 64px; flex: none; }
+    .me-head .av svg { width: 100%; height: 100%; }
+    .shop-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 2px dashed var(--soft); }
+    .shop-row:first-of-type { border-top: 0; }
+    .shop-row .e { font-size: 26px; text-align: center; }
+    .knob { display: grid; grid-template-columns: 1fr 96px; gap: 10px; align-items: center; padding: 8px 0; border-top: 2px dashed var(--soft); font-size: 14px; }
+    .knob input { padding: 8px 10px; font-size: 15px; text-align: right; }
+    .knob small { display: block; color: var(--muted); font-size: 12px; }
+    .knob.changed b { color: var(--orange); }
+    .rules li { margin-bottom: 6px; }
+    .hist { font-size: 13.5px; }
+    .hist .list-row { cursor: default; padding: 10px 14px; }
+
+    /* ---------- Battle screens ---------- */
+    .arena { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--paper); z-index: 5; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+    .arena-top { padding: calc(env(safe-area-inset-top) + 10px) 14px 6px; display: grid; gap: 6px; }
+    .arena-top .row { gap: 8px; }
+    .clock { font: 800 22px/1 var(--display); font-variant-numeric: tabular-nums; }
+    .hpbar { height: 16px; border: 2px solid var(--edge); border-radius: 99px; background: var(--card); overflow: hidden; position: relative; }
+    .hpbar i { position: absolute; inset: 0 auto 0 0; background: var(--rose); transition: width .12s linear; }
+    .hpbar.tax i { background: var(--fern); }
+    .hpbar.steal i { background: var(--sun); }
+    .hpbar span { position: relative; display: block; text-align: center; font: 800 11px/12px var(--body); color: var(--ink); }
+    .tapzone { flex: 1; position: relative; overflow: hidden; display: grid; place-items: center; touch-action: none; cursor: pointer; }
+    .monster { width: min(62vw, 260px); transition: transform .06s; pointer-events: none; }
+    .monster svg { width: 100%; height: auto; display: block; }
+    .monster.hit { transform: scale(.94) rotate(-2deg); }
+    .pop { position: absolute; pointer-events: none; font: 800 22px/1 var(--display); color: var(--ink); animation: pop .7s ease-out forwards; text-shadow: 0 2px 0 var(--card); }
+    .pop.crit { color: var(--orange); font-size: 30px; }
+    @keyframes pop { to { transform: translateY(-60px); opacity: 0; } }
+    .combo { position: absolute; top: 12px; right: 14px; font: 800 18px/1 var(--display); color: var(--orange); }
+    .tap-hint { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; font: 700 22px/1 var(--hand); color: var(--muted); pointer-events: none; }
+    .arena-bottom { padding: 8px 14px calc(env(safe-area-inset-bottom) + 12px); display: grid; gap: 8px; }
+
+    .raid-boss { display: flex; gap: 10px; align-items: center; }
+    .raid-boss .monster { width: 86px; flex: none; }
+    .warnbar { min-height: 44px; border: 2px solid var(--edge); border-radius: 12px; padding: 6px 10px; font-size: 13.5px; font-weight: 700; background: var(--card); display: flex; align-items: center; gap: 8px; }
+    .warnbar.hot { background: color-mix(in srgb, var(--rose) 22%, var(--card)); }
+    .warnbar.feast { background: color-mix(in srgb, var(--sun) 40%, var(--card)); }
+    .lanes { display: grid; gap: 6px; padding: 0 14px; }
+    .lane { display: grid; grid-template-columns: 58px 1fr; gap: 8px; align-items: center; border: 2px dashed var(--soft); border-radius: 12px; padding: 5px 8px; min-height: 52px; }
+    .lane > b { font: 800 12px/1.1 var(--display); text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+    .lane .ppl { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ppl .m { display: grid; grid-template-columns: 26px 1fr; gap: 4px; align-items: center; width: 96px; background: var(--card); border: 2px solid var(--edge); border-radius: 10px; padding: 3px 5px; font-size: 11.5px; font-weight: 700; line-height: 1.1; position: relative; }
+    .ppl .m .av svg { width: 26px; height: 26px; display: block; }
+    .ppl .m.me { background: color-mix(in srgb, var(--orange) 22%, var(--card)); }
+    .ppl .m.dead { opacity: .45; filter: grayscale(1); }
+    .ppl .m .hp { height: 5px; border-radius: 9px; background: var(--card-2); overflow: hidden; margin-top: 2px; }
+    .ppl .m .hp i { display: block; height: 100%; background: var(--fern); }
+    .ppl .m .st { position: absolute; top: -7px; right: -6px; font-size: 13px; }
+    .ppl .m.flash { animation: flash .35s; }
+    @keyframes flash { 50% { background: var(--rose); } }
+    .arena-bottom.grow-tap { flex: 1; display: flex; flex-direction: column; }
+    .arena-bottom.grow-tap .raid-tap { flex: 1; }
+    .raid-tap { min-height: 120px; border: 2px solid var(--edge); border-radius: 18px; background: var(--card); box-shadow: var(--pop); }
+    .raid-tap.locked { opacity: .5; }
+    .raid-tap .tap-hint { bottom: auto; top: 50%; transform: translateY(-50%); }
+    .ctrl { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 6px; }
+    .ctrl .btn { min-height: 46px; padding: 6px; font-size: 13px; }
+    .ctrl .btn[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+    .ability { position: relative; overflow: hidden; }
+    .ability i { position: absolute; inset: 0 auto 0 0; background: rgba(0,0,0,.18); pointer-events: none; }
+    .log { font-size: 12px; color: var(--muted); height: 32px; overflow: hidden; line-height: 16px; }
+    .log .bad { color: var(--bad); } .log .good { color: var(--good); } .log .warn { color: var(--warn); }
+    /* Sits over the tap area so the boss bar, warnings and rows stay visible while the squad answers. */
+    .trivia { position: fixed; left: 10px; right: 10px; bottom: calc(env(safe-area-inset-bottom) + 72px); z-index: 8; background: var(--card); border: 2px solid var(--edge); border-radius: 18px; box-shadow: var(--pop); padding: 12px; max-width: 540px; margin: 0 auto; }
+    .trivia h3 { margin: 0 0 8px; font-size: 18px; }
+    .trivia .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .trivia .opts button { border: 2px solid var(--edge); border-radius: 12px; background: var(--card); padding: 10px 6px; font-weight: 800; font-size: 15px; cursor: pointer; color: var(--ink); }
+    .trivia .opts button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+    .trivia .opts button.struck { text-decoration: line-through; opacity: .35; }
+    .trivia .meta { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+    .stunned { position: fixed; inset: 0; z-index: 7; display: grid; place-items: center; background: rgba(30, 40, 90, .35); pointer-events: none; font: 800 30px/1.1 var(--display); color: #fff; text-align: center; text-shadow: 0 2px 0 #000; }
+    .end-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    .end-table th, .end-table td { padding: 6px 4px; text-align: right; border-bottom: 2px dashed var(--soft); font-variant-numeric: tabular-nums; }
+    .end-table th:first-child, .end-table td:first-child { text-align: left; }
+    .end-table tr.me td { font-weight: 800; }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="2.2"/></filter></svg>
+  <main id="app" aria-live="polite"></main>
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="character.js" defer></script>
+  <script src="game.js" defer></script>
+  <script src="lab.js" defer></script>
+</body>
+</html>

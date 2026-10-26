@@ -1492,9 +1492,27 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#she
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.view === "main") refresh(true); });
 setInterval(() => { if (!document.hidden && S.view === "main" && $("#sheet").hidden) refresh(true); }, 90000);
 
+// ---------- updates ----------
+// Every deploy changes app.js's ETag. Home-screen apps can sit open for days, so check when the app
+// comes back to the front and every few minutes, and reload into the new version when nothing's in progress.
+let releaseTag = null;
+async function checkForUpdate() {
+  if (location.protocol !== "https:") return;
+  try {
+    const res = await fetch("app.js", { method: "HEAD", cache: "no-store" });
+    const tag = res.headers.get("etag") || res.headers.get("last-modified");
+    if (!tag) return;
+    if (!releaseTag) { releaseTag = tag; return; }
+    if (tag !== releaseTag && S.view === "main" && $("#sheet").hidden) location.reload();
+  } catch { /* offline: try again later */ }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
+setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
+
 // ---------- boot ----------
 (async function boot() {
   if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  checkForUpdate();
   render();
   const params = new URLSearchParams(location.search);
   const restore = params.get("me");
