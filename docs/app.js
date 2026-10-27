@@ -8,11 +8,23 @@ const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
 const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
 const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
 const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push";
-// Effort Steps, the small Android app that reads steps from Health Connect (android/ in the repo).
+// On Android in a browser: the Effort app does steps, scrolling and the 6:45pm ping with a tap each.
+function androidApp(t) {
+  return `<p class="small" style="margin-top:0">The Effort app does it all: steps and scrolling with one tap each, and the 6:45pm ping.</p>
+    <a class="btn gold block" href="${STEPS_APK}">${ic("phone")} 1. Get the Effort app</a>
+    <p class="tiny faint" style="margin:6px 2px 12px">Free, under 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
+    <a class="btn green block" href="${stepsAppLink(t)}">${ic("arrowRight")} 2. Open Effort in the app</a>
+    <p class="tiny faint" style="margin:6px 2px 0">Signs you in there. Then use the app instead of Chrome.</p>`;
+}
+
+// Effort, the Android app that reads steps from Health Connect (android/ in the repo).
 // effort://connect?t=TOKEN opens it signed in; as a Chrome intent link it downloads the app instead
 // if it isn't installed yet.
 const STEPS_APK = "https://github.com/Kirish-Vijay/effort/releases/latest/download/effort-steps.apk";
 const stepsAppLink = (token) => `intent://connect?t=${token}#Intent;scheme=effort;package=io.github.kirishvijay.effort;S.browser_fallback_url=${encodeURIComponent(STEPS_APK)};end`;
+// Inside the Android app the game can ask for steps, usage access and reminders itself (android/MainActivity.kt).
+const NATIVE = window.EffortAndroid || null;
+const nativeStatus = () => { try { return JSON.parse(NATIVE.status()); } catch { return {}; } };
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
@@ -106,6 +118,24 @@ const S = {
   view: "boot", tab: store.get("tab") || "today", token: store.get("token"), D: null, skew: 0,
   answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null, retake: false,
   setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false, push: "unknown",
+  native: NATIVE ? nativeStatus() : null, sheetKind: null,
+};
+// The app reports what's connected (and each sync); redraw whatever's showing, and pull new numbers after a sync.
+window.onEffortNative = (st) => {
+  const synced = st.syncedAt && st.syncedAt !== S.native?.syncedAt;
+  S.native = st;
+  if (!$("#sheet").hidden && S.sheetKind) setupSheet(S.sheetKind);
+  else if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+  if (synced && S.view === "main") refresh(true);
+};
+// The Android back button: close a sheet, step back through the quiz, or go back to Today; otherwise leave the app.
+window.effortBack = () => {
+  if (!$("#sheet").hidden) { closeSheet(); return true; }
+  if (["tax", "raid"].includes(S.view)) return true;
+  const back = $("[data-act=quiz-back]") || $("[data-act=back]");
+  if (back) { back.click(); return true; }
+  if (S.view === "main" && S.tab !== "today") { S.tab = "today"; render(); return true; }
+  return false;
 };
 const V = { tax: null, raid: null, result: null };
 // For poking at a live session from the browser console.
@@ -118,6 +148,7 @@ async function load() {
   S.skew = D.now - Date.now();
   S.D = D;
   ANS[D.me.id] = answersOf(D.me);
+  NATIVE?.setToken(S.token);
   for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
   return D;
 }
@@ -141,6 +172,7 @@ function signOut(msg) {
     currentSub().then((sub) => sub && callPush("unsubscribe", { token, endpoint: sub.endpoint })).catch(() => {});
   }
   store.del("token"); store.del("pushSynced");
+  NATIVE?.setToken("");
   Object.assign(S, { token: null, D: null, view: "welcome" });
   history.replaceState(null, "", APP_URL);
   closeSheet(); render();
@@ -246,6 +278,9 @@ async function keepPushAlive() {
   callPush("subscribe", { token: S.token, sub: sub.toJSON() }).then(() => store.set("pushSynced", S.D?.today.day || "")).catch(() => {});
 }
 function pushBlock() {
+  if (NATIVE) return S.native?.reminders
+    ? `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("bell")} Pings on</span><span class="row" style="gap:6px"><button class="btn xs" data-act="native-test">Send a test</button><button class="btn xs" data-act="native-reminders-off">Turn off</button></span></div>`
+    : `<button class="btn gold block" data-act="native-reminders-on">${ic("bell")} Ping me at 6:45pm</button>`;
   switch (S.push) {
     case "on": return `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("bell")} Pings on</span><span class="row" style="gap:6px"><button class="btn xs" data-act="push-test">Send a test</button><button class="btn xs" data-act="push-off">Turn off</button></span></div>`;
     case "install": return `<div class="guide small">On iPhone, notifications only work from the Home Screen app: tap <b>Share</b> → <b>Add to Home Screen</b>, open Effort from there, then turn them on.</div>`;
@@ -315,7 +350,9 @@ function noSquadPanel() {
 // ---------- Today ----------
 function syncChip() {
   const m = me(), fresh = m.steps_synced_at && Date.now() - Date.parse(m.steps_synced_at) < 3 * 3600000;
+  if (NATIVE && !S.native?.steps) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps not connected · connect</button>`;
   if (!m.steps_synced_at) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps aren't syncing · set up</button>`;
+  if (NATIVE) return `<span class="chip green">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span><button class="chip cyan" data-act="native-sync">${ic("refresh")} Sync now</button>`;
   return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : m.steps_source === "android-app" ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
 }
 function dayTiles() {
@@ -349,7 +386,7 @@ function taxHero() {
   } else if (st === "soon") {
     chip = `<span class="chip gold">${ic("clock")} Tonight · 7pm</span>`;
     line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Five minutes to knock him out.`;
-    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me at 6:45pm</button>` : ""}`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${NATIVE ? (S.native?.reminders ? "" : `<button class="btn xs block" style="margin-top:10px" data-act="native-reminders-on">${ic("bell")} Ping me at 6:45pm</button>`) : S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me at 6:45pm</button>` : ""}`;
   } else {
     chip = `<span class="chip red">${ic("warning")} Missed tonight</span>`;
     line = `No fight, so he takes the full ${Math.round(T.taxRate * 100)}% when today settles after midnight.`;
@@ -557,7 +594,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
-      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort Steps app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
+      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
       <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
     </section>
     <section class="panel">
@@ -604,10 +641,25 @@ function openSheet(html, { rc } = {}) {
   sh.hidden = false;
   hydratePortraits();
 }
-function closeSheet() { const sh = $("#sheet"); sh.hidden = true; sh.innerHTML = ""; }
+function closeSheet() { const sh = $("#sheet"); sh.hidden = true; sh.innerHTML = ""; S.sheetKind = null; }
 const sheetHead = (title) => `<div class="row spread" style="margin-bottom:12px"><h2 class="ol-sm disp" style="margin:0;font-size:22px">${title}</h2><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>`;
 
+// Inside the Android app: one button each, and the phone asks.
+function nativeSetup(kind) {
+  const st = S.native || {}, done = (text) => `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("check")} ${text}</span>`;
+  if (kind === "steps") {
+    if (st.health === "none") return `<div class="guide small">This phone doesn't have Health Connect, which is how Android shares steps. Type your steps in from <b>Me → Steps</b> instead.</div>`;
+    if (st.health === "update") return `<p class="small muted" style="margin:0 0 10px">Android shares steps through Google's Health Connect. Get it (free), then come back and allow steps.</p><button class="btn gold block" data-act="native-steps">${ic("steps")} Get Health Connect</button>`;
+    if (st.steps) return `${done(st.todaySteps >= 0 ? `Steps on · ${fmt(st.todaySteps)} today` : "Steps on")}<button class="btn xs" data-act="native-sync">${ic("refresh")} Sync now</button></div>
+      <p class="tiny faint" style="margin:8px 0 0">${st.syncedAt ? `Synced ${ago(new Date(st.syncedAt).toISOString())}. ` : ""}It syncs every 15 minutes by itself.${st.error ? ` <span style="color:var(--red)">${esc(st.error)}</span>` : ""}</p>`;
+    return `<button class="btn gold block" data-act="native-steps">${ic("steps")} Allow steps</button><p class="tiny faint" style="margin:6px 2px 0">Android asks once. Effort only reads your step count. Samsung Health? Also turn on <b>Settings → Health Connect</b> in Samsung Health.</p>`;
+  }
+  if (st.scroll) return `${done("Scroll tracking on")}</div><p class="tiny faint" style="margin:8px 0 0">Counts minutes in TikTok, Instagram, YouTube, Snapchat and Facebook.</p>`;
+  return `<button class="btn blue block" data-act="native-scroll">${ic("phone")} Allow scroll tracking</button><p class="tiny faint" style="margin:6px 2px 0">Android opens <b>Usage access</b>: tap <b>Effort</b>, switch it on, then come back. It only counts minutes in short-video apps.</p>`;
+}
+
 function setupBody(kind) {
+  if (NATIVE) return nativeSetup(kind);
   const p = S.setupPlatform || me()?.platform || S.platform, t = S.token;
   const toggle = `<div class="seg" style="margin-bottom:12px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Type it in"]].map(([v, l]) => `<button type="button" data-setup="${v}" data-kind="${kind}" aria-pressed="${v === p}">${l}</button>`).join("")}</div>`;
   const box = (url) => `<div class="copybox"><code>${esc(url)}</code><button class="btn xs" data-copy="${esc(url)}">${ic("copy")} Copy</button></div>`;
@@ -622,11 +674,7 @@ function setupBody(kind) {
         <li>In the <b>Automation</b> tab: <b>+</b> → <b>Time of Day</b> → <b>18:50</b>, <b>Daily</b>, <b>Run Immediately</b> → <b>Effort Steps</b>. That's your steps in before the Taxman.</li>
         <li>Make two more for <b>13:00</b> and <b>23:50</b>, so the squad table stays live and the whole day counts.</li>
       </ol>`;
-    else if (p === "android") body = `<p class="small" style="margin-top:0">Two taps, about a minute.</p>
-      <a class="btn gold block" href="${STEPS_APK}">${ic("phone")} 1. Get the Effort Steps app</a>
-      <p class="tiny faint" style="margin:6px 2px 12px">Free, under 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
-      <a class="btn green block" href="${stepsAppLink(t)}">${ic("steps")} 2. Connect steps</a>
-      <p class="tiny faint" style="margin:6px 2px 0">Opens the app signed in as you. Tap <b>Connect steps</b> and <b>Allow</b>, and it syncs every 15 minutes from then on. Samsung Health? Also turn on <b>Settings → Health Connect</b> in Samsung Health.</p>`;
+    else if (p === "android") body = androidApp(t);
     else body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
   } else {
     if (p === "ios") body = `<p class="small">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>
@@ -636,7 +684,7 @@ function setupBody(kind) {
         <li><b>New Blank Automation</b> → <b>Get Contents of URL</b>, paste:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
         <li>Make a second one the same way, ticking <b>Is Closed</b> and using:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
       </ol>`;
-    else if (p === "android") body = `<p class="small">Free with <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener"><b>MacroDroid</b></a>.</p>
+    else if (p === "android") body = `${androidApp(t)}<div class="divider"></div><p class="small">Or without the app, free with <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener"><b>MacroDroid</b></a>:</p>
       <ol class="steps-list">
         <li>New macro → Trigger <b>Applications → Application Launched/Closed</b> → <b>Launched</b> → pick TikTok, Instagram, YouTube.</li>
         <li>Action <b>Web Interactions → HTTP Request</b>, GET:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
@@ -648,9 +696,10 @@ function setupBody(kind) {
   return `${toggle}<div class="guide">${body}</div>`;
 }
 function setupSheet(kind) {
+  S.sheetKind = kind;
   openSheet(`${sheetHead(kind === "steps" ? "Sync your steps" : "Track your scrolling")}${setupBody(kind)}
-    <button class="btn green block" style="margin-top:12px" data-act="check-sync" data-kind="${kind}">${ic("refresh")} Check it worked</button>
-    <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0 0"></p>`);
+    ${NATIVE ? "" : `<button class="btn green block" style="margin-top:12px" data-act="check-sync" data-kind="${kind}">${ic("refresh")} Check it worked</button>
+    <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0 0"></p>`}`);
 }
 function logSheet(kind) {
   const days = [0, 1, 2, 3, 4, 5, 6].map((i) => { const d = new Date(Date.parse(S.D.today.day + "T12:00:00Z") - i * 86400000).toISOString().slice(0, 10); return [d, i === 0 ? "Today" : i === 1 ? "Yesterday" : new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long" })]; });
@@ -697,7 +746,7 @@ function viewWelcome() {
     </section>
     <button class="btn gold xl block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Make my walker"}</button>
     ${inv ? "" : `<form data-form="code" class="row" style="margin-top:12px"><input type="text" name="code" placeholder="Got a squad code?" autocomplete="off" maxlength="6" class="grow code"><button class="btn blue sm">Join</button></form>`}
-    <p class="small faint" style="text-align:center;margin-top:16px">Played on another phone? Open your restore link from the Me tab there.</p>
+    <p class="small faint" style="text-align:center;margin-top:16px">${NATIVE ? "Already playing in Chrome? Open Effort there and tap Me → Steps → Open Effort in the app." : "Played on another phone? Open your restore link from the Me tab there."}</p>
   </section>`;
 }
 const QUESTIONS = Walker.QUESTIONS;
@@ -754,7 +803,11 @@ function viewSetup() {
   const step = S.setupStep;
   $("#app").innerHTML = `<section class="onboard">
     <div class="dots"><i class="on"></i><i class="on"></i><i class="${step === "remind" ? "on" : ""}"></i></div>
-    ${step === "steps" ? `<h1 class="ol disp ob-title">Sync your steps</h1>
+    ${step === "steps" && NATIVE ? `<h1 class="ol disp ob-title">Connect your phone</h1>
+      <p class="muted">Two taps. Your steps and scrolling count by themselves from then on.</p>
+      <section class="panel"><span class="field-label">Steps</span>${nativeSetup("steps")}<span class="field-label">Scrolling (optional)</span>${nativeSetup("scroll")}</section>
+      <div class="btn-row" style="margin-top:12px"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
+    : step === "steps" ? `<h1 class="ol disp ob-title">Sync your steps</h1>
       <p class="muted">Set it up once and your steps flow in on their own. About three minutes.</p>
       ${setupBody("steps")}
       <button class="btn green block" style="margin-top:14px" data-act="check-sync" data-kind="steps">${ic("refresh")} Check it worked</button>
@@ -1539,6 +1592,12 @@ document.addEventListener("click", async (e) => {
   switch (d.act) {
     case "close-sheet": closeSheet(); break;
     case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
+    case "native-steps": NATIVE?.connectSteps(); break;
+    case "native-scroll": NATIVE?.connectScroll(); break;
+    case "native-reminders-on": NATIVE?.reminders(true); break;
+    case "native-reminders-off": NATIVE?.reminders(false); break;
+    case "native-test": NATIVE?.testReminder(); toast("Sent. Check your notifications"); break;
+    case "native-sync": NATIVE?.syncNow(); toast("Syncing…"); break;
     case "push-off": disablePush(); break;
     case "push-test": try { await callPush("test", { token: S.token }); toast("Sent. It should arrive in a few seconds"); } catch (err) { toast(err.message); } break;
     case "start": S.view = "quiz"; S.qi = 0; S.retake = false; render(); break;
