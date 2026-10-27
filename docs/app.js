@@ -55,7 +55,14 @@ const updateBanner = () => !S.appUpdate ? "" : `<section class="panel update">
     <div class="row"><span class="ic-badge">${ic("upgrade")}</span><div class="grow"><b class="disp">New version of the app</b><span class="small muted" style="display:block">Install it over this one. Your account and progress stay.</span></div></div>
     <div class="btn-row" style="margin-top:12px"><a class="btn gold sm" href="${STEPS_APK}">${ic("upgrade")} Update</a><button class="btn sm" data-act="app-update-later">Later</button></div>
   </section>`;
-const natOr = (fn, ...args) => nat(fn, ...args) || toast("Update the Effort app to use this: Me → Steps → Set up sync");
+// An older app without the feature: bring back the Update banner and point at it.
+const natOr = (fn, ...args) => {
+  if (nat(fn, ...args)) return;
+  closeSheet(); store.del("appUpdateLater"); store.del("appLatest");
+  checkAppUpdate();
+  scrollTo(0, 0);
+  toast("This needs the newest Effort app. Tap Update at the top");
+};
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
