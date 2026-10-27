@@ -14,7 +14,7 @@ const KEY = "ef_lab";
 const fresh = () => ({
   v: 2, answers: Walker.fallbackAnswers("lab-" + Math.floor(Math.random() * 1e9)), name: "You", fromApp: false,
   wallet: 1500, xp: 0, inv: {}, equipped: {}, steps: 9000, scroll: 25, debt: 0,
-  bots: 3, botGear: "some", raidMin: 15, pos: null, rules: {}, history: [], shopTab: "class",
+  bots: 3, botGear: "some", raidMin: 15, pos: null, rules: {}, history: [], shopTab: "class", tier: 1,
 });
 let L;
 try {
@@ -106,7 +106,7 @@ function render() {
 
 function dayLive() {
   const steps = effectiveSteps();
-  const S = G.taxmanSetup({ steps, scrollMin: L.scroll, stats: myStats(), equipped: L.equipped, inv: L.inv });
+  const S = G.taxmanSetup({ steps, scrollMin: L.scroll, stats: myStats(), equipped: L.equipped, inv: L.inv, level: level() });
   return `${L.debt ? `<div class="callout" style="border-color:var(--bad)"><b>Paralysed:</b> ${fmt(L.debt)} steps knocked off today from Sunday's failed trivia.</div>` : ""}
     <div class="facts">
       <div class="fact good"><b>${S.efforts}</b><span>Efforts earned today</span></div>
@@ -167,13 +167,23 @@ function botSquad() {
 }
 function tabSunday() {
   const st = myStats(), cls = myClass(), sug = G.suggestedPosition(st), pos = L.pos || sug;
-  const preview = G.raidCreate(botSquad(), { minutes: L.raidMin, seed: 1 });
+  const preview = G.raidCreate(botSquad(), { minutes: L.raidMin, seed: 1, tier: L.tier });
+  const boss = preview.boss;
   return `<section class="card">
       <h2>${cls.e} ${esc(cls.name)}</h2>
       <p class="small muted" style="margin-top:-4px">${esc(cls.blurb)} Your class is your top two stats, and it picks which gear you can buy.</p>
       ${statBars(st)}
       <p class="small muted" style="margin:8px 0">Best in the <b>${G.posOf(sug).label.toLowerCase()}</b> row. Yellow is gear. ${L.fromApp ? "Your walker from the app." : "Random test walker."}</p>
       <div class="btn-row"><button class="btn sm ghost" data-act="reroll">New random walker</button><button class="btn sm ghost" data-act="use-mine">Use my walker</button></div>
+    </section>
+    <section class="card">
+      <div class="row spread"><h2 style="margin:0">The ladder</h2><span class="small muted">Lap ${boss.lap}</span></div>
+      <p class="small muted" style="margin:4px 0 10px">Beat this Sunday's boss and next week you face the next one. After the last, it loops twice as tough (and twice as rich).</p>
+      <div class="ladder">${G.BOSSES.map((b, i) => {
+        const t = (boss.lap - 1) * G.BOSSES.length + i + 1, state = t < L.tier ? "beaten" : t === L.tier ? "next" : "locked";
+        return `<div class="rung ${state}"><span class="n">${i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small></span><span class="tag">${state === "beaten" ? "✓" : state === "next" ? "THIS SUNDAY" : "🔒"}</span></div>`;
+      }).join("")}</div>
+      <div class="btn-row" style="margin-top:10px"><button class="btn sm ghost" data-act="tier-down" ${L.tier <= 1 ? "disabled" : ""}>◀ Easier (test)</button><button class="btn sm ghost" data-act="tier-up">Harder (test) ▶</button></div>
     </section>
     <section class="card">
       <h2>Squad</h2>
@@ -186,9 +196,9 @@ function tabSunday() {
       <label class="field"><span>Raid length (shorter = smaller boss)</span></label>
       <div class="seg three">${[15, 5, 2].map((k) => `<button data-raidmin="${k}" aria-pressed="${k === L.raidMin}">${k} min</button>`).join("")}</div>
       <div class="facts">
-        <div class="fact"><b>Lv ${preview.lvl}</b><span>boss level (from squad gear)</span></div>
-        <div class="fact"><b>${fmt(preview.boss.max)}</b><span>boss health</span></div>
-        <div class="fact good"><b>${esc(G.money(G.RULES.raidRewardPerMember * preview.members.length * preview.lvl))}</b><span>reward pool if you win</span></div>
+        <div class="fact"><b>${esc(boss.name)}</b><span>boss ${boss.tier}${boss.lap > 1 ? ` (lap ${boss.lap})` : ""}</span></div>
+        <div class="fact"><b>${fmt(boss.max)}</b><span>health · level ${preview.lvl} from squad gear</span></div>
+        <div class="fact good"><b>${esc(G.money(G.RULES.raidRewardPerMember * preview.members.length * preview.lvl ** G.RULES.raidRewardCurve * boss.reward))}</b><span>reward pool if you win</span></div>
         <div class="fact"><b>${preview.members.length}</b><span>in the squad</span></div>
       </div>
       <button class="btn block big-cta" data-act="raid">🐉 Start the raid</button>
@@ -196,11 +206,11 @@ function tabSunday() {
     <section class="card">
       <h2>How Sunday works</h2>
       <ul class="rules small" style="padding-left:18px;margin:0">
-        <li>7pm Sunday, ${G.RULES.raidMin} minutes, whole squad vs <b>${G.BOSS.name}</b>. Tap it.</li>
+        <li>7pm Sunday, ${G.RULES.raidMin} minutes, whole squad vs this week's boss. Tap it.</li>
         <li><b>Rows.</b> ${G.POSITIONS.map((p) => `${p.e} ${p.label}: ×${p.mult} damage, ${p.aggro}% of swipes, <i>${p.ability}</i>`).join(". ")}. Moving rows takes a few seconds.</li>
         <li><b>Attacks</b> are warned ahead: ${Object.values(G.ATTACKS).map((a) => `${a.e} ${a.label} (${a.what})`).join(", ")}.</li>
-        <li>Better squad gear = tougher boss = bigger rewards.</li>
-        <li><b>Someone dies?</b> Krillion-style trivia: name one thing in ${G.RULES.triviaSeconds}s, three times. Majority of the squad needs a valid answer. Rare answers hit the boss. Fail ${G.RULES.triviaFailAt} and everyone is paralysed: stunned and ${fmt(G.RULES.paralysedSteps)} steps down tomorrow.</li>
+        <li>Better squad gear makes the boss tougher too, but the reward grows faster. Gear is how you climb the ladder.</li>
+        <li><b>Someone dies?</b> Everyone gets their own Krillion-style question: name one thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, everyone is paralysed: stunned and ${fmt(G.RULES.paralysedSteps)} steps down tomorrow. Pass and the fallen get back up. Rare answers hit the boss.</li>
       </ul>
     </section>`;
 }
@@ -273,15 +283,17 @@ const KNOBS = [
   ["taxmanBaseHp", "Taxman base health"], ["taxmanHpPerEffort", "Taxman health per Effort earned"], ["taxmanHpPerOverMin", "Taxman health per minute over budget"],
   ["taxmanRegen", "Health he wins back per second idle"], ["auditEvery", "Seconds between Audit shields"], ["auditFor", "Audit shield length (s)"], ["auditBlock", "Damage through the Audit shield"],
   ["stealDmgPerPct", "Damage for each 1% stolen (× his health)"], ["comboWindowMs", "Combo window (ms between taps)"],
-  ["raidHpPerMember", "Raid boss health per squad member"], ["raidLvlPerGear", "Boss level per average gear point"],
+  ["raidHpPerMember", "Raid boss health per squad member"], ["raidLvlCurve", "How much gear raises the boss (1 = fully)"], ["raidPerkWeight", "How much each gear perk counts"],
+  ["raidRewardCurve", "Reward growth vs boss level"], ["taxmanPerLevel", "Taxman toughness per player level"], ["stealPerLevel", "Extra steal cap per level"],
   ["raidAtkEvery", "Seconds between boss attacks"], ["raidBossDmg", "Boss swipe damage"], ["raidRewardPerMember", "Win reward per member per level (Efforts)"],
-  ["triviaSeconds", "Seconds per trivia prompt"], ["triviaFailAt", "Failed prompts that paralyse"], ["rarityBossDmg", "Boss damage per rarity point"],
+  ["triviaSeconds", "Seconds per trivia prompt"], ["triviaFailShare", "Share of squad wrong that paralyses"], ["rarityBossDmg", "Boss damage per rarity point"],
   ["paralysedSteps", "Step penalty when paralysed"], ["paralysedStunSec", "Stun when paralysed (s)"], ["xpPerLevel", "XP curve (level n needs this × (n−1)²)"],
   ["dealDiscount", "Daily deal discount"], ["stepsPerEffort", "Steps per Effort"], ["dailyEffortCap", "Most Efforts a day"],
 ];
 function tabKnobs() {
   return `<section class="card">
       <h2>Test cheats</h2>
+      <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Turn off to compare with the flat version</span></span><input class="switch" type="checkbox" data-toggle3d ${L.no3d ? "" : "checked"}></label>
       <div class="btn-row"><button class="btn sm sun" data-act="cheat">+5 Endeavours</button><button class="btn sm sun" data-act="cheat-lvl">+1 level</button><button class="btn sm sun" data-act="cheat-lvl5">+5 levels</button></div>
     </section>
     <section class="card">
@@ -301,7 +313,22 @@ function banner(text, small = "") {
   $("#arena")?.appendChild(el);
   setTimeout(() => el.remove(), 1150);
 }
-function bossHurt() {
+// The 3D arena, when the device can run it (and it's not switched off in Knobs).
+const use3d = () => !L.no3d && window.Arena3D && Arena3D.supported();
+const arena = () => (V.tax && V.tax.A) || (V.raid && V.raid.A) || null;
+// Arena3D positions are relative to the stage; the effects canvas covers the whole arena.
+function toArena(pt) {
+  if (!pt) return [0, 0];
+  const st = $("#stage").getBoundingClientRect(), ar = $("#arena").getBoundingClientRect();
+  return [pt[0] + st.left - ar.left, pt[1] + st.top - ar.top];
+}
+function bossXY(frac = 0.55) {
+  const A = arena();
+  if (A) return toArena(A.screenOf("boss", frac));
+  const b = $("#boss"); return b ? FX.centre(b) : [0, 0];
+}
+function bossHurt(crit = false) {
+  const A = arena(); if (A) { A.bossHit(crit); return; }
   const b = $("#boss"); if (!b) return;
   b.classList.add("hurt", "squash");
   clearTimeout(bossHurt.t); bossHurt.t = setTimeout(() => b.classList.remove("hurt", "squash"), 90);
@@ -329,7 +356,7 @@ function stagePoint(e) {
 // ---------- 7pm: the Taxman ----------
 function startTax(seconds) {
   FX.unlock();
-  const S = G.taxmanSetup({ steps: effectiveSteps(), scrollMin: L.scroll, stats: myStats(), equipped: L.equipped, inv: L.inv });
+  const S = G.taxmanSetup({ steps: effectiveSteps(), scrollMin: L.scroll, stats: myStats(), equipped: L.equipped, inv: L.inv, level: level() });
   S.seconds = seconds;
   V.tax = { B: G.taxmanStart(S), S, left: seconds, last: performance.now() };
   V.view = "tax";
@@ -340,7 +367,7 @@ function startTax(seconds) {
 }
 function renderTax() {
   const S = V.tax.S;
-  $("#app").innerHTML = `<div class="arena tax" id="arena"><div class="shake-wrap" id="shake">
+  $("#app").innerHTML = `<div class="arena tax ${use3d() ? "three" : ""}" id="arena"><div class="shake-wrap" id="shake">
     <div class="hud">
       <div class="hud-row"><div class="nameplate"><span class="lv">${Math.round(S.taxRate * 100)}%</span><div><b>The Taxman</b><small>Collector of the 7pm levy</small></div></div>
         <span style="flex:1"></span><span class="glass pill timer" id="t-clock">${mmss(V.tax.left)}</span><button class="gbtn" data-act="tax-stop">End</button></div>
@@ -349,7 +376,7 @@ function renderTax() {
     </div>
     <div class="arena-stage" id="stage">
       <div class="audit-dome" id="dome" hidden></div>
-      <div class="boss" id="boss"><div class="halo"></div>${taxmanSvg(false)}</div>
+      ${use3d() ? "" : `<div class="boss" id="boss"><div class="halo"></div>${taxmanSvg(false)}</div>`}
       <div class="weak" id="weak" hidden></div>
       <div class="receipt" id="receipt" hidden>🧾</div>
       <div class="combo-meter" id="combo"></div>
@@ -358,6 +385,7 @@ function renderTax() {
     <div class="foot"><div class="feed" id="t-feed"></div></div>
   </div></div>`;
   FX.init($("#arena"));
+  if (use3d()) V.tax.A = Arena3D.create($("#stage"), { mode: "tax", boss: { id: "taxman" }, team: [{ id: "me", you: true, answers: L.answers, pos: "front" }] });
   paintTax();
 }
 function taxTick() {
@@ -371,8 +399,8 @@ function taxTick() {
     if (e.type === "receipt") FX.play("receipt");
     if (e.type === "ko") {
       FX.play("ko"); banner("K.O.!", "now rob him blind");
-      const boss = $("#boss"); boss.innerHTML = `<div class="halo"></div>${taxmanSvg(true)}`;
-      const [x, y] = FX.centre(boss); FX.coins(x, y, 26); FX.ring(x, y, { r1: 260, color: "rgba(255,210,80,.9)", width: 16 }); FX.shake($("#shake"), 14, 500);
+      if (v.A) v.A.bossKO(); else { const boss = $("#boss"); boss.innerHTML = `<div class="halo"></div>${taxmanSvg(true)}`; }
+      const [x, y] = bossXY(0.5); FX.coins(x, y, 26); FX.ring(x, y, { r1: 260, color: "rgba(255,210,80,.9)", width: 16 }); FX.shake($("#shake"), 14, 500);
       $("#hint").textContent = "keep tapping to steal";
     }
   }
@@ -405,13 +433,15 @@ function taxTap(e) {
   FX.play(hit.kind === "blocked" ? "blocked" : hit.kind === "weak" ? "weak" : hit.crit ? "crit" : "hit");
   if (hit.crit || hit.kind === "weak") { FX.shake($("#shake"), 6, 180); FX.buzz(20); } else FX.buzz(6);
   if (v.B.ko && (hit.crit || Math.random() < 0.25)) { FX.coins(x, y, hit.crit ? 6 : 2); FX.play("coin"); }
-  if (hit.kind !== "blocked") bossHurt();
+  v.A?.heroAttack("me", { crit: hit.crit || hit.kind === "weak" });
+  if (hit.kind !== "blocked") bossHurt(hit.crit || hit.kind === "weak");
 }
 function finishTax() {
   const v = V.tax;
   clearInterval(v.timer);
   const r = G.taxmanResult(v.B);
   r.taps = v.B.taps; r.crits = v.B.crits; r.weak = v.B.weak; r.receipts = v.B.receipts;
+  v.A?.dispose();
   FX.destroy();
   V.tax = null;
   V.result = { kind: "tax", r, banked: false };
@@ -424,32 +454,36 @@ function finishTax() {
 function startRaid() {
   FX.unlock();
   const squad = botSquad();
-  V.raid = { R: G.raidCreate(squad, { minutes: L.raidMin }), last: performance.now(), q: null, bossPct: 1, myTaps: 0 };
+  V.raid = { R: G.raidCreate(squad, { minutes: L.raidMin, tier: L.tier }), last: performance.now(), q: null, bossPct: 1, myTaps: 0 };
   V.view = "raid";
   render();
   V.raid.timer = setInterval(raidTick, 50);
   FX.play("roar");
-  setTimeout(() => banner(G.BOSS.name.toUpperCase(), "squad up"), 150);
+  setTimeout(() => banner(V.raid.R.boss.name.toUpperCase(), V.raid.R.boss.title), 150);
 }
 const mateHtml = (m) => `<div class="mate ${m.you ? "me" : ""}" id="m-${m.id}"><div class="ring"><div class="face">${head(m.answers)}</div></div><div class="nm">${esc(m.you ? "You" : m.name)}</div><span class="st"></span></div>`;
 function renderRaid() {
   const R = V.raid.R;
-  $("#app").innerHTML = `<div class="arena raid" id="arena"><div class="shake-wrap" id="shake">
+  const three = use3d();
+  $("#app").innerHTML = `<div class="arena raid ${three ? "three" : ""}" id="arena"><div class="shake-wrap" id="shake">
     <div class="hud">
       <div class="hud-row"><div class="nameplate"><span class="lv">LV ${R.lvl}</span><div><b>${esc(R.boss.name)}</b><small>${esc(R.boss.title)}</small></div></div>
         <span style="flex:1"></span><span class="glass pill timer" id="r-clock"></span><button class="gbtn" data-act="raid-quit">End</button></div>
       <div class="bigbar" id="r-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
     </div>
     <div class="telegraph idle" id="tele"><span class="e">👁️</span><span class="txt">It's watching…</span><i class="cd"></i></div>
-    <div class="arena-stage" id="stage"><div class="boss" id="boss"><div class="halo"></div>${Walker.boss(1, false)}</div><div class="combo-meter" id="combo"></div><div class="tap-hint" id="hint">tap the boss</div></div>
-    <div class="party">${G.POSITIONS.map((p) => `<div class="prow"><b title="${p.label}">${p.e}</b><div class="who" id="row-${p.id}"></div></div>`).join("")}</div>
+    <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss" id="boss"><div class="halo"></div>${Walker.boss(1, false)}</div>`}<div class="combo-meter" id="combo"></div><div class="tap-hint" id="hint">tap the boss</div></div>
+    ${three ? "" : `<div class="party">${G.POSITIONS.map((p) => `<div class="prow"><b title="${p.label}">${p.e}</b><div class="who" id="row-${p.id}"></div></div>`).join("")}</div>`}
     <div class="foot"><div class="feed" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability"><span class="e"></span><span class="lbl"></span></button>
         <div class="moves">${G.POSITIONS.map((p) => `<button data-move="${p.id}">${p.e}<br>${p.label}</button>`).join("")}</div></div>
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
-  for (const m of R.members) $(`#row-${m.pos}`).insertAdjacentHTML("beforeend", mateHtml(m));
   FX.init($("#arena"));
+  if (three) {
+    V.raid.A = Arena3D.create($("#stage"), { mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: !!m.you, answers: m.answers, pos: m.pos })) });
+    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.you ? "me" : ""}" id="np-${m.id}"><b>${esc(m.you ? "You" : m.name)}</b><span class="st"></span><i><s></s></i></div>`).join("");
+  } else for (const m of R.members) $(`#row-${m.pos}`).insertAdjacentHTML("beforeend", mateHtml(m));
   paintRaid();
 }
 function raidTick() {
@@ -459,26 +493,42 @@ function raidTick() {
   v.last = now;
   while (dt > 0 && !v.R.over) { G.raidStep(v.R, Math.min(0.25, dt)); dt -= 0.25; }
   for (const e of v.R.fx.splice(0)) raidFx(e);
-  if (v.R.over) return finishRaid();
+  if (v.R.over) {
+    // Let the boss fall over before the results.
+    if (v.A && v.R.result.how === "won" && !v.koShown) { v.koShown = true; clearInterval(v.timer); v.A.bossKO(); banner("K.O.!", `${v.R.boss.name} is down`); FX.play("ko"); setTimeout(finishRaid, 1800); return; }
+    if (!v.koShown) return finishRaid();
+    return;
+  }
   paintRaid();
 }
-const mateEl = (id) => $(`#m-${id}`);
-const mateXY = (id) => (mateEl(id) ? FX.centre(mateEl(id)) : [0, 0]);
+const mateEl = (id) => $(`#m-${id}`) || $(`#np-${id}`);
+const mateXY = (id) => { const A = arena(); if (A) return toArena(A.screenOf(id, 0.75)); return mateEl(id) ? FX.centre(mateEl(id)) : [0, 0]; };
+// Who a boss attack is aimed at, for the ground warnings.
+function attackTargets(R, type) {
+  const up = R.members.filter((m) => m.alive);
+  if (type === "scream") return up.map((m) => m.id);
+  if (type === "stomp") { const rows = up.filter((m) => m.pos !== "back"); return (rows.length ? rows : up).map((m) => m.id); }
+  if (type === "swipe") return up.filter((m) => m.pos === "front").map((m) => m.id);
+  return [];
+}
 function raidFx(e) {
-  const R = V.raid.R, boss = $("#boss");
-  const [bx, by] = boss ? FX.centre(boss) : [0, 0];
+  const R = V.raid.R, boss = $("#boss"), A = V.raid.A;
+  const [bx, by] = bossXY();
   switch (e.type) {
-    case "windup": boss.classList.add("windup"); FX.play("warn"); break;
+    case "tap": A?.heroAttack(e.id, { crit: e.crit, big: e.swing }); break;
+    case "move": A?.move(e.id, e.pos); break;
+    case "windup": if (A) A.bossWindup(e.attack, attackTargets(R, e.attack)); else boss.classList.add("windup"); FX.play("warn"); break;
     case "attack": {
-      boss.classList.remove("windup"); boss.classList.add(`atk-${e.attack}`);
-      setTimeout(() => boss.classList.remove(`atk-${e.attack}`), 1200);
+      if (A) A.bossAttack(e.attack, e.ids);
+      else { boss.classList.remove("windup"); boss.classList.add(`atk-${e.attack}`); setTimeout(() => boss.classList.remove(`atk-${e.attack}`), 1200); }
       if (e.attack === "swipe") { FX.play("swipe"); for (const id of e.ids) { const [x, y] = mateXY(id); FX.claw(x, y); } FX.shake($("#shake"), 6, 220); }
-      if (e.attack === "stomp") { FX.play("stomp"); const r = $(".party").getBoundingClientRect(), h = $("#arena").getBoundingClientRect(); FX.stompWave(r.left + r.width / 2 - h.left, r.top - h.top + 20); FX.shake($("#shake"), 16, 500); }
-      if (e.attack === "scream") { FX.play("scream"); FX.screamWaves(bx, by); FX.shake($("#shake"), 10, 600); }
-      if (e.attack === "feast") { FX.play("feast"); FX.chomp(bx, by + 30); banner("FEAST!", "burst it down"); }
+      if (e.attack === "stomp") { FX.play("stomp"); if (!A) { const r = $(".party").getBoundingClientRect(), h = $("#arena").getBoundingClientRect(); FX.stompWave(r.left + r.width / 2 - h.left, r.top - h.top + 20); } FX.shake($("#shake"), A ? 8 : 16, 500); }
+      if (e.attack === "scream") { FX.play("scream"); if (!A) FX.screamWaves(bx, by); FX.shake($("#shake"), A ? 6 : 10, 600); }
+      if (e.attack === "feast") { FX.play("feast"); FX.chomp(bx, by + 30); banner((R.boss.attacks?.feast || "Feast").toUpperCase() + "!", "burst it down"); }
       break;
     }
     case "hurt": {
+      A?.hurt(e.id);
       const el = mateEl(e.id); if (!el) break;
       el.classList.remove("hurt"); void el.offsetWidth; el.classList.add("hurt");
       const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${e.amt}`, { size: 22, color: "#ff6b6b" });
@@ -486,16 +536,22 @@ function raidFx(e) {
       break;
     }
     case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "DODGE", { size: 20, color: "#9af0ff" }); break; }
-    case "shield": { FX.play("shield"); const r = $("#row-front").getBoundingClientRect(), h = $("#arena").getBoundingClientRect(); FX.shieldDome(r.left + r.width / 2 - h.left, r.top + r.height / 2 - h.top, r.width); break; }
-    case "swing": { FX.play("swing"); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "BIG SWING!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
-    case "heal": { FX.play("heal"); const [x, y] = mateXY(e.id); FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); const [sx, sy] = mateXY(e.by); FX.beam(sx, sy, x, y, "#7ee29d", 6); break; }
-    case "down": { FX.play("down"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "DOWN", { size: 22, color: "#ff6b6b" }); FX.sparks(x, y, "#ff6b6b", 16, 300); break; }
+    case "shield": {
+      FX.play("shield");
+      if (A) A.shield(e.ids, 8);
+      else { const r = $("#row-front").getBoundingClientRect(), h = $("#arena").getBoundingClientRect(); FX.shieldDome(r.left + r.width / 2 - h.left, r.top + r.height / 2 - h.top, r.width); }
+      break;
+    }
+    case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "BIG SWING!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
+    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); if (!A) { const [sx, sy] = mateXY(e.by); FX.beam(sx, sy, x, y, "#7ee29d", 6); } break; }
+    case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "DOWN", { size: 22, color: "#ff6b6b" }); FX.sparks(x, y, "#ff6b6b", 16, 300); break; }
     case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "SECOND WIND", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
-    case "revive": FX.play("revive"); for (const id of e.ids) { const [x, y] = mateXY(id); FX.heal(x, y); } banner("BACK UP!"); break;
-    case "phase": FX.play("phase"); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "PHASE 2" : "ENRAGED", e.phase === 2 ? "it hits harder" : "it's fast now"); FX.shake($("#shake"), 14, 600); break;
+    case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("BACK UP!"); break;
+    case "phase": FX.play("phase"); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "PHASE 2" : "ENRAGED", e.phase === 2 ? "it hits harder" : "it's fast now"); FX.shake($("#shake"), 14, 600); break;
     case "feastEnd": if (e.healed) { FX.number(bx, by - 40, `+${fmt(e.healed)}`, { size: 30, color: "#7ee29d" }); FX.play("heal"); } else { FX.number(bx, by - 40, "INTERRUPTED", { size: 26, grad: ["#fff3a0", "#ff7a3d"] }); FX.play("combo"); } break;
     case "trivia": FX.play("warn"); break;
-    case "answer": FX.play(e.ok ? (e.rarity >= 5 ? "rare" : "right") : "wrong"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(); } break;
+    case "answered": if (e.id !== "me") FX.play(e.valid ? "tap" : "blocked"); break;
+    case "triviaDone": FX.play(e.failed ? "wrong" : "right"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(true); } break;
     case "paralysed": FX.play("stun"); banner("PARALYSED", `${fmt(G.RULES.paralysedSteps)} steps down tomorrow`); break;
   }
 }
@@ -505,7 +561,7 @@ function paintRaid() {
   setBar($("#r-hp"), B.hp / B.max, `${fmt(B.hp)} / ${fmt(B.max)}`);
   // Swap boss art as it takes damage (cracks appear).
   const pct = Math.ceil((B.hp / B.max) * 10) / 10;
-  if (pct !== v.bossPct) { v.bossPct = pct; const b = $("#boss"); const cls = b.className; b.innerHTML = `<div class="halo"></div>${Walker.boss(B.hp / B.max, false)}`; b.className = cls; }
+  if (!v.A && pct !== v.bossPct) { v.bossPct = pct; const b = $("#boss"); const cls = b.className; b.innerHTML = `<div class="halo"></div>${Walker.boss(B.hp / B.max, false)}`; b.className = cls; }
   const tele = $("#tele");
   if (B.feast) {
     tele.className = "telegraph feast";
@@ -516,7 +572,7 @@ function paintRaid() {
     const a = G.ATTACKS[B.next.type], total = B.next.at - B.next.warnAt;
     tele.className = "telegraph hot";
     tele.querySelector(".e").textContent = a.e;
-    tele.querySelector(".txt").textContent = `${a.label} in ${Math.max(0, B.next.at - R.t).toFixed(1)}s · ${a.what}`;
+    tele.querySelector(".txt").textContent = `${B.attacks?.[B.next.type] || a.label} in ${Math.max(0, B.next.at - R.t).toFixed(1)}s · ${a.what}`;
     tele.querySelector(".cd").style.width = `${Math.max(0, (B.next.at - R.t) / total) * 100}%`;
   } else {
     tele.className = "telegraph idle";
@@ -526,6 +582,17 @@ function paintRaid() {
   }
   for (const m of R.members) {
     const el = mateEl(m.id);
+    if (v.A) {
+      // Floating nameplates above each walker's head.
+      const pt = v.A.screenOf(m.id, 1.05);
+      if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1]}px) translate(-50%, -100%)`;
+      const f = m.hp / m.max;
+      el.querySelector("s").style.width = `${f * 100}%`;
+      el.querySelector("s").style.background = f > 0.5 ? "#5fe08f" : f > 0.25 ? "#ffd166" : "#ff6b6b";
+      el.classList.toggle("dead", !m.alive);
+      el.querySelector(".st").textContent = !m.alive ? "💀" : R.t < m.stunUntil ? "⚡" : R.t < m.moveUntil ? "↔️" : R.t < m.shieldUntil ? "🛡️" : m.swing ? "💥" : "";
+      continue;
+    }
     if (el.parentElement.id !== `row-${m.pos}`) $(`#row-${m.pos}`).appendChild(el);
     const f = m.hp / m.max;
     el.style.setProperty("--hp", f);
@@ -550,35 +617,33 @@ function paintRaid() {
 function paintTrivia() {
   const v = V.raid, R = v.R, T = R.trivia, box = $("#trivia");
   if (!T) { if (box.innerHTML) box.innerHTML = ""; v.q = null; return; }
-  const key = `${R.triviaRuns}-${T.i}`, Q = T.qs[T.i];
-  const me = R.members.find((m) => m.id === "me");
+  const mineP = T.per.me, Q = mineP.q, key = `${R.triviaRuns}`;
   if (v.q !== key) {
     v.q = key; v.ticked = 0;
-    box.innerHTML = `<div class="trivia"><div class="top"><span>Squad trivia · ${T.i + 1} of ${T.qs.length} · ${T.right} passed, ${T.wrong} failed</span><div class="clock" id="tv-clock"><span></span></div></div>
+    box.innerHTML = `<div class="trivia"><div class="top"><span>Your question · ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = paralysed</span><div class="clock" id="tv-clock"><span></span></div></div>
       <h3>${esc(Q.q)}</h3>
       <form data-form="answer"><input id="tv-in" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Type one thing…" maxlength="40"><button class="go">Go</button></form>
       <div class="verdict" id="tv-verdict"></div>
       <div class="meta" id="tv-votes"></div></div>`;
     setTimeout(() => $("#tv-in")?.focus(), 50);
   }
-  const left = Math.max(0, T.until - R.t);
+  const left = Math.max(0, mineP.until - R.t);
   const clock = $("#tv-clock");
-  clock.style.setProperty("--t", left / T.secs); clock.classList.toggle("low", left <= 5);
-  clock.querySelector("span").textContent = Math.ceil(left);
-  if (left <= 5 && Math.ceil(left) !== v.ticked) { v.ticked = Math.ceil(left); FX.play("tick"); }
-  const answers = T.answers[T.i];
+  clock.style.setProperty("--t", left / mineP.secs); clock.classList.toggle("low", left <= 5);
+  clock.querySelector("span").textContent = mineP.ans ? "✓" : Math.ceil(left);
+  if (!mineP.ans && left <= 5 && Math.ceil(left) !== v.ticked) { v.ticked = Math.ceil(left); FX.play("tick"); }
+  const wrong = Object.values(T.per).filter((p) => p.ans && !p.ans.valid).length;
   $("#tv-votes").innerHTML = R.members.map((m) => {
-    const a = answers[m.id];
+    const a = T.per[m.id].ans;
     return `<span class="vote ${a ? (a.valid ? "ok" : "no") : ""}">${esc(m.you ? "You" : m.name)} ${a ? (a.valid ? "✓" : "✗") : "…"}</span>`;
-  }).join("");
-  const mine = answers.me;
+  }).join("") + `<span class="vote" style="background:none">${wrong} wrong of ${R.members.length}</span>`;
+  const mine = mineP.ans;
   if (mine) {
     const form = $("#trivia form"); if (form) form.remove();
     $("#tv-verdict").innerHTML = mine.valid
-      ? `✓ ${esc(mine.canon)} <span class="rar r${mine.rarity}">${["", "obvious", "decent", "rare!"][mine.rarity]}</span>`
-      : `✗ “${esc(mine.text)}” doesn't count. <span style="opacity:.7">Deep cuts: ${esc(Q.examples.join(", "))}</span>`;
+      ? `✓ ${esc(mine.canon)} <span class="rar r${mine.rarity}">${["", "obvious", "decent", "rare!"][mine.rarity]}</span> <span style="opacity:.7">Waiting for the squad…</span>`
+      : `✗ “${esc(mine.text || "(no answer)")}” doesn't count. <span style="opacity:.7">Deep cuts: ${esc(Q.examples.join(", "))}</span>`;
   }
-  if (!me.alive && !mine) $("#hint").textContent = "you're down. answer below";
 }
 function raidTap(e) {
   const v = V.raid; if (!v) return;
@@ -588,11 +653,13 @@ function raidTap(e) {
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, color: hit.swing ? "#ff9f43" : "#ffd166" });
   FX.play(hit.crit || hit.swing ? "crit" : "hit");
   if (hit.crit || hit.swing) { FX.shake($("#shake"), hit.swing ? 9 : 5, 180); FX.buzz(18); } else FX.buzz(5);
-  bossHurt();
+  v.A?.heroAttack("me", { crit: hit.crit, big: hit.swing });
+  bossHurt(hit.crit || hit.swing);
 }
 function finishRaid() {
   const v = V.raid;
   clearInterval(v.timer);
+  v.A?.dispose();
   FX.destroy();
   V.result = { kind: "raid", R: v.R, banked: false };
   V.raid = null; V.view = "result";
@@ -621,7 +688,7 @@ function renderResult() {
     countUp($("#count"), r.net);
   } else {
     const R = res.R, out = R.result, mine = out.shares.find((s) => s.id === "me");
-    const title = { won: "The Algorithm is down.", timeout: "Out of time.", wiped: "Squad wiped." }[out.how];
+    const title = { won: `${R.boss.name} is down.`, timeout: "Out of time.", wiped: "Squad wiped." }[out.how];
     const T = R.lastTrivia;
     html = `<div class="results ${out.how === "won" ? "" : "lost"}" id="arena"><div class="inner">
       <h1>${title}</h1>
@@ -629,7 +696,7 @@ function renderResult() {
       ${out.paralysed ? `<div class="rcard" style="border-color:#ff8a8a"><b>⚡ Paralysed.</b> Everyone starts tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</div>` : ""}
       <div class="rcard"><table class="rtable"><tr><th>Who</th><th>Damage</th><th>Healed</th><th>Took</th><th>Reward</th></tr>
         ${out.shares.map((s) => `<tr class="${s.id === "me" ? "me" : ""}"><td>${esc(s.id === "me" ? "You" : s.name)}</td><td>${fmt(s.dmg)}</td><td>${fmt(s.healed)}</td><td>${fmt(s.taken)}</td><td>${s.reward}</td></tr>`).join("")}</table></div>
-      ${T ? `<div class="rcard"><b>Last trivia round</b>${T.results.map((q) => `<div class="rline"><span>${esc(q.q)}<br><small style="opacity:.7">${esc(q.answers.me ? `You: ${q.answers.me.text}` : "You didn't answer")} · deep cuts: ${esc(q.examples.join(", "))}</small></span><b>${q.ok ? "✓" : "✗"}</b></div>`).join("")}</div>` : ""}
+      ${T ? `<div class="rcard"><b>Last trivia round · ${T.n - T.wrong}/${T.n} right${T.failed ? " · paralysed" : ""}</b>${T.results.map((q) => `<div class="rline"><span>${esc(q.id === "me" ? "You" : q.name)}: ${esc(q.q)}<br><small style="opacity:.7">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</small></span><b>${q.ans.valid ? "✓" : "✗"}</b></div>`).join("")}</div>` : ""}
       <div class="rcard"><div class="rline total"><span>Your share</span><b id="count">0</b></div></div>
       ${resultFooter(mine.reward)}
     </div></div>`;
@@ -661,6 +728,7 @@ function collect() {
     const out = res.R.result, mine = out.shares.find((s) => s.id === "me");
     amount = mine.reward; xp = mine.reward + mine.dmg / 1000;
     if (out.paralysed) L.debt = G.RULES.paralysedSteps;
+    if (out.how === "won") L.tier++;
     text = `Sunday raid (${out.how}, ${Math.round(out.frac * 100)}%)${out.paralysed ? ", paralysed" : ""}`;
   }
   L.wallet += amount;
@@ -749,6 +817,8 @@ document.addEventListener("click", (e) => {
     }
     case "tax-stop": if (V.tax) finishTax(); break;
     case "raid": startRaid(); break;
+    case "tier-up": L.tier++; save(); render(); break;
+    case "tier-down": L.tier = Math.max(1, L.tier - 1); save(); render(); break;
     case "ability": if (V.raid) G.raidAbility(V.raid.R, "me"); break;
     case "raid-quit": if (V.raid && confirm("End the raid now? It counts as running out of time.")) V.raid.R.dur = V.raid.R.t; break;
     case "collect": collect(); break;
@@ -775,6 +845,7 @@ document.addEventListener("input", (e) => {
   }
 });
 document.addEventListener("change", (e) => {
+  if (e.target.matches("[data-toggle3d]")) { L.no3d = !e.target.checked; save(); return; }
   const k = e.target.dataset.knob;
   if (!k) return;
   const n = Number(e.target.value);

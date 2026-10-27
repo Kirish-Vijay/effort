@@ -240,7 +240,7 @@ const SOUNDS = {
 };
 function play(name) { try { SOUNDS[name]?.(); } catch { /* audio is a nice-to-have */ } }
 function setMuted(v) { muted = v; try { localStorage.setItem("ef_mute", v ? "1" : "0"); } catch { /* ignore */ } if (v && ac) ac.suspend(); }
-function buzz(ms = 12) { try { if (!muted) navigator.vibrate?.(ms); } catch { /* not supported on iPhone */ } }
+function buzz(ms = 12) { try { if (!muted && navigator.userActivation?.hasBeenActive !== false) navigator.vibrate?.(ms); } catch { /* not supported on iPhone */ } }
 
 root.FX = {
   init, destroy, resize, local, centre, add, sparks, tapHit, number, ring, coins, confetti, heal, shieldDome, claw, stompWave, screamWaves, beam, chomp,

@@ -226,3 +226,28 @@ input[type=range] { width: 100%; accent-color: var(--orange); }
 @media (prefers-reduced-motion: reduce) {
   .boss, .boss.windup, .arena::before, .item.mythic, .item .tile::before, .weak, .receipt, .telegraph.hot, .ability.ready { animation: none !important; }
 }
+
+/* Boss ladder */
+.ladder { display: grid; gap: 6px; }
+.rung { display: flex; align-items: center; gap: 10px; border: 2px solid var(--soft); border-radius: 14px; padding: 8px 10px; background: var(--card); }
+.rung .n { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font: 800 14px/1 var(--display); background: var(--card-2); flex: none; }
+.rung b { display: block; font: 800 14px/1.15 var(--display); }
+.rung small { display: block; font-size: 11.5px; color: var(--muted); }
+.rung .tag { font: 800 10.5px/1 var(--display); letter-spacing: .04em; white-space: nowrap; }
+.rung.beaten { opacity: .65; }
+.rung.beaten .n { background: var(--fern); color: #fff; }
+.rung.next { border-color: var(--edge); background: color-mix(in srgb, var(--orange) 14%, var(--card)); box-shadow: 2px 3px 0 var(--edge); }
+.rung.next .n { background: var(--orange); color: #fff; }
+.rung.next .tag { color: var(--orange); }
+.rung.locked { filter: grayscale(.6); opacity: .55; }
+
+/* 3D battles: the stage fills the screen between the HUD and the controls; walkers get floating nameplates. */
+.arena.three .arena-stage { flex: 1; overflow: hidden; }
+.arena.three::before { opacity: .5; }
+#plates { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.plate { position: absolute; left: 0; top: 0; min-width: 48px; padding: 2px 5px 3px; border-radius: 9px; background: rgba(8,14,28,.72); border: 1.5px solid rgba(255,255,255,.18); text-align: center; font: 800 10.5px/1.1 var(--display); color: #fff; white-space: nowrap; will-change: transform; }
+.plate.me { border-color: var(--gold); box-shadow: 0 0 10px rgba(255,207,63,.5); }
+.plate.dead { opacity: .5; }
+.plate .st { position: absolute; top: -12px; right: -8px; font-size: 14px; }
+.plate i { display: block; height: 5px; border-radius: 9px; background: rgba(255,255,255,.15); margin-top: 3px; overflow: hidden; }
+.plate s { display: block; height: 100%; width: 100%; background: #5fe08f; transition: width .2s; }
