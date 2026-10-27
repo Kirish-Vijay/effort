@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 
 let buildWalker = null;
 try { ({ buildWalker } = await import("./walker3d.js")); } catch { /* falls back to simple walkers */ }
@@ -100,6 +101,159 @@ function buildTaxman() {
 }
 const BUILT_IN = { algorithm: buildAlgorithm, taxman: buildTaxman };
 
+// ---------- models (shared by the arena and the menu portraits) ----------
+const gltfCache = new Map();
+function loadGltf(url) {
+  if (!gltfCache.has(url)) {
+    // A failed fetch isn't cached, so the next fight can try again.
+    gltfCache.set(url, new GLTFLoader().loadAsync(url).catch((err) => { gltfCache.delete(url); throw err; }));
+  }
+  return gltfCache.get(url);
+}
+// A fresh, arena-ready copy of a model: normalised to its height, toon-lit, with its clips resolved by role.
+function prepareModel(gltf, spec) {
+  // Measure the original once: a fresh skinned clone reports bounds from an unposed skeleton.
+  if (!gltf.userData.fit) {
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    gltf.userData.fit = { minY: box.min.y, h: box.getSize(new THREE.Vector3()).y };
+  }
+  const fit = gltf.userData.fit;
+  const obj = cloneSkinned(gltf.scene);
+  const k = (spec.height || 5.5) / Math.max(0.001, fit.h);
+  obj.scale.setScalar(k);
+  obj.position.y = -fit.minY * k + (spec.hover || 0);
+  obj.rotation.y = spec.rotY || 0;
+  obj.traverse((o) => {
+    if (!o.isMesh) return;
+    o.frustumCulled = false;
+    const src = o.material;
+    // Re-light the model with the same toon ramp as everything else, keeping its colours/textures.
+    o.material = toon(src.color ? src.color.clone() : 0xffffff, { map: src.map || null, vertexColors: !!src.vertexColors, transparent: !!src.transparent, opacity: src.opacity ?? 1 });
+    if (spec.tint) o.material.color.lerp(new THREE.Color(spec.tint), 0.35);
+  });
+  const mixer = new THREE.AnimationMixer(obj), clips = {};
+  // Clips are named "CharacterArmature|Idle" and so on; match each role against its list of candidates.
+  const byName = new Map(gltf.animations.map((a) => [a.name.replace(/^.*\|/, "").toLowerCase(), a]));
+  for (const [role, names] of Object.entries(spec.clips || {})) {
+    const clip = names.map((n) => byName.get(n.toLowerCase())).find(Boolean);
+    if (clip) clips[role] = mixer.clipAction(clip);
+  }
+  if (spec.taxman) dressTaxman(obj);
+  return { obj, mixer, clips, k };
+}
+// The Business Man model gets the Taxman's top hat, monocle and a sack of your money, pinned to his bones.
+function dressTaxman(obj) {
+  const bones = [];
+  obj.traverse((o) => { if (o.isBone) bones.push(o); });
+  const find = (...res) => bones.find((b) => res.some((re) => re.test(b.name)));
+  const head = find(/^head$/i, /head/i), hand = find(/fist.?r$/i, /hand.?r$/i, /wrist.?r$/i, /lowerarm.?r$/i);
+  // Bones carry their own scale and rotation; undo both so accessories are sized and oriented in arena units.
+  obj.updateMatrixWorld(true);
+  const pin = (bone, group) => {
+    const ws = bone.getWorldScale(new THREE.Vector3()).x;
+    group.scale.setScalar(1 / ws);
+    group.quaternion.copy(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
+    bone.add(group);
+  };
+  if (head) {
+    const hat = new THREE.Group();
+    const dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x221100 });
+    const brim = outlined(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 28), dark); hat.add(brim);
+    const crown = outlined(new THREE.CylinderGeometry(0.38, 0.41, 0.7, 24), dark); crown.position.y = 0.38; hat.add(crown);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.42, 0.12, 24), red); band.position.y = 0.1; hat.add(band);
+    hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
+    const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.14, 0.32, 0.38);
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.24, 0.12, 0.36); chain.rotation.z = 0.4;
+    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain); inner.scale.setScalar(0.75); wrap.add(inner);
+    pin(head, wrap);
+  }
+  if (hand) {
+    const gold = toon(0xf2b51d, { emissive: 0x221100 });
+    const bag = new THREE.Group();
+    const sack = outlined(new THREE.SphereGeometry(0.42, 20, 16), gold); sack.scale.set(1, 1.15, 1); sack.position.y = -0.5; bag.add(sack);
+    const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, 0.22, 12), gold); knot.position.y = -0.05; bag.add(knot);
+    const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
+    x.fillStyle = "#1f2a24"; x.font = "900 96px Arial"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("£", 64, 70);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), new THREE.MeshBasicMaterial({ map: t, transparent: true }));
+    label.position.set(0, -0.5, 0.43); bag.add(label);
+    const wrap = new THREE.Group(); wrap.add(bag);
+    pin(hand, wrap);
+  }
+}
+
+// ---------- menu portraits ----------
+// Renders a boss or a walker once into a transparent PNG, so menus use the same 3D art as the battles.
+// One shared offscreen renderer, one render at a time; results are cached for the session.
+let pRenderer = null, pQueue = Promise.resolve();
+const pCache = new Map();
+function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) {
+  const key = `${kind}:${id}:${w}x${h}:${frame}`;
+  if (pCache.has(key)) return pCache.get(key);
+  const job = pQueue.then(async () => {
+    if (!pRenderer) {
+      pRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      pRenderer.setPixelRatio(2);
+      pRenderer.outputColorSpace = THREE.SRGBColorSpace;
+      pRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+      pRenderer.toneMappingExposure = 1.3;
+    }
+    pRenderer.setSize(w, h, false);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x24305a, 1.5));
+    const key1 = new THREE.DirectionalLight(0xffffff, 2.2); key1.position.set(-3, 6, 8); scene.add(key1);
+    const rim = new THREE.DirectionalLight(0x8fc3ff, 1.6); rim.position.set(4, 3, -6); scene.add(rim);
+    let obj, height, known = null, dispose = () => {};
+    if (kind === "walker") {
+      const wk = buildWalker ? buildWalker(THREE, answers || {}, { detail: 2, shadow: false }) : simpleWalker(answers);
+      wk.group.rotation.y = Math.PI + 0.35; // face the camera, three-quarter turn
+      wk.update(0.4);
+      obj = wk.group; height = wk.height || 1.6; dispose = () => wk.dispose?.();
+    } else {
+      const spec = MODELS[id];
+      if (spec) {
+        const m = prepareModel(await loadGltf(spec.url), spec);
+        m.clips.idle?.play(); m.mixer.update(0.45);
+        obj = m.obj; height = spec.height || 5.5;
+        obj.rotation.y = (spec.rotY || 0) - 0.35;
+        // Skinned meshes report bounds from an unposed skeleton, so frame from the size we normalised to.
+        const hv = spec.hover || 0;
+        known = new THREE.Box3(new THREE.Vector3(-height * 0.42, hv, -height * 0.3), new THREE.Vector3(height * 0.42, hv + height, height * 0.3));
+      } else {
+        const b = (BUILT_IN[id] || BUILT_IN.algorithm)();
+        obj = b.root; height = b.height; obj.rotation.y = -0.35;
+      }
+    }
+    scene.add(obj);
+    obj.updateMatrixWorld(true);
+    const box = known || new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
+    // "head" frames the top of the character (avatars); "full" fits the whole body.
+    const fitH = frame === "head" ? size.y * 0.62 : size.y * 1.08;
+    const cy = frame === "head" ? box.max.y - fitH * 0.48 : centre.y;
+    const cam = new THREE.PerspectiveCamera(30, w / h, 0.1, 200);
+    const dist = (fitH / 2) / Math.tan((cam.fov * Math.PI) / 360) * Math.max(1, (size.x / size.y) * (h / w) * 0.9);
+    cam.position.set(centre.x, cy + fitH * 0.08, centre.z + dist);
+    cam.lookAt(centre.x, cy, centre.z);
+    pRenderer.clear();
+    pRenderer.render(scene, cam);
+    const url = pRenderer.domElement.toDataURL("image/png");
+    dispose(); // model clones share geometry with the cached original, so only walkers free theirs
+    return url;
+  }).catch(() => "");
+  pQueue = job;
+  pCache.set(key, job);
+  return job;
+}
+
+// Effects make their own geometry and materials; free them when the effect ends or phones run out of GPU memory.
+function freeObj(o) {
+  o?.traverse?.((x) => {
+    x.geometry?.dispose?.();
+    for (const m of [].concat(x.material || [])) if (m !== OUTLINE) { m.map?.dispose?.(); m.dispose?.(); }
+  });
+}
+
 // ---------- fallback walker ----------
 function simpleWalker(answers) {
   const hue = Number(answers?.hue) || 30;
@@ -156,21 +310,59 @@ class Arena {
     const key = new THREE.DirectionalLight(0xfff4e0, 1.3); key.position.set(2, 5, 12); key.target.position.set(0, 2, this.bossZ); S.add(key, key.target);
     this.rim = new THREE.PointLight(tax ? 0xffd166 : 0x7fb2ff, 30, 18); this.rim.position.set(0, 4, this.bossZ - 2.5); S.add(this.rim);
     this.danger = new THREE.PointLight(0xff3b3b, 0, 20); this.danger.position.set(0, 3, this.bossZ + 3); S.add(this.danger);
-    // Arena floor: a big disc with a glowing rune ring.
+    // Arena floor: flagstones laid in rings, darker towards the edge, with an inlaid ring around the boss.
     const floorTex = (() => {
-      const c = document.createElement("canvas"); c.width = c.height = 512; const x = c.getContext("2d");
-      const g = x.createRadialGradient(256, 256, 20, 256, 256, 256);
-      g.addColorStop(0, tax ? "#4a7a55" : "#3a4f86"); g.addColorStop(0.7, tax ? "#22382a" : "#1a2546"); g.addColorStop(1, tax ? "#0b150f" : "#070d1c");
-      x.fillStyle = g; x.fillRect(0, 0, 512, 512);
-      x.strokeStyle = "rgba(255,255,255,.08)"; x.lineWidth = 2;
-      for (let r = 60; r < 256; r += 48) { x.beginPath(); x.arc(256, 256, r, 0, 7); x.stroke(); }
-      for (let a = 0; a < 12; a++) { x.beginPath(); x.moveTo(256, 256); x.lineTo(256 + Math.cos(a / 12 * 6.283) * 256, 256 + Math.sin(a / 12 * 6.283) * 256); x.stroke(); }
-      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+      const N = 1024, c = document.createElement("canvas"); c.width = c.height = N; const x = c.getContext("2d");
+      const base = tax ? [52, 92, 66] : [44, 60, 112];
+      x.fillStyle = `rgb(${base.map((v) => v * 0.35).join(",")})`; x.fillRect(0, 0, N, N);
+      let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let ring = 0; ring < 9; ring++) {
+        const r0 = 40 + ring * 54, r1 = r0 + 50, stones = Math.max(6, Math.round((2 * Math.PI * (r0 + 25)) / 62));
+        for (let i = 0; i < stones; i++) {
+          const a0 = (i / stones) * Math.PI * 2 + ring * 0.3, a1 = ((i + 1) / stones) * Math.PI * 2 + ring * 0.3 - 0.035;
+          const shade = 0.75 + rnd() * 0.35 - ring * 0.045;
+          x.fillStyle = `rgb(${base.map((v) => Math.round(v * shade)).join(",")})`;
+          x.beginPath(); x.arc(N / 2, N / 2, r1 - 3, a0, a1); x.arc(N / 2, N / 2, r0 + 3, a1, a0, true); x.closePath(); x.fill();
+          x.strokeStyle = "rgba(255,255,255,.06)"; x.lineWidth = 2; x.beginPath(); x.arc(N / 2, N / 2, r1 - 5, a0 + 0.01, a1 - 0.01); x.stroke();
+        }
+      }
+      const v = x.createRadialGradient(N / 2, N / 2, N * 0.18, N / 2, N / 2, N / 2);
+      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.75)");
+      x.fillStyle = v; x.fillRect(0, 0, N, N);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
     })();
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(16, 64), new THREE.MeshLambertMaterial({ map: floorTex }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(16, 96), new THREE.MeshLambertMaterial({ map: floorTex }));
     floor.rotation.x = -Math.PI / 2; floor.position.z = -2; S.add(floor);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(5.6, 5.9, 64), new THREE.MeshBasicMaterial({ color: tax ? 0xffd166 : 0x6fb6ff, transparent: true, opacity: 0.55 }));
+    const ringCol = tax ? 0xffd166 : 0x6fb6ff;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(5.6, 5.85, 96), new THREE.MeshBasicMaterial({ color: ringCol, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.set(0, 0.02, this.bossZ); S.add(ring); this.bossRing = ring;
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(5.6, 64), new THREE.MeshBasicMaterial({ color: ringCol, transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.rotation.x = -Math.PI / 2; glow.position.set(0, 0.015, this.bossZ); S.add(glow);
+    // Backdrop: a city of glowing phone-screen towers at night (an office district for the Taxman).
+    const skyTex = (() => {
+      const W = 2048, H = 512, c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d");
+      const g = x.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, tax ? "#081410" : "#060a1d"); g.addColorStop(0.62, tax ? "#173a2a" : "#1d2a66"); g.addColorStop(0.78, tax ? "#2f6046" : "#4a3f8f"); g.addColorStop(1, tax ? "#0b150f" : "#0a0f26");
+      x.fillStyle = g; x.fillRect(0, 0, W, H);
+      let seed = 3; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < 90; i++) { x.fillStyle = `rgba(255,255,255,${0.2 + rnd() * 0.6})`; x.fillRect(rnd() * W, rnd() * H * 0.5, 1.5, 1.5); }
+      for (let layer = 0; layer < 2; layer++) {
+        let px = 0;
+        while (px < W) {
+          const w = 30 + rnd() * 70, h = (layer ? 120 : 70) + rnd() * (layer ? 170 : 110), top = H * 0.8 - h;
+          x.fillStyle = layer ? (tax ? "#0c1d14" : "#0b1230") : (tax ? "#16301f" : "#17204a");
+          x.fillRect(px, top, w, H - top);
+          // Lit windows: mostly the cold blue of screens.
+          for (let wy = top + 8; wy < H * 0.8 - 6; wy += 9) for (let wx = px + 5; wx < px + w - 5; wx += 8)
+            if (rnd() < (layer ? 0.22 : 0.12)) { x.fillStyle = rnd() < 0.8 ? (tax ? "rgba(255,214,120,.75)" : "rgba(120,190,255,.75)") : "rgba(255,240,200,.8)"; x.fillRect(wx, wy, 3, 4); }
+          px += w + rnd() * 10;
+        }
+      }
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; return t;
+    })();
+    const sky = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 22, 48, 1, true, Math.PI * 0.55, Math.PI * 0.9), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false }));
+    sky.position.set(0, 8.5, -2); S.add(sky);
+    this.scene.fog.near = 18; this.scene.fog.far = 40;
     // Standing stones around the edge for depth.
     const stone = toon(tax ? 0x2c4434 : 0x2b3456);
     for (let i = 0; i < 14; i++) {
@@ -178,6 +370,9 @@ class Arena {
       const h = 1.5 + ((i * 37) % 5) * 0.6;
       const p = outlined(new THREE.CylinderGeometry(0.35, 0.55, h, 6), stone, 1.05);
       p.position.set(Math.cos(a) * r, h / 2, -2 + Math.sin(a) * r * 0.9); p.rotation.y = i; S.add(p);
+      // A small light on top of each stone, like a beacon.
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshBasicMaterial({ color: ringCol }));
+      cap.position.set(p.position.x, h + 0.15, p.position.z); S.add(cap);
     }
     // Drifting embers.
     const n = 160, pos = new Float32Array(n * 3);
@@ -204,76 +399,17 @@ class Arena {
     };
     if (!spec) return builtIn();
     builtIn(); // show something straight away; swap in the model when it arrives
-    new GLTFLoader().load(spec.url, (gltf) => {
-      const obj = gltf.scene;
-      const box = new THREE.Box3().setFromObject(obj), size = box.getSize(new THREE.Vector3());
-      const k = (spec.height || 5.5) / Math.max(0.001, size.y);
-      obj.scale.setScalar(k);
-      obj.position.y = -box.min.y * k + (spec.hover || 0);
-      obj.rotation.y = spec.rotY || 0;
-      obj.traverse((o) => {
-        if (!o.isMesh) return;
-        o.frustumCulled = false;
-        const src = o.material;
-        // Re-light the model with the same toon ramp as everything else, keeping its colours/textures.
-        o.material = toon(src.color ? src.color.clone() : 0xffffff, { map: src.map || null, vertexColors: !!src.vertexColors, transparent: !!src.transparent, opacity: src.opacity ?? 1 });
-        if (spec.tint) o.material.color.lerp(new THREE.Color(spec.tint), 0.35);
-      });
+    loadGltf(spec.url).then((gltf) => {
+      if (this.disposed) return;
+      const m = prepareModel(gltf, spec);
       const old = this.boss.holder, wasDead = this.boss.dead;
       this.scene.remove(old);
-      this.boss = { gltf, mixer: new THREE.AnimationMixer(obj), clips: {}, hover: spec.hover || 0 };
-      // Clips are named "CharacterArmature|Idle" and so on; match each role against its list of candidates.
-      const byName = new Map(gltf.animations.map((a) => [a.name.replace(/^.*\|/, "").toLowerCase(), a]));
-      for (const [role, names] of Object.entries(spec.clips || {})) {
-        const clip = names.map((n) => byName.get(n.toLowerCase())).find(Boolean);
-        if (clip) this.boss.clips[role] = this.boss.mixer.clipAction(clip);
-      }
-      if (spec.taxman) this.dressTaxman(obj, k);
-      place(obj, spec.height || 5.5);
-      this.collectMats(obj);
+      this.boss = { mixer: m.mixer, clips: m.clips, hover: spec.hover || 0 };
+      place(m.obj, spec.height || 5.5);
+      this.collectMats(m.obj);
       this.bossPlay("idle");
       if (wasDead) this.bossKO();
-    }, undefined, () => { /* keep the built-in boss */ });
-  }
-  // The Business Man model gets the Taxman's top hat, monocle and a sack of your money, pinned to his bones.
-  dressTaxman(obj, k) {
-    const bones = [];
-    obj.traverse((o) => { if (o.isBone) bones.push(o); });
-    const find = (...res) => bones.find((b) => res.some((re) => re.test(b.name)));
-    const head = find(/^head$/i, /head/i), hand = find(/fist.?r$/i, /hand.?r$/i, /wrist.?r$/i, /lowerarm.?r$/i);
-    // Bones carry their own scale and rotation; undo both so accessories are sized and oriented in arena units.
-    obj.updateMatrixWorld(true);
-    const pin = (bone, group) => {
-      const ws = bone.getWorldScale(new THREE.Vector3()).x;
-      group.scale.setScalar(1 / ws);
-      group.quaternion.copy(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
-      bone.add(group);
-    };
-    if (head) {
-      const hat = new THREE.Group();
-      const dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x221100 });
-      const brim = outlined(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 28), dark); hat.add(brim);
-      const crown = outlined(new THREE.CylinderGeometry(0.38, 0.41, 0.7, 24), dark); crown.position.y = 0.38; hat.add(crown);
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.42, 0.12, 24), red); band.position.y = 0.1; hat.add(band);
-      hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
-      const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.14, 0.32, 0.38);
-      const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.24, 0.12, 0.36); chain.rotation.z = 0.4;
-      const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain); inner.scale.setScalar(0.75); wrap.add(inner);
-      pin(head, wrap);
-    }
-    if (hand) {
-      const gold = toon(0xf2b51d, { emissive: 0x221100 });
-      const bag = new THREE.Group();
-      const sack = outlined(new THREE.SphereGeometry(0.42, 20, 16), gold); sack.scale.set(1, 1.15, 1); sack.position.y = -0.5; bag.add(sack);
-      const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, 0.22, 12), gold); knot.position.y = -0.05; bag.add(knot);
-      const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
-      x.fillStyle = "#1f2a24"; x.font = "900 96px Arial"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("£", 64, 70);
-      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-      const label = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), new THREE.MeshBasicMaterial({ map: t, transparent: true }));
-      label.position.set(0, -0.5, 0.43); bag.add(label);
-      const wrap = new THREE.Group(); bag.scale.setScalar(1.0); wrap.add(bag);
-      pin(hand, wrap);
-    }
+    }).catch(() => { /* keep the built-in boss */ });
   }
   collectMats(root) {
     const mats = [];
@@ -455,7 +591,7 @@ class Arena {
     const fill = new THREE.Mesh(new THREE.CircleGeometry(r, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false }));
     d.rotation.x = fill.rotation.x = -Math.PI / 2; d.position.set(at.x, 0.04, at.z); fill.position.set(at.x, 0.035, at.z);
     this.scene.add(d, fill);
-    this.fx.push({ obj: d, life, t: 0, update: (f) => { const k = f.t / f.life; d.material.opacity = 0.5 + Math.sin(f.t * 18) * 0.3; fill.material.opacity = 0.25 * k; fill.scale.setScalar(k); }, done: () => this.scene.remove(d, fill) });
+    this.fx.push({ obj: d, extra: fill, life, t: 0, update: (f) => { const k = f.t / f.life; d.material.opacity = 0.5 + Math.sin(f.t * 18) * 0.3; fill.material.opacity = 0.25 * k; fill.scale.setScalar(k); }, done: () => this.scene.remove(d, fill) });
   }
   beam(a, b, color) {
     const len = a.distanceTo(b);
@@ -510,7 +646,7 @@ class Arena {
     p.needsUpdate = true;
     this.bossRing.material.opacity = 0.4 + Math.sin(this.t * 2) * 0.15;
     for (const f of this.fx) { f.t += dt; f.update?.(f, dt); }
-    this.fx = this.fx.filter((f) => { if (f.t >= f.life) { f.done?.(); return false; } return true; });
+    this.fx = this.fx.filter((f) => { if (f.t >= f.life) { f.done?.(); freeObj(f.obj); freeObj(f.extra); return false; } return true; });
     this.renderer.render(this.scene, this.camera);
   }
   updateBoss(dt) {
@@ -559,18 +695,29 @@ class Arena {
     }
   }
   dispose() {
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.onResize);
     for (const h of this.heroes.values()) h.w.dispose?.();
     this.scene.traverse((o) => { o.geometry?.dispose?.(); if (o.material && o.material !== OUTLINE) [].concat(o.material).forEach((m) => { m.map?.dispose?.(); m.dispose?.(); }); });
     this.renderer.dispose();
+    this.renderer.forceContextLoss(); // browsers cap live WebGL contexts; don't leave this one hanging
     this.renderer.domElement.remove();
   }
 }
 
+let supportedCache = null;
 window.Arena3D = {
   create(host, opts) { return new Arena(host, opts); },
-  supported() { try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch { return false; } },
+  // Probed once: every probe would otherwise hold a WebGL context open.
+  supported() {
+    if (supportedCache === null) {
+      try { const c = document.createElement("canvas"), gl = c.getContext("webgl2") || c.getContext("webgl"); supportedCache = !!gl; gl?.getExtension("WEBGL_lose_context")?.loseContext(); }
+      catch { supportedCache = false; }
+    }
+    return supportedCache;
+  },
   hasWalkers: !!buildWalker,
+  portrait,
 };
 window.dispatchEvent(new Event("arena3d-ready"));

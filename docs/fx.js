@@ -93,7 +93,7 @@ function draw(p, dt) {
     const pop = k < 0.12 ? 0.6 + (k / 0.12) * 0.7 : 1.3 - Math.min(0.3, (k - 0.12) * 1.2);
     const y = p.y - ease(k) * (p.rise ?? 70);
     ctx.translate(p.x + (p.drift || 0) * k, y); ctx.scale(pop, pop);
-    ctx.font = `800 ${p.size}px "Bricolage Grotesque", system-ui, sans-serif`;
+    ctx.font = `400 ${p.size}px "Lilita One", "Arial Rounded MT Bold", system-ui, sans-serif`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.lineJoin = "round"; ctx.lineWidth = Math.max(4, p.size / 5); ctx.strokeStyle = p.stroke || "#1f2a24";
     ctx.strokeText(p.text, 0, 0);

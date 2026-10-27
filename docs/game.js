@@ -21,9 +21,10 @@ const DEFAULT_RULES = {
   taxmanBaseHp: 35000,
   taxmanHpPerEffort: 100,
   taxmanHpPerOverMin: 80,
-  taxmanRegen: 0.025,
+  taxmanRegen: 0.025,       // share of his health he wins back per second when you stop tapping
+  taxmanStepBoost: 300,     // steps power you up: tap damage ×(1 + Efforts today / this)
   taxmanPerLevel: 0.08,     // the Taxman gets 8% tougher for every player level
-  stealPerLevel: 0.01,      // ...and you can steal 1% more per level (up to +15%)       // share of his health he wins back per second when you stop tapping
+  stealPerLevel: 0.01,      // ...and you can steal 1% more per level (up to +15%)
   auditEvery: 22,           // seconds between Audit shields
   auditFor: 6,
   auditBlock: 0.15,         // damage that gets through the Audit shield (weak spot hits ×2.5)
@@ -40,13 +41,14 @@ const DEFAULT_RULES = {
   raidRewardPerMember: 150, // Efforts per squad member per boss level, on a win
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
   triviaSeconds: 25,
-  triviaFailShare: 0.667,   // when someone dies everyone gets one question; 2/3 of the squad wrong = paralysed
+  triviaFailShare: 2 / 3,   // when someone dies everyone gets one question; 2/3 of the squad wrong = paralysed
   rarityBossDmg: 0.001,     // each rarity point in trivia knocks this share off the boss
   paralysedSteps: 2500,     // step deficit the next day
   paralysedStunSec: 12,
   xpPerLevel: 40,           // level n needs xpPerLevel × (n−1)² lifetime XP
   upgradeMax: 10,
-  upgradeStep: 0.1,         // each upgrade adds 10% of an item's base stats (at least +1)
+  upgradeStep: 0.1,         // each upgrade adds 10% of an item's base stats
+  upgradeCostShare: 0.1,    // upgrade n costs this share of the item's price × n
   dealDiscount: 0.3,
 };
 let RULES = { ...DEFAULT_RULES };
@@ -73,7 +75,7 @@ const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 // ---------- currency ----------
 const effortsFromSteps = (steps) => clamp(Math.floor((Number(steps) || 0) / RULES.stepsPerEffort), 0, RULES.dailyEffortCap);
 function money(efforts, short) {
-  const e = Math.round(efforts), sign = e < 0 ? "−" : "";
+  const e = Math.round(Number(efforts) || 0), sign = e < 0 ? "−" : "";
   const a = Math.abs(e), en = Math.floor(a / RULES.effortsPerEndeavour), ef = a % RULES.effortsPerEndeavour;
   if (short) return `${sign}${en ? `${en}.${String(ef).padStart(2, "0")}` : `0.${String(ef).padStart(2, "0")}`}`;
   if (!en) return `${sign}${ef} Effort${ef === 1 ? "" : "s"}`;
@@ -85,7 +87,7 @@ const taxRate = (steps, scrollMin) => RULES.baseTax + Math.min(RULES.taxMaxExtra
 
 // ---------- levels ----------
 const xpFor = (level) => RULES.xpPerLevel * (level - 1) ** 2;
-const levelOf = (xp) => Math.max(1, Math.floor(1 + Math.sqrt(Math.max(0, xp) / RULES.xpPerLevel)));
+const levelOf = (xp) => Math.max(1, Math.floor(1 + Math.sqrt(Math.max(0, xp) / Math.max(1, RULES.xpPerLevel))));
 function levelProgress(xp) {
   const lvl = levelOf(xp), lo = xpFor(lvl), hi = xpFor(lvl + 1);
   return { lvl, into: xp - lo, need: hi - lo, pct: (xp - lo) / (hi - lo) };
@@ -152,13 +154,15 @@ function suggestedPosition(st) {
 const SLOTS = ["weapon", "armour", "trinket"];
 const itemById = (id) => CAT().ITEMS.find((i) => i.id === id);
 const tierOf = (id) => CAT().TIERS.find((t) => t.id === id) || CAT().TIERS[0];
-// Each upgrade adds about 10% of the item's base stats, and always at least +1, so every level shows.
+// Each upgrade adds 10% of the item's base stats (kept to one decimal, so small items still grow every level).
 function itemStats(item, up) {
   const out = {};
-  for (const [k, v] of Object.entries(item.stats || {})) out[k] = v + (up || 0) * Math.max(1, Math.round(v * RULES.upgradeStep));
+  for (const [k, v] of Object.entries(item.stats || {})) out[k] = Math.round(v * (1 + (up || 0) * RULES.upgradeStep) * 10) / 10;
   return out;
 }
-const upgradeCost = (item, up) => Math.round(tierOf(item.tier).price * 0.3 * (up + 1));
+// Prices are always whole Endeavours (multiples of 100 Efforts) so the shop never shows fractions.
+const wholeE = (efforts) => Math.max(RULES.effortsPerEndeavour, Math.round(efforts / RULES.effortsPerEndeavour) * RULES.effortsPerEndeavour);
+const upgradeCost = (item, up) => wholeE(tierOf(item.tier).price * RULES.upgradeCostShare * (up + 1));
 function loadout(st, equipped, inv) {
   const g = { ...st }, perks = {};
   let points = 0;
@@ -177,12 +181,12 @@ function loadout(st, equipped, inv) {
 // Today's three deals: picked by date, leaning towards your class, at a discount.
 function dealsFor(day, cls, level) {
   const r = rng(hash("deals:" + day + ":" + cls));
-  const pool = CAT().ITEMS.filter((i) => (i.cls === cls || !i.cls) && tierOf(i.tier).lvl <= level + 3);
+  const pool = CAT().ITEMS.filter((i) => (i.cls === cls || !i.cls) && tierOf(i.tier).lvl <= level);
   const out = [];
   while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0].id);
   return out;
 }
-const priceOf = (item, deal) => Math.round(tierOf(item.tier).price * (deal ? 1 - RULES.dealDiscount : 1));
+const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RULES.dealDiscount : 1));
 
 // ---------- 7pm: the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
@@ -195,7 +199,8 @@ function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, 
     level,
     // He keeps pace with you: every level you gain, he gets tougher (and you can steal a bit more).
     hp: Math.round((RULES.taxmanBaseHp + efforts * RULES.taxmanHpPerEffort + over * RULES.taxmanHpPerOverMin) * (1 + RULES.taxmanPerLevel * (level - 1))),
-    tapDmg: 10 + (g.power || 0) * 0.8,
+    tapDmg: (10 + (g.power || 0) * 0.8) * (1 + efforts / Math.max(1, RULES.taxmanStepBoost)),
+    stepBoost: 1 + efforts / Math.max(1, RULES.taxmanStepBoost),
     critChance: (g.luck || 0) * 0.02 + (perks.critChance || 0),
     critMult: 3 + (perks.critDmg || 0),
     comboWindow: RULES.comboWindowMs + (g.speed || 0) * 12,
@@ -206,7 +211,7 @@ function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, 
 }
 function taxmanStart(setup, seed = Date.now()) {
   return {
-    setup, r: rng(seed), t: 0, dmg: 0, taps: 0, combo: setup.perks.taxStart || 0, lastTap: -9, crits: 0, weak: 0, receipts: 0,
+    setup, r: rng(seed), t: 0, dmg: 0, taps: 0, combo: setup.perks.taxStart || 0, lastTap: 0, tapped: false, crits: 0, weak: 0, receipts: 0,
     bonusSteal: 0, audit: null, nextAudit: 15, receipt: null, nextReceipt: 8, ko: false, fx: [],
   };
 }
@@ -215,7 +220,7 @@ function taxmanStep(B, dt) {
   B.t += dt;
   // Stop tapping and he starts recounting his money.
   if (!B.ko && B.t - B.lastTap > 0.8 && B.dmg > 0) B.dmg = Math.max(0, B.dmg - S.hp * RULES.taxmanRegen * dt);
-  if (B.combo && B.t - B.lastTap > S.comboWindow / 1000 * 2.5) B.combo = 0;
+  if (B.tapped && B.combo && B.t - B.lastTap > S.comboWindow / 1000 * 2.5) B.combo = 0;
   if (!B.audit && B.t >= B.nextAudit) {
     B.audit = { until: B.t + RULES.auditFor, x: 0.3 + B.r() * 0.4, y: 0.35 + B.r() * 0.3, vx: (B.r() < 0.5 ? -1 : 1) * (0.25 + B.r() * 0.2), vy: (B.r() < 0.5 ? -1 : 1) * (0.2 + B.r() * 0.2) };
     B.fx.push({ type: "audit" });
@@ -242,12 +247,16 @@ function taxmanStep(B, dt) {
 function taxmanTap(B, x = 0.5, y = 0.5) {
   const S = B.setup;
   if (B.receipt && Math.hypot(B.receipt.x - x, (B.receipt.y - y) * 1.6) < 0.11) {
-    B.receipt = null; B.nextReceipt = B.t + 15 + B.r() * 12; B.receipts++;
+    B.receipt = null; B.nextReceipt = B.t + 15 + B.r() * 12; B.receipts++; B.lastTap = B.t; B.tapped = true;
+    const wasKo = B.ko;
     if (B.ko) B.bonusSteal += 0.01; else B.dmg += S.hp * 0.03;
-    return { kind: "receipt", dmg: 0, bonus: B.ko ? "+1% stolen" : "−3% health" };
+    if (!B.ko && B.dmg >= S.hp) { B.ko = true; B.fx.push({ type: "ko" }); }
+    return { kind: "receipt", dmg: 0, bonus: wasKo ? "+1% stolen" : "−3% health" };
   }
-  B.combo = B.t - B.lastTap <= S.comboWindow / 1000 ? Math.min(RULES.comboMax, B.combo + S.comboGain) : Math.max(0, Math.floor(B.combo / 2));
-  B.lastTap = B.t;
+  // A starting combo (from gear) carries into the first tap however long you wait to start.
+  const inTime = !B.tapped || B.t - B.lastTap <= S.comboWindow / 1000;
+  B.combo = inTime ? Math.min(RULES.comboMax, B.combo + S.comboGain) : Math.max(0, Math.floor(B.combo / 2));
+  B.lastTap = B.t; B.tapped = true;
   const crit = B.r() < S.critChance;
   let dmg = S.tapDmg * (1 + B.combo / RULES.comboMax) * (crit ? S.critMult : 1);
   let kind = crit ? "crit" : "hit";
@@ -271,16 +280,20 @@ function taxmanResult(B) {
 
 // ---------- trivia: name one thing, rarer answers score more ----------
 const norm = (s) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+// Edit distance counting a swapped pair of letters as one typo ("jurrasic" → "jurassic").
 function lev(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    prev = cur;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
   }
-  return prev[b.length];
+  return d[a.length][b.length];
 }
+// Every answer to every prompt: a typo match must not turn a real, different word ("ytterbium") into a right answer.
+let KNOWN = null;
+const known = () => KNOWN || (KNOWN = new Set((root.EffortPrompts || []).flatMap((p) => p.a.flatMap(([ans, , ...al]) => [ans, ...al].map(norm)))));
 function listPrompt(p) {
   const answers = p.a.map(([ans, rarity, ...aliases]) => ({ ans, rarity, keys: [ans, ...aliases].map(norm) }));
   return {
@@ -289,16 +302,17 @@ function listPrompt(p) {
       const t = norm(text);
       if (!t) return { valid: false };
       let hit = answers.find((x) => x.keys.includes(t));
-      if (!hit && t.length >= 5) hit = answers.find((x) => x.keys.some((k) => k.length >= 5 && lev(t, k, t.length >= 9 ? 2 : 1) <= (t.length >= 9 ? 2 : 1)));
+      if (!hit && t.length >= 5 && !known().has(t)) hit = answers.find((x) => x.keys.some((k) => k.length >= 5 && lev(t, k, t.length >= 9 ? 2 : 1) <= (t.length >= 9 ? 2 : 1)));
       return hit ? { valid: true, rarity: hit.rarity, canon: hit.ans } : { valid: false };
     },
     sample(r, good) {
       const pool = answers.filter((x) => (good ? x.rarity <= 2 : x.rarity === 3));
       return pick(r, pool.length ? pool : answers).ans;
     },
-    examples: answers.filter((x) => x.rarity === 3).slice(0, 3).map((x) => x.ans),
+    examples: [...answers.filter((x) => x.rarity === 3), ...answers.filter((x) => x.rarity === 2)].slice(0, 3).map((x) => x.ans),
   };
 }
+const isSquare = (n) => n >= 0 && Number.isSafeInteger(n) && Math.round(Math.sqrt(n)) ** 2 === n;
 const isPrime = (n) => { if (n < 2 || n % 1) return false; for (let i = 2; i * i <= n; i++) if (n % i === 0) return false; return true; };
 // Numeric prompts are generated, so any correct number counts. Obvious picks (the first ones
 // people think of) score 1, the rest 2 or 3.
@@ -311,16 +325,17 @@ function mathPrompt(r) {
       const list = []; for (let k = Math.ceil(Math.sqrt(lo + 1)); k * k < hi; k++) list.push(k * k);
       return { q: `Name a square number between ${lo.toLocaleString("en-GB")} and ${hi.toLocaleString("en-GB")}`, ok, rank: (n) => (Math.sqrt(n) % 10 === 0 || n === list[0] ? 1 : Math.sqrt(n) % 5 === 0 ? 2 : 3), list }; },
     () => { const fib = [144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946, 17711, 28657, 46368, 75025, 121393, 196418, 317811, 514229, 832040];
-      return { q: "Name a Fibonacci number bigger than 100", ok: (n) => fib.includes(n), rank: (n) => (n === 144 ? 1 : n < 1000 ? 2 : 3), list: fib }; },
+      const big = []; for (let a = 832040, b = 1346269; b < 1e15; [a, b] = [b, a + b]) big.push(b);
+      return { q: "Name a Fibonacci number bigger than 100", ok: (n) => n > 100 && (n < 1e7 ? isSquare(5 * n * n + 4) || isSquare(5 * n * n - 4) : big.includes(n)), rank: (n) => (n === 144 ? 1 : n < 1000 ? 2 : 3), list: fib }; },
     () => { const list = []; for (let p = 10; p <= 40; p++) list.push(2 ** p);
-      return { q: "Name a power of 2 bigger than 1,000", ok: (n) => list.includes(n), rank: (n) => (n === 1024 ? 1 : n <= 8192 ? 2 : 3), list }; },
+      return { q: "Name a power of 2 bigger than 1,000", ok: (n) => n > 1000 && Number.isSafeInteger(n) && Number.isInteger(Math.log2(n)), rank: (n) => (n === 1024 ? 1 : n <= 8192 ? 2 : 3), list }; },
     () => { const N = pick(r, [360, 720, 840, 1260, 2520]); const ok = (n) => n >= 10 && n <= 100 && N % n === 0;
       const list = []; for (let n = 10; n <= 100; n++) if (ok(n)) list.push(n);
       return { q: `Name a factor of ${N.toLocaleString("en-GB")} between 10 and 100`, ok, rank: (n) => (n % 10 === 0 ? 1 : n % 5 === 0 || n % 12 === 0 ? 2 : 3), list }; },
     () => { const list = []; for (let k = 5; k <= 60; k++) list.push(k ** 3);
-      return { q: "Name a cube number bigger than 100", ok: (n) => list.includes(n), rank: (n) => (n === 125 || n === 1000 ? 1 : n < 1000 ? 2 : 3), list }; },
+      return { q: "Name a cube number bigger than 100", ok: (n) => n > 100 && Number.isSafeInteger(n) && Math.round(Math.cbrt(n)) ** 3 === n, rank: (n) => (n === 125 || n === 1000 ? 1 : n < 1000 ? 2 : 3), list }; },
     () => { const list = []; for (let k = 10; k <= 200; k++) { const t = (k * (k + 1)) / 2; if (t > 50) list.push(t); }
-      return { q: "Name a triangular number bigger than 50", ok: (n) => list.includes(n), rank: (n) => (n === 55 ? 1 : n < 150 ? 2 : 3), list }; },
+      return { q: "Name a triangular number bigger than 50", ok: (n) => n > 50 && isSquare(8 * n + 1), rank: (n) => (n === 55 ? 1 : n < 150 ? 2 : 3), list }; },
     () => { const s = 20 + Math.floor(r() * 5); const ok = (n) => n >= 100 && n <= 999 && String(n).split("").reduce((a, d) => a + Number(d), 0) === s;
       const list = []; for (let n = 100; n <= 999; n++) if (ok(n)) list.push(n);
       return { q: `Name a three-digit number whose digits add up to ${s}`, ok, rank: (n) => (String(n).includes("9") ? (n % 10 === 9 ? 1 : 2) : 3), list }; },
@@ -345,10 +360,13 @@ function triviaSet(seed, count = 3) {
   const r = rng(seed);
   const bank = root.EffortPrompts || [];
   const used = new Set(), out = [];
-  while (out.length < count) {
-    if (!bank.length || r() < 0.4) { out.push(mathPrompt(r)); continue; }
-    let i; do { i = Math.floor(r() * bank.length); } while (used.has(i) && used.size < bank.length);
-    used.add(i); out.push(listPrompt(bank[i]));
+  const asked = new Set();
+  for (let tries = 0; out.length < count && tries < 200; tries++) {
+    let q;
+    if (!bank.length || r() < 0.4) q = mathPrompt(r);
+    else { let i; do { i = Math.floor(r() * bank.length); } while (used.has(i) && used.size < bank.length); used.add(i); q = listPrompt(bank[i]); }
+    if (asked.has(q.q)) continue;
+    asked.add(q.q); out.push(q);
   }
   return out;
 }
@@ -377,8 +395,8 @@ const BOSSES = [
 // tier starts at 1. Tier 8 is The Algorithm again on lap 2, and so on.
 function bossFor(tier) {
   const t = Math.max(1, Math.floor(tier || 1)), lap = Math.floor((t - 1) / BOSSES.length), b = BOSSES[(t - 1) % BOSSES.length];
-  const k = 2 ** lap;
-  return { ...b, tier: t, lap: lap + 1, hp: b.hp * k, dmg: b.dmg * k ** 0.5, reward: b.reward * k };
+  const k = 2 ** lap, rk = (BOSSES[BOSSES.length - 1].reward * 1.1) ** lap; // lap 2 starts richer than the final boss of lap 1
+  return { ...b, tier: t, lap: lap + 1, hp: b.hp * k, dmg: b.dmg * k ** 0.5, reward: b.reward * rk };
 }
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1 } = {}) {
   const r = rng(seed);
@@ -395,7 +413,7 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
     const dmg = (20 + m.g.power * 4) / (20 + m.stats.power * 4);
     const tough = (80 + m.g.guard * 10) / (80 + m.stats.guard * 10);
     // Rarer perks are stronger, so they count for more.
-    const perkScore = Object.values(m.equipped || {}).reduce((t, id) => { const it = itemById(id); return t + (it && it.perk ? PERK_WEIGHT[it.tier] || 1 : 0); }, 0);
+    const perkScore = Object.values(m.equipped || {}).reduce((t, id) => { const it = itemById(id); return t + (it && it.perk && !TAX_ONLY.has(it.perk[0]) ? PERK_WEIGHT[it.tier] || 1 : 0); }, 0);
     return s + dmg * tough ** RULES.raidToughWeight * (1 + RULES.raidPerkWeight * perkScore);
   }, 0) / Math.max(1, n);
   const lvl = Math.round(strength ** RULES.raidLvlCurve * 100) / 100;
@@ -404,6 +422,8 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   const max = Math.round(RULES.raidHpPerMember * n * lvl * def.hp * (minutes / 15));
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null,
+    // Balanced for a squad of four; smaller squads take lighter hits. Short test raids pay proportionally less.
+    sizeDmg: Math.min(1, 0.4 + 0.15 * n), timeShare: Math.min(1, minutes / 15),
     boss: { ...def, hp: max, max, phase: 1, next: null, feast: null, warned: false },
     members: ms, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
   };
@@ -426,7 +446,24 @@ function scheduleAttack(R) {
   B.next = { type: pick(R.r, pool), at: R.t + every, warnAt: R.t + every - RULES.raidTelegraph - brains * 0.05 };
   B.warned = false;
 }
+function swipeTarget(R) {
+  const up = alive(R);
+  if (!up.length) return null;
+  const weights = up.map((m) => posOf(m.pos).aggro * (m.pos === "front" && R.t < m.shieldUntil ? 1.3 : 1));
+  let x = R.r() * weights.reduce((s, w) => s + w, 0);
+  for (let i = 0; i < up.length; i++) { x -= weights[i]; if (x <= 0) return up[i]; }
+  return up[up.length - 1];
+}
+// Who an attack will hit, decided at the warning so the ground markers are honest.
+function targetsOf(R, type) {
+  const up = alive(R);
+  if (type === "swipe") { const t = swipeTarget(R); return t ? [t.id] : []; }
+  if (type === "stomp") { const rows = up.filter((m) => m.pos !== "back"); return (rows.length ? rows : up).map((m) => m.id); }
+  if (type === "scream") return up.map((m) => m.id);
+  return [];
+}
 const PERK_WEIGHT = { rare: 0.6, epic: 1, legendary: 1.6, mythic: 2.4 };
+const TAX_ONLY = new Set(["taxStart", "steal"]);
 const alive = (R) => R.members.filter((m) => m.alive);
 const canAct = (R, m) => m.alive && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
 // `you: true` marks the person playing on this screen, so the log reads "You raise" not "You raises".
@@ -449,11 +486,11 @@ function raidTap(R, id) {
   m.dmg += dmg;
   // Teammates' hits are shown too (a sample of them, so the screen isn't a blizzard).
   if (!m.you && (crit || swing || R.r() < 0.3)) fx(R, { type: "tap", id: m.id, crit, swing });
-  if (m.perks.lifesteal) m.hp = Math.min(m.max, m.hp + dmg * m.perks.lifesteal / 10); // damage is 10× health scale
+  if (m.perks.lifesteal && m.alive) m.hp = Math.min(m.max, m.hp + dmg * m.perks.lifesteal / 2.5); // damage numbers run ~10× health
   if (R.boss.hp <= 0) endRaid(R, "won");
   return { dmg, crit, swing };
 }
-const abilityCd = (m) => ({ front: 25, mid: 20, back: 18 }[m.pos]) * (1 - m.g.speed * 0.03) * (1 - (m.perks.cdr || 0));
+const abilityCd = (m) => Math.max(5, ({ front: 25, mid: 20, back: 18 }[m.pos]) * Math.max(0.45, 1 - m.g.speed * 0.03) * (1 - Math.min(0.5, m.perks.cdr || 0)));
 function raidAbility(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m) || R.t < m.cdUntil) return false;
@@ -489,12 +526,12 @@ function raidMove(R, id, pos) {
 function hit(R, m, base) {
   if (!m.alive) return 0;
   if (m.perks.dodge && R.r() < m.perks.dodge) { fx(R, { type: "dodge", id: m.id }); return 0; }
-  let d = base * R.boss.dmg * R.lvl ** 0.9 * (1 - Math.min(0.6, m.g.guard * 0.02));
+  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - Math.min(0.6, m.g.guard * 0.02));
   if (R.t < m.shieldUntil) d *= 0.4;
   d = Math.round(d);
   m.hp -= d; m.taken += d;
   fx(R, { type: "hurt", id: m.id, amt: d });
-  if (m.perks.thorns) { const back = d * m.perks.thorns * 10; R.boss.hp = Math.max(0, R.boss.hp - back); m.dmg += back; }
+  if (m.perks.thorns) { const back = d * m.perks.thorns * 10; R.boss.hp = Math.max(0, R.boss.hp - back); m.dmg += back; if (R.boss.hp <= 0) endRaid(R, "won"); }
   if (m.hp <= 0 && m.secondWind) { m.hp = 1; m.secondWind = false; fx(R, { type: "secondWind", id: m.id }); say(R, `${nm(m)} ${vb(m, "refuses", "refuse")} to die (Second Wind)`, "good"); return d; }
   if (m.hp <= 0) {
     m.hp = 0; m.alive = false; m.swing = 0;
@@ -508,9 +545,8 @@ function bossAttack(R) {
   const B = R.boss, type = B.next.type, up = alive(R);
   const mult = B.phase === 1 ? 1 : B.phase === 2 ? 1.25 : 1.5;
   if (type === "swipe" && up.length) {
-    const weights = up.map((m) => posOf(m.pos).aggro * (m.pos === "front" && R.t < m.shieldUntil ? 1.3 : 1));
-    let x = R.r() * weights.reduce((s, w) => s + w, 0), target = up[0];
-    for (let i = 0; i < up.length; i++) { x -= weights[i]; if (x <= 0) { target = up[i]; break; } }
+    // The one marked at the warning, unless they've died since.
+    let target = up.find((m) => m.id === B.next.ids?.[0]) || swipeTarget(R);
     fx(R, { type: "attack", attack: "swipe", ids: [target.id] });
     const d = hit(R, target, RULES.raidBossDmg * mult);
     say(R, `${B.attacks.swipe} hits ${target.you ? "you" : target.name} for ${d}`, "bad");
@@ -526,7 +562,7 @@ function bossAttack(R) {
     say(R, `${B.attacks.scream} hits everyone`, "bad");
   } else if (type === "feast") {
     // The target scales with who's standing, so a small squad isn't punished for being small.
-    const need = Math.round(up.length * 1700 * R.lvl * B.dmg);
+    const need = Math.round(up.length * 1100 * R.lvl * B.dmg);
     B.feast = { until: R.t + 6, need, dealt: 0 };
     fx(R, { type: "attack", attack: "feast", ids: [] });
     say(R, `${B.attacks.feast}. Deal ${need.toLocaleString("en-GB")} damage in 6s or it heals`, "warn");
@@ -573,6 +609,8 @@ function resolveTrivia(R) {
   if (failed) {
     R.paralysed = true;
     alive(R).forEach((m) => (m.stunUntil = R.t + RULES.paralysedStunSec));
+    // The fallen stay down until the stun wears off, then limp back in.
+    R.reviveAt = R.t + RULES.paralysedStunSec;
     fx(R, { type: "paralysed" });
     say(R, `Paralysed. Everyone's stunned ${RULES.paralysedStunSec}s and starts tomorrow ${RULES.paralysedSteps.toLocaleString("en-GB")} steps down`, "bad");
   } else {
@@ -583,8 +621,11 @@ function resolveTrivia(R) {
   }
   R.lastTrivia = { wrong, n, failed, dive, results };
   R.trivia = null;
-  if (!alive(R).length) endRaid(R, "wiped");
-  else if (R.members.some((m) => !m.alive)) startTrivia(R); // someone fell during the questions
+  if (failed) R.fails = (R.fails || 0) + 1;
+  // Everyone down: a squad gets one failed round to recover from; the second one ends it.
+  if (!alive(R).length && (!failed || R.fails >= 2)) endRaid(R, "wiped");
+  // Only someone who fell while the questions were up earns a new round.
+  else if (!failed && R.members.some((m) => !m.alive)) startTrivia(R);
 }
 
 function botAct(R, m) {
@@ -612,8 +653,14 @@ function raidStep(R, dt) {
     else { fx(R, { type: "feastEnd", healed: 0 }); say(R, "Feast interrupted", "good"); }
     B.feast = null;
   }
-  if (B.next && !B.warned && R.t >= B.next.warnAt) { B.warned = true; fx(R, { type: "windup", attack: B.next.type }); }
+  if (B.next && !B.warned && R.t >= B.next.warnAt) { B.warned = true; B.next.ids = targetsOf(R, B.next.type); fx(R, { type: "windup", attack: B.next.type, ids: B.next.ids }); }
   if (B.next && R.t >= B.next.at) { bossAttack(R); scheduleAttack(R); }
+  if (R.reviveAt && R.t >= R.reviveAt) {
+    R.reviveAt = 0;
+    const back = R.members.filter((m) => !m.alive);
+    back.forEach((m) => { m.alive = true; m.hp = Math.round(m.max * 0.2); });
+    if (back.length) { fx(R, { type: "revive", ids: back.map((m) => m.id) }); say(R, "The fallen stagger back up", "good"); }
+  }
   for (const m of R.members) if (m.bot) botAct(R, m);
   const T = R.trivia;
   if (T) {
@@ -626,11 +673,11 @@ function raidStep(R, dt) {
 
 function endRaid(R, how) {
   if (R.over) return;
-  R.over = true;
+  R.over = true; R.reviveAt = 0;
   const n = R.members.length;
   const frac = 1 - R.boss.hp / R.boss.max;
-  const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward;
-  const pool = how === "won" ? full : how === "timeout" ? full * frac * 0.5 : 0;
+  const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
+  const pool = how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0;
   // Half shared equally, half by what you did (damage, healing and hits taken for the team).
   const work = (m) => m.dmg + m.healed * 200 + m.taken * 100;
   const totalWork = R.members.reduce((s, m) => s + work(m), 0) || 1;

@@ -14,11 +14,11 @@ const CLASSES = [
   { id: "hedge", name: "Hedge Wizard", stats: ["brains", "luck"], e: "🔮", blurb: "Tarot from the pound shop. Accuracy also costs a pound." },
 ];
 const TIERS = [
-  { id: "common", label: "Common", color: "#8d9a92", lvl: 1, price: 150 },
-  { id: "rare", label: "Rare", color: "#3b8fd9", lvl: 3, price: 450 },
-  { id: "epic", label: "Epic", color: "#9b5de5", lvl: 6, price: 1200 },
-  { id: "legendary", label: "Legendary", color: "#f2a51d", lvl: 11, price: 3000 },
-  { id: "mythic", label: "Mythic", color: "#e5484d", lvl: 18, price: 7500 },
+  { id: "common", label: "Common", color: "#9aa6c4", lvl: 1, price: 200 },
+  { id: "rare", label: "Rare", color: "#3d9bff", lvl: 3, price: 500 },
+  { id: "epic", label: "Epic", color: "#a86bff", lvl: 6, price: 1200 },
+  { id: "legendary", label: "Legendary", color: "#ffb21e", lvl: 11, price: 3000 },
+  { id: "mythic", label: "Mythic", color: "#ff4d6a", lvl: 18, price: 7500 },
 ];
 // id: short kebab-case, unique. stats: object of bonuses. perk: [type, value] or null.
 const ITEMS = [

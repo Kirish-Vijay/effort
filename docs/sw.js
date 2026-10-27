@@ -1,5 +1,5 @@
 // Network first so updates show up straight away; cached shell only when offline.
-const CACHE = "effort-v6";
+const CACHE = "effort-v7";
 const SHELL = ["./", "index.html", "styles.css", "character.js", "engine.js", "hunt.js", "game.js", "app.js", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
@@ -17,8 +17,8 @@ self.addEventListener("fetch", (e) => {
     // no-cache: always ask the server, so a new release shows up on the next open rather than after the HTTP cache expires.
     fetch(e.request.url, { cache: "no-cache", credentials: "same-origin" })
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        // Only keep complete, successful responses; never cache a 404 or a partial (206) one.
+        if (res.status === 200) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {}); }
         return res;
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match("index.html"))),
