@@ -475,10 +475,13 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .wrow .chip { height: 18px; font-size: 9.5px; padding: 0 6px; vertical-align: 2px; }
 .wbar { display: block; height: 6px; margin-top: 6px; border-radius: 9px; background: rgba(255,255,255,.08); overflow: hidden; }
 .wbar s { display: block; height: 100%; border-radius: 9px; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
-.wrow .ws { text-align: right; display: grid; gap: 3px; }
+/* Right side: today and this week; raid power sits under the bar. */
+.wrow .ws { display: grid; grid-template-columns: auto auto; gap: 12px; text-align: right; }
+.wrow .ws > span { display: grid; gap: 3px; }
 .wrow .ws b { margin: 0; font-size: 16px; }
-.wrow .ws small { font: 700 11px/1 var(--ui); color: var(--text-2); }
-.wrow .ws small.up { color: #9df0b9; } .wrow .ws small.down { color: #ff9aa3; }
+.wrow .ws small { font: 700 10px/1 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.wrow .pw { display: block; margin-top: 5px; font: 700 11px/1 var(--ui); color: var(--text-2); }
+.wrow .pw.up { color: #9df0b9; } .wrow .pw.down { color: #ff9aa3; }
 .wrow.me { box-shadow: 0 0 0 2px var(--cyan) inset; }
 .wrow.top { background: linear-gradient(90deg, rgba(255,200,61,.16), var(--inset) 60%); }
 .wrow.top .wn { background: linear-gradient(180deg, var(--gold-hi), var(--gold-lo)); color: #3a2400; font-size: 16px; }

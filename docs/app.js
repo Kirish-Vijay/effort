@@ -25,6 +25,12 @@ const stepsAppLink = (token) => `intent://connect?t=${token}#Intent;scheme=effor
 // Inside the Android app the game can ask for steps, usage access and reminders itself (android/MainActivity.kt).
 const NATIVE = window.EffortAndroid || null;
 const nativeStatus = () => { try { return JSON.parse(NATIVE.status()); } catch { return {}; } };
+// Calls the Android app only if the installed version has that feature, so an older install never breaks.
+const nat = (fn, ...args) => {
+  if (typeof NATIVE?.[fn] !== "function") return false;
+  try { NATIVE[fn](...args); return true; } catch { return false; }
+};
+const natOr = (fn, ...args) => nat(fn, ...args) || toast("Update the Effort app to use this: Me → Steps → Set up sync");
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
@@ -148,7 +154,7 @@ async function load() {
   S.skew = D.now - Date.now();
   S.D = D;
   ANS[D.me.id] = answersOf(D.me);
-  NATIVE?.setToken(S.token);
+  nat("setToken", S.token);
   for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
   return D;
 }
@@ -172,7 +178,7 @@ function signOut(msg) {
     currentSub().then((sub) => sub && callPush("unsubscribe", { token, endpoint: sub.endpoint })).catch(() => {});
   }
   store.del("token"); store.del("pushSynced");
-  NATIVE?.setToken("");
+  nat("setToken", "");
   Object.assign(S, { token: null, D: null, view: "welcome" });
   history.replaceState(null, "", APP_URL);
   closeSheet(); render();
@@ -328,13 +334,15 @@ function dockDot(tab) {
 function weekPanel() {
   if (!squad()) return noSquadPanel();
   const T = weekRows(), top = Math.max(1, ...T.rows.map((r) => r.weekSteps));
+  const today = (id) => squad().members.find((m) => m.id === id)?.todaySteps ?? 0;
   return `<section class="panel" id="week-panel">
       <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">This week</h2><span class="side chip">Avg ${fmt(T.avg)}</span></div>
       <div class="wtable">${T.rows.map((r, i) => `<div class="wrow ${r.you ? "me" : ""} ${r.title || ""}">
           <span class="wn">${r.title === "top" ? ic("crown") : i + 1}</span>
           <span class="grow"><b>${esc(r.you ? "You" : r.name)}</b>${r.title === "top" ? '<span class="chip gold">Top walker</span>' : r.title === "last" ? '<span class="chip red">Dead weight</span>' : r.fresh ? '<span class="chip">New</span>' : ""}
-            <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i></span>
-          <span class="ws"><b class="num">${fmt(r.weekSteps)}</b><small class="${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} power</small></span>
+            <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i>
+            <small class="pw ${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} raid power</small></span>
+          <span class="ws"><span><b class="num">${fmt(today(r.id))}</b><small>today</small></span><span><b class="num">${fmt(r.weekSteps)}</b><small>week</small></span></span>
         </div>`).join("")}</div>
       <p class="tiny faint" style="margin:10px 0 0">Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
     </section>`;
@@ -1592,12 +1600,12 @@ document.addEventListener("click", async (e) => {
   switch (d.act) {
     case "close-sheet": closeSheet(); break;
     case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
-    case "native-steps": NATIVE?.connectSteps(); break;
-    case "native-scroll": NATIVE?.connectScroll(); break;
-    case "native-reminders-on": NATIVE?.reminders(true); break;
-    case "native-reminders-off": NATIVE?.reminders(false); break;
-    case "native-test": NATIVE?.testReminder(); toast("Sent. Check your notifications"); break;
-    case "native-sync": NATIVE?.syncNow(); toast("Syncing…"); break;
+    case "native-steps": natOr("connectSteps"); break;
+    case "native-scroll": natOr("connectScroll"); break;
+    case "native-reminders-on": natOr("reminders", true); break;
+    case "native-reminders-off": natOr("reminders", false); break;
+    case "native-test": if (nat("testReminder")) toast("Sent. Check your notifications"); break;
+    case "native-sync": if (nat("syncNow")) toast("Syncing…"); break;
     case "push-off": disablePush(); break;
     case "push-test": try { await callPush("test", { token: S.token }); toast("Sent. It should arrive in a few seconds"); } catch (err) { toast(err.message); } break;
     case "start": S.view = "quiz"; S.qi = 0; S.retake = false; render(); break;
