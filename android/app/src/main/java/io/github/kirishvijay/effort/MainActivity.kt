@@ -1,115 +1,167 @@
 package io.github.kirishvijay.effort
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.text.format.DateUtils
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
-// One screen. Effort's web app opens it with effort://connect?t=TOKEN; the player taps Connect steps,
-// Health Connect asks, and from then on it syncs every 15 minutes by itself.
+// The whole game, in the app: the same Effort the website runs, plus what only an app can do on
+// Android: read steps, read short-video screen time, and ping at 6:45pm. The game talks to the app
+// through window.EffortAndroid, and the app tells the game what's connected via window.onEffortNative.
 class MainActivity : ComponentActivity() {
-    private var syncing = false
+    private lateinit var web: WebView
+    private var health = "none"     // ok | update (Health Connect needs installing) | none
+    private var stepsOn = false
     private var lastError: String? = null
 
-    private val askPermission: ActivityResultLauncher<Set<String>> = registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted: Set<String> ->
-        if (StepSync.STEPS in granted) { StepSync.schedule(this); syncNow() } else render()
-    }
+    private val askSteps: ActivityResultLauncher<Set<String>> =
+        registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted: Set<String> ->
+            stepsOn = Sync.STEPS in granted
+            sync()
+        }
+    private val askNotify: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok: Boolean ->
+            if (ok) { Reminders.enable(this, true); Reminders.show(this, test = true) }
+            pushStatus()
+        }
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        takeToken(intent)
+        web = WebView(this).apply {
+            setBackgroundColor(Ui.BG)
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            addJavascriptInterface(Bridge(), "EffortAndroid")
+            webChromeClient = WebChromeClient() // the game's confirm() and prompt() boxes
+            webViewClient = object : WebViewClient() {
+                // The game stays in the app; anything else (calendar links, Health Connect's Play page) opens outside it.
+                override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
+                    val u = req.url
+                    if (u.host == Uri.parse(Sync.APP_URL).host && u.path.orEmpty().startsWith("/effort") && !u.path.orEmpty().endsWith(".ics")) return false
+                    openOutside(u)
+                    return true
+                }
+            }
+            setDownloadListener { url, _, _, _, _ -> openOutside(Uri.parse(url)) }
+        }
+        setContentView(web)
+        web.loadUrl(startUrl(intent) ?: Sync.APP_URL)
+        // Back closes sheets and steps back through the game; at the top it leaves the app.
+        onBackPressedDispatcher.addCallback(this) {
+            web.evaluateJavascript("window.effortBack ? window.effortBack() : false") { handled -> if (handled != "true") moveTaskToBack(true) }
+        }
+    }
+
+    // effort://connect?t=TOKEN signs in (from the website's "Open in the app"); effort://join?g=CODE joins a squad.
+    private fun startUrl(intent: Intent?): String? {
+        val d = intent?.data?.takeIf { it.scheme == "effort" } ?: return null
+        val t = d.getQueryParameter("t")?.takeIf { it.matches(Regex("[A-Za-z0-9]{10,64}")) }
+        val g = d.getQueryParameter("g")?.takeIf { it.matches(Regex("[A-Za-z0-9]{4,12}")) }
+        return when {
+            t != null -> "${Sync.APP_URL}?me=$t"
+            g != null -> "${Sync.APP_URL}?g=$g"
+            else -> null
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        takeToken(intent)
+        startUrl(intent)?.let { web.loadUrl(it) }
     }
 
     override fun onResume() {
         super.onResume()
-        // Every time it's opened, sync straight away if it can.
-        lifecycleScope.launch { if (StepSync.token(this@MainActivity) != null && hasPermission()) syncNow() else render() }
+        web.onResume()
+        // Coming back from Settings or Health Connect: see what's now allowed, and sync.
+        sync()
     }
 
-    private fun takeToken(intent: Intent?) {
-        val t = intent?.data?.takeIf { it.scheme == "effort" }?.getQueryParameter("t")
-        if (!t.isNullOrBlank() && t.matches(Regex("[A-Za-z0-9]{10,64}"))) StepSync.setToken(this, t)
+    override fun onPause() {
+        web.onPause()
+        super.onPause()
     }
 
-    private suspend fun hasPermission() =
-        HealthConnectClient.getSdkStatus(this) == HealthConnectClient.SDK_AVAILABLE &&
-            StepSync.STEPS in HealthConnectClient.getOrCreate(this).permissionController.getGrantedPermissions()
+    private fun openOutside(u: Uri) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, u)) } catch (e: Exception) { /* nothing can open it */ }
+    }
 
-    private fun syncNow() {
-        if (syncing) return
-        syncing = true; lastError = null; render()
+    private fun sync() {
         lifecycleScope.launch {
-            try { StepSync.run(this@MainActivity) } catch (e: Exception) { lastError = e.message ?: "Couldn't sync" }
-            syncing = false
-            render()
+            health = when (HealthConnectClient.getSdkStatus(this@MainActivity)) {
+                HealthConnectClient.SDK_AVAILABLE -> "ok"
+                HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "update"
+                else -> "none"
+            }
+            stepsOn = health == "ok" && Sync.stepsAllowed(this@MainActivity)
+            pushStatus()
+            if (Sync.token(this@MainActivity) == null || !(stepsOn || Sync.scrollAllowed(this@MainActivity))) return@launch
+            Sync.schedule(this@MainActivity)
+            lastError = try { Sync.run(this@MainActivity); null } catch (e: Exception) { e.message }
+            pushStatus()
         }
     }
 
-    private fun openEffort() = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(StepSync.APP_URL)))
-
-    private fun render() {
-        lifecycleScope.launch { show() }
+    private fun status(): String {
+        val p = Sync.prefs(this)
+        return JSONObject()
+            .put("health", health).put("steps", stepsOn).put("scroll", Sync.scrollAllowed(this))
+            .put("reminders", Reminders.enabled(this) && Reminders.canNotify(this))
+            .put("syncedAt", p.getLong("syncedAt", 0)).put("todaySteps", p.getLong("syncedSteps", -1))
+            .put("error", lastError ?: JSONObject.NULL)
+            .put("version", packageManager.getPackageInfo(packageName, 0).versionName)
+            .toString()
     }
 
-    private suspend fun show() {
-        val c = this@MainActivity
-        val status = HealthConnectClient.getSdkStatus(c)
-        val view = when {
-            status == HealthConnectClient.SDK_UNAVAILABLE -> Ui.screen(
-                c, Ui.title(c, "Not on this phone"),
-                Ui.body(c, "This phone doesn't have Health Connect, which is how Android shares steps. You can still type your steps into Effort each day."),
-                Ui.button(c, "Open Effort", Ui.Style.Secondary) { openEffort() },
-            )
-            status == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> Ui.screen(
-                c, Ui.title(c, "One more app"),
-                Ui.body(c, "Android shares steps through Google's Health Connect. Install it (it's free), then come back here."),
-                Ui.button(c, "Get Health Connect", Ui.Style.Primary) {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding")).setPackage("com.android.vending"))
-                },
-            )
-            StepSync.token(c) == null -> Ui.screen(
-                c, Ui.title(c, "Effort Steps"),
-                Ui.body(c, "Open Effort, go to Me → Steps and tap Connect steps. That brings you back here, signed in."),
-                Ui.button(c, "Open Effort", Ui.Style.Primary) { openEffort() },
-            )
-            !hasPermission() -> Ui.screen(
-                c, Ui.title(c, "Connect your steps"),
-                Ui.body(c, "One tap and Effort counts your steps by itself. It only reads your step count, nothing else."),
-                Ui.button(c, "Connect steps", Ui.Style.Primary) { askPermission.launch(StepSync.PERMISSIONS) },
-                Ui.body(c, "Samsung Health? Also turn on Samsung Health → Settings → Health Connect."),
-            )
-            else -> {
-                val (at, steps) = StepSync.lastSync(c)
-                Ui.screen(
-                    c, Ui.title(c, "You're connected"),
-                    Ui.card(
-                        c,
-                        Ui.body(c, "Steps today"),
-                        Ui.big(c, if (steps >= 0) "%,d".format(steps) else "…"),
-                        Ui.body(c, when {
-                            syncing -> "Syncing…"
-                            lastError != null -> lastError!!
-                            at > 0 -> "Synced " + DateUtils.getRelativeTimeSpanString(at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
-                            else -> "Not synced yet"
-                        }, if (lastError != null) Ui.RED else Ui.MUTED),
-                    ),
-                    Ui.body(c, "It syncs every 15 minutes by itself, and whenever you open this. You can close it."),
-                    Ui.button(c, "Back to Effort", Ui.Style.Go) { openEffort() },
-                    Ui.button(c, "Sync now", Ui.Style.Secondary) { syncNow() },
-                )
+    private fun pushStatus() = runOnUiThread {
+        web.evaluateJavascript("window.onEffortNative && window.onEffortNative(${status()})", null)
+    }
+
+    // What the game can ask the app to do. These run off the main thread, so each hops back onto it.
+    inner class Bridge {
+        @JavascriptInterface fun status(): String = this@MainActivity.status()
+
+        // The game hands over the signed-in player's token, so the background sync knows whose steps these are.
+        @JavascriptInterface fun setToken(t: String?) = runOnUiThread {
+            val changed = t != Sync.token(this@MainActivity)
+            Sync.setToken(this@MainActivity, t)
+            if (changed && !t.isNullOrBlank()) sync()
+        }
+
+        @JavascriptInterface fun connectSteps() = runOnUiThread {
+            when (health) {
+                "ok" -> askSteps.launch(Sync.PERMISSIONS)
+                "update" -> openOutside(Uri.parse("market://details?id=com.google.android.apps.healthdata&url=healthconnect%3A%2F%2Fonboarding"))
             }
         }
-        setContentView(view)
+
+        @JavascriptInterface fun connectScroll() = runOnUiThread { Sync.openScrollSettings(this@MainActivity) }
+
+        @JavascriptInterface fun reminders(on: Boolean) = runOnUiThread {
+            if (!on) { Reminders.enable(this@MainActivity, false); pushStatus() }
+            else if (Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(this@MainActivity)) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+            else { Reminders.enable(this@MainActivity, true); Reminders.show(this@MainActivity, test = true); pushStatus() }
+        }
+
+        @JavascriptInterface fun testReminder() = runOnUiThread { Reminders.show(this@MainActivity, test = true) }
+
+        @JavascriptInterface fun syncNow() = runOnUiThread { sync() }
     }
 }

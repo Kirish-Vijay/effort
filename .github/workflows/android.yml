@@ -63,8 +63,12 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Open it, connect, check the screens
+      # Signs in as a throwaway "CI test (ignore)" account (it's in no squad), with every permission granted,
+      # then checks the game loaded in the app and that steps and scrolling reached the server.
+      - name: Open the game in the app and check it syncs
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          CI_TOKEN: gGYk9mF2WtGe6KdPRZUAWG2S
         with:
           api-level: 34
           target: google_apis
@@ -72,20 +76,17 @@ jobs:
           disable-animations: true
           script: |
             adb install -r effort-steps.apk
-            adb shell am start -W -a android.intent.action.VIEW -d "effort://connect?t=CItestToken0000000" io.github.kirishvijay.effort
-            sleep 6
-            adb exec-out screencap -p > 1-before-permission.png
-            adb shell uiautomator dump /sdcard/ui1.xml && adb pull /sdcard/ui1.xml ui1.xml
             adb shell pm grant io.github.kirishvijay.effort android.permission.health.READ_STEPS
-            adb shell am force-stop io.github.kirishvijay.effort
-            adb shell am start -W -n io.github.kirishvijay.effort/.MainActivity
-            sleep 10
-            adb exec-out screencap -p > 2-connected.png
-            adb shell uiautomator dump /sdcard/ui2.xml && adb pull /sdcard/ui2.xml ui2.xml
-            grep -o 'text="[^"]*"' ui1.xml ui2.xml
-            grep -q "Connect your steps" ui1.xml
-            # A made-up account: the app reads the steps, the server turns it away, and the app asks to connect again.
-            grep -q "Open Effort, go to Me" ui2.xml
+            adb shell pm grant io.github.kirishvijay.effort android.permission.POST_NOTIFICATIONS
+            adb shell appops set io.github.kirishvijay.effort GET_USAGE_STATS allow
+            adb shell am start -W -a android.intent.action.VIEW -d "effort://connect?t=$CI_TOKEN" io.github.kirishvijay.effort
+            sleep 45
+            adb exec-out screencap -p > 1-game.png
+            adb shell uiautomator dump /sdcard/ui1.xml && adb pull /sdcard/ui1.xml ui1.xml
+            curl -s -X POST "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort/game" -H "Content-Type: application/json" -d "{\"token\":\"$CI_TOKEN\"}" > game.json
+            jq '{steps_source: .me.steps_source, steps_synced_at: .me.steps_synced_at, scroll_synced_at: .me.scroll_synced_at}' game.json
+            jq -e '.me.steps_source == "android-app" and (now - ((.me.steps_synced_at[0:19] + "Z") | fromdateiso8601)) < 600' game.json
+            jq -e '(now - ((.me.scroll_synced_at[0:19] + "Z") | fromdateiso8601)) < 600' game.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -93,6 +94,7 @@ jobs:
           path: |
             *.png
             *.xml
+            game.json
 
   publish:
     needs: [build, emulator]
