@@ -36,7 +36,7 @@ Out-walk your mates. A step-counting game for friend squads: steps are money, a 
 
 | What | iPhone | Android | Fallback |
 | --- | --- | --- | --- |
-| Steps | Shortcuts automation → `/log?t=TOKEN&steps=N` | HC Webhook (Health Connect) → `/hc?t=TOKEN` | Me → Steps → Type them in |
+| Steps | Shortcuts automation → `/log?t=TOKEN&steps=N` | [HC Webhook](https://github.com/mcnaveen/health-connect-webhook) (Health Connect; free APK from its GitHub releases, paid on Play) → `/hc?t=TOKEN` | Me → Steps → Type them in |
 | Scrolling | Shortcuts "App is Opened/Closed" automations → `/scroll?t=TOKEN&ev=open\|close` | MacroDroid launch/close macros (same URLs), or Tasker → `/scroll?t=TOKEN&minutes=N` | Me → Scrolling → Type it in |
 
 Each player's own links are in the app under **Me → Steps / Scrolling**.

@@ -8,6 +8,9 @@ const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
 const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
 const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
 const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push";
+// HC Webhook (open source, github.com/mcnaveen/health-connect-webhook): the free download of the app that
+// sends Android steps from Health Connect. Always the newest release.
+const HC_APK = "https://github.com/mcnaveen/health-connect-webhook/releases/latest/download/app-foss-release.apk";
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
@@ -618,13 +621,13 @@ function setupBody(kind) {
         <li>Make two more for <b>13:00</b> and <b>23:50</b>, so the squad table stays live and the whole day counts.</li>
       </ol>`;
     else if (p === "android") body = `<ol class="steps-list">
-        <li>Make sure Samsung Health, Google Fit or Fitbit syncs to <b>Health Connect</b>.</li>
-        <li>Install <a href="https://play.google.com/store/apps/details?id=com.hcwebhook.app" target="_blank" rel="noopener"><b>HC Webhook</b></a> (free).</li>
-        <li>Grant <b>Steps</b>, turn on Steps only, and set resolution to <b>Daily</b>.</li>
-        <li>Under <b>Webhooks</b>, add:${box(`${API}/hc?t=${t}`)}</li>
-        <li>Sync every <b>30 min</b>, then tap <b>Sync now</b>.</li>
+        <li>Your steps need to reach <b>Health Connect</b>. Samsung: <b>Samsung Health → Settings → Health Connect</b>, turn it on. Google Fit or Fitbit: turn on Health Connect in its settings.</li>
+        <li>Get <b>HC Webhook</b>, free:<a class="btn sm green block" style="margin:8px 0 4px" href="${HC_APK}">${ic("phone")} Download HC Webhook (4 MB)</a>Open the download. If Android asks, tap <b>Settings</b> → <b>Allow from this source</b>, go back and tap <b>Install</b>. If Play Protect warns you, tap <b>More details → Install anyway</b> (it's open source, it just isn't on the Play Store).</li>
+        <li>Open HC Webhook, tap <b>Grant Permissions</b> and allow <b>Steps</b>.</li>
+        <li>Add this webhook URL, tick <b>Steps</b> only:${box(`${API}/hc?t=${t}`)}</li>
+        <li>Sync mode <b>Interval</b>, every <b>30 minutes</b>. Tap <b>Save configuration</b>, then <b>Sync Now</b>.</li>
       </ol>
-      <p class="small muted">If your phone kills background apps, set HC Webhook's battery use to <b>Unrestricted</b>.</p>`;
+      <p class="small muted">If your phone kills background apps, set HC Webhook's battery use to <b>Unrestricted</b> (long-press the app → App info → Battery).</p>`;
     else body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
   } else {
     if (p === "ios") body = `<p class="small">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>
