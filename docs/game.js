@@ -1,5 +1,6 @@
-// Effort game rules: the step currency, walker stats, gear, the 7pm tax battle and the Sunday raid.
-// Pure logic with no DOM, so the test lab, the app and the server can all run the same numbers.
+// Effort game rules: the step currency, walker stats and classes, gear and perks, player levels,
+// the 7pm Taxman, the Sunday raid and its trivia. Pure logic with no DOM, so the lab, the app and
+// the server can all run the same numbers. Needs items.js and prompts.js loaded first.
 (function (root) {
 "use strict";
 
@@ -10,21 +11,25 @@ const DEFAULT_RULES = {
   dailyEffortCap: 300,      // 30k steps a day, max
   scrollMinPer1kSteps: 5,   // scroll budget earned per 1,000 steps
   scrollBudgetMax: 60,
-  baseTax: 0.30,            // the Taxman takes 30% of today's Efforts if you don't fight
+  baseTax: 0.20,            // the Taxman takes 20% of today's Efforts if you don't fight
   taxPerOverMin: 0.005,     // +0.5% tax per minute scrolled over budget
   taxMaxExtra: 0.20,
   stealCap: 0.30,           // beat the Taxman, keep tapping: steal up to +30%
   windowHour: 19,           // battles open at 7pm
   dailyWindowMin: 5,
   raidMin: 15,
-  taxmanBaseHp: 450,
-  taxmanHpPerEffort: 2.5,
-  taxmanHpPerOverMin: 6,
-  stealDmgPerPct: 0.12,     // extra damage (as a share of HP) for each 1% stolen
+  taxmanBaseHp: 35000,
+  taxmanHpPerEffort: 100,
+  taxmanHpPerOverMin: 80,
+  taxmanRegen: 0.025,       // share of his health he wins back per second when you stop tapping
+  auditEvery: 22,           // seconds between Audit shields
+  auditFor: 6,
+  auditBlock: 0.15,         // damage that gets through the Audit shield (weak spot hits ×2.5)
+  stealDmgPerPct: 0.07,     // extra damage (as a share of his health) for each 1% stolen
   comboWindowMs: 320,
   comboMax: 50,
-  raidHpPerMember: 18000,   // boss HP per squad member at level 1 (about 12 min for a good squad)
-  raidLvlPerGear: 0.06,     // each average gear point on the squad adds 6% boss level
+  raidHpPerMember: 220000,   // boss HP per squad member at level 1 (about 12 min for a good squad)
+  raidLvlPerGear: 0.035,    // each average gear point on the squad adds 3.5% boss level
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
   raidBossDmg: 15,          // a swipe at level 1
@@ -32,8 +37,13 @@ const DEFAULT_RULES = {
   triviaSeconds: 25,
   triviaQuestions: 3,
   triviaFailAt: 2,          // this many wrong = paralysed
+  rarityBossDmg: 0.001,     // each rarity point in trivia knocks this share off the boss
   paralysedSteps: 2500,     // step deficit the next day
   paralysedStunSec: 12,
+  xpPerLevel: 40,           // level n needs xpPerLevel × (n−1)² lifetime XP
+  upgradeMax: 10,
+  upgradeStep: 0.1,         // each upgrade adds 10% of an item's base stats (at least +1)
+  dealDiscount: 0.3,
 };
 let RULES = { ...DEFAULT_RULES };
 function setRules(r) { RULES = { ...DEFAULT_RULES, ...(r || {}) }; return RULES; }
@@ -58,9 +68,10 @@ const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 
 // ---------- currency ----------
 const effortsFromSteps = (steps) => clamp(Math.floor((Number(steps) || 0) / RULES.stepsPerEffort), 0, RULES.dailyEffortCap);
-function money(efforts) {
+function money(efforts, short) {
   const e = Math.round(efforts), sign = e < 0 ? "−" : "";
   const a = Math.abs(e), en = Math.floor(a / RULES.effortsPerEndeavour), ef = a % RULES.effortsPerEndeavour;
+  if (short) return `${sign}${en ? `${en}.${String(ef).padStart(2, "0")}` : `0.${String(ef).padStart(2, "0")}`}`;
   if (!en) return `${sign}${ef} Effort${ef === 1 ? "" : "s"}`;
   return `${sign}${en} Endeavour${en === 1 ? "" : "s"}${ef ? ` ${ef} Effort${ef === 1 ? "" : "s"}` : ""}`;
 }
@@ -68,13 +79,20 @@ const scrollBudget = (steps) => Math.min(RULES.scrollBudgetMax, Math.floor((step
 const overBudget = (steps, scrollMin) => Math.max(0, (scrollMin || 0) - scrollBudget(steps));
 const taxRate = (steps, scrollMin) => RULES.baseTax + Math.min(RULES.taxMaxExtra, overBudget(steps, scrollMin) * RULES.taxPerOverMin);
 
-// ---------- stats from quiz answers ----------
-// Five stats, always 30 points between them (2 to 10 each). Answers lean them one way or another.
+// ---------- levels ----------
+const xpFor = (level) => RULES.xpPerLevel * (level - 1) ** 2;
+const levelOf = (xp) => Math.max(1, Math.floor(1 + Math.sqrt(Math.max(0, xp) / RULES.xpPerLevel)));
+function levelProgress(xp) {
+  const lvl = levelOf(xp), lo = xpFor(lvl), hi = xpFor(lvl + 1);
+  return { lvl, into: xp - lo, need: hi - lo, pct: (xp - lo) / (hi - lo) };
+}
+
+// ---------- stats and classes from quiz answers ----------
 const STATS = [
   { id: "power", label: "Power", e: "💪", what: "Damage per tap" },
   { id: "guard", label: "Guard", e: "🛡️", what: "Health and armour" },
   { id: "speed", label: "Speed", e: "🏃", what: "Faster cooldowns and combos" },
-  { id: "brains", label: "Brains", e: "🧠", what: "Trivia hints, earlier warnings" },
+  { id: "brains", label: "Brains", e: "🧠", what: "More trivia time, earlier warnings" },
   { id: "luck", label: "Luck", e: "🍀", what: "Critical hits" },
 ];
 const STAT_TOTAL = 30, STAT_MIN = 2, STAT_MAX = 10;
@@ -88,6 +106,7 @@ const LEAN = {
   laugh: { giggle: "brains luck", snort: "luck luck", cackle: "power brains", silent: "guard guard", boom: "power power", wheeze: "speed guard" },
   hat: { beanie: "guard brains", cap: "speed power", bucket: "luck luck", flowers: "luck guard", wizard: "brains brains", band: "speed speed", none: "power luck" },
 };
+// Five stats, always 30 points between them (2 to 10 each). Answers lean them one way or another.
 function stats(answers) {
   const a = answers || {};
   const w = { power: 1, guard: 1, speed: 1, brains: 1, luck: 1 };
@@ -107,10 +126,16 @@ function stats(answers) {
   }
   return out;
 }
+const CAT = () => root.EffortItems || { CLASSES: [], TIERS: [], ITEMS: [] };
+// Your class is your top two stats.
+function classOf(st) {
+  const top = STATS.map((s) => s.id).sort((a, b) => st[b] - st[a] || STATS.findIndex((s) => s.id === a) - STATS.findIndex((s) => s.id === b)).slice(0, 2);
+  return CAT().CLASSES.find((c) => c.stats.includes(top[0]) && c.stats.includes(top[1])) || CAT().CLASSES[0];
+}
 const POSITIONS = [
-  { id: "front", label: "Front", e: "🛡️", ability: "Shield wall", abilityWhat: "Front row takes 60% less damage for 8s", mult: 1.15, aggro: 70 },
-  { id: "mid", label: "Middle", e: "⚔️", ability: "Big swing", abilityWhat: "Your next 8 taps hit 3× as hard", mult: 1.3, aggro: 25 },
-  { id: "back", label: "Back", e: "🩹", ability: "Patch up", abilityWhat: "Heal the most hurt teammate 35%", mult: 0.85, aggro: 5 },
+  { id: "front", label: "Front", e: "🛡️", ability: "Shield Wall", abilityWhat: "Front row takes 60% less damage for 8s", mult: 1.15, aggro: 70 },
+  { id: "mid", label: "Middle", e: "⚔️", ability: "Big Swing", abilityWhat: "Your next 8 taps hit 3× as hard", mult: 1.3, aggro: 25 },
+  { id: "back", label: "Back", e: "🩹", ability: "Patch Up", abilityWhat: "Heal the most hurt teammate 35%", mult: 0.85, aggro: 5 },
 ];
 const posOf = (id) => POSITIONS.find((p) => p.id === id) || POSITIONS[1];
 function suggestedPosition(st) {
@@ -119,171 +144,239 @@ function suggestedPosition(st) {
 }
 
 // ---------- gear ----------
-const GEAR = [
-  { id: "stick", slot: "weapon", name: "Pointy stick", e: "🪵", stat: "power", plus: 2, price: 100 },
-  { id: "umbrella", slot: "weapon", name: "Golf umbrella", e: "☂️", stat: "power", plus: 4, price: 300 },
-  { id: "bat", slot: "weapon", name: "Cricket bat", e: "🏏", stat: "power", plus: 6, price: 600 },
-  { id: "extinguisher", slot: "weapon", name: "Fire extinguisher", e: "🧯", stat: "power", plus: 8, price: 1000 },
-  { id: "hoodie", slot: "armour", name: "Thick hoodie", e: "🧥", stat: "guard", plus: 2, price: 100 },
-  { id: "puffer", slot: "armour", name: "Puffer jacket", e: "🦺", stat: "guard", plus: 4, price: 300 },
-  { id: "binlid", slot: "armour", name: "Bin lid shield", e: "🛡️", stat: "guard", plus: 6, price: 600 },
-  { id: "riot", slot: "armour", name: "Full riot gear", e: "⛑️", stat: "guard", plus: 8, price: 1000 },
-  { id: "trainers", slot: "trinket", name: "Fresh trainers", e: "👟", stat: "speed", plus: 3, price: 200 },
-  { id: "coin", slot: "trinket", name: "Lucky 2p coin", e: "🪙", stat: "luck", plus: 3, price: 200 },
-  { id: "calculator", slot: "trinket", name: "Calculator watch", e: "⌚", stat: "brains", plus: 3, price: 200 },
-];
+// inv: { itemId: upgradeLevel }   equipped: { weapon: id, armour: id, trinket: id }
 const SLOTS = ["weapon", "armour", "trinket"];
-const gearById = (id) => GEAR.find((g) => g.id === id);
-function withGear(st, equipped) {
-  const out = { ...st };
-  for (const id of Object.values(equipped || {})) { const g = gearById(id); if (g) out[g.stat] += g.plus; }
+const itemById = (id) => CAT().ITEMS.find((i) => i.id === id);
+const tierOf = (id) => CAT().TIERS.find((t) => t.id === id) || CAT().TIERS[0];
+// Each upgrade adds about 10% of the item's base stats, and always at least +1, so every level shows.
+function itemStats(item, up) {
+  const out = {};
+  for (const [k, v] of Object.entries(item.stats || {})) out[k] = v + (up || 0) * Math.max(1, Math.round(v * RULES.upgradeStep));
   return out;
 }
-const gearPoints = (equipped) => Object.values(equipped || {}).reduce((s, id) => s + (gearById(id)?.plus || 0), 0);
+const upgradeCost = (item, up) => Math.round(tierOf(item.tier).price * 0.3 * (up + 1));
+function loadout(st, equipped, inv) {
+  const g = { ...st }, perks = {};
+  let points = 0;
+  for (const id of Object.values(equipped || {})) {
+    const item = itemById(id);
+    if (!item) continue;
+    const up = (inv && inv[id]) || 0;
+    for (const [k, v] of Object.entries(itemStats(item, up))) { g[k] = (g[k] || 0) + v; points += v; }
+    if (item.perk) {
+      const [type, val] = item.perk;
+      perks[type] = type === "secondWind" ? 1 : (perks[type] || 0) + val;
+    }
+  }
+  return { g, perks, points };
+}
+// Today's three deals: picked by date, leaning towards your class, at a discount.
+function dealsFor(day, cls, level) {
+  const r = rng(hash("deals:" + day + ":" + cls));
+  const pool = CAT().ITEMS.filter((i) => (i.cls === cls || !i.cls) && tierOf(i.tier).lvl <= level + 3);
+  const out = [];
+  while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0].id);
+  return out;
+}
+const priceOf = (item, deal) => Math.round(tierOf(item.tier).price * (deal ? 1 - RULES.dealDiscount : 1));
 
 // ---------- 7pm: the Taxman ----------
-// Can't die. Damage cuts the tax; once he's down, every extra chunk of damage steals 1% back.
-function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {} }) {
+// Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
+// (only the moving weak spot takes proper damage), and golden receipts fly past for bonus loot.
+function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {} }) {
   const efforts = effortsFromSteps(steps), over = overBudget(steps, scrollMin);
-  const g = withGear(st, equipped);
+  const { g, perks } = loadout(st, equipped, inv);
   return {
-    efforts, over, taxRate: taxRate(steps, scrollMin),
+    efforts, over, taxRate: taxRate(steps, scrollMin), perks,
     hp: Math.round(RULES.taxmanBaseHp + efforts * RULES.taxmanHpPerEffort + over * RULES.taxmanHpPerOverMin),
-    tapDmg: 1 + (g.power || 0) * 0.08,
-    critChance: (g.luck || 0) * 0.02,
+    tapDmg: 10 + (g.power || 0) * 0.8,
+    critChance: (g.luck || 0) * 0.02 + (perks.critChance || 0),
+    critMult: 3 + (perks.critDmg || 0),
     comboWindow: RULES.comboWindowMs + (g.speed || 0) * 12,
+    comboGain: 1 + (perks.combo || 0),
+    stealCap: RULES.stealCap + (perks.steal || 0),
     seconds: RULES.dailyWindowMin * 60,
   };
 }
 function taxmanStart(setup, seed = Date.now()) {
-  return { setup, r: rng(seed), dmg: 0, taps: 0, combo: 0, lastTap: -1e9, crits: 0, t: 0, over: false };
+  return {
+    setup, r: rng(seed), t: 0, dmg: 0, taps: 0, combo: setup.perks.taxStart || 0, lastTap: -9, crits: 0, weak: 0, receipts: 0,
+    bonusSteal: 0, audit: null, nextAudit: 15, receipt: null, nextReceipt: 8, ko: false, fx: [],
+  };
 }
-// One tap at time `ms` (ms since the fight started). Returns the hit for the UI.
-function taxmanTap(B, ms) {
-  if (B.over) return null;
+function taxmanStep(B, dt) {
   const S = B.setup;
-  B.combo = ms - B.lastTap <= S.comboWindow ? Math.min(RULES.comboMax, B.combo + 1) : 0;
-  B.lastTap = ms;
+  B.t += dt;
+  // Stop tapping and he starts recounting his money.
+  if (!B.ko && B.t - B.lastTap > 0.8 && B.dmg > 0) B.dmg = Math.max(0, B.dmg - S.hp * RULES.taxmanRegen * dt);
+  if (B.combo && B.t - B.lastTap > S.comboWindow / 1000 * 2.5) B.combo = 0;
+  if (!B.audit && B.t >= B.nextAudit) {
+    B.audit = { until: B.t + RULES.auditFor, x: 0.3 + B.r() * 0.4, y: 0.35 + B.r() * 0.3, vx: (B.r() < 0.5 ? -1 : 1) * (0.25 + B.r() * 0.2), vy: (B.r() < 0.5 ? -1 : 1) * (0.2 + B.r() * 0.2) };
+    B.fx.push({ type: "audit" });
+  }
+  if (B.audit) {
+    const a = B.audit;
+    a.x += a.vx * dt; a.y += a.vy * dt;
+    if (a.x < 0.18 || a.x > 0.82) a.vx *= -1;
+    if (a.y < 0.25 || a.y > 0.75) a.vy *= -1;
+    if (B.t >= a.until) { B.audit = null; B.nextAudit = B.t + RULES.auditEvery; B.fx.push({ type: "auditEnd" }); }
+  }
+  if (!B.receipt && B.t >= B.nextReceipt) {
+    const fromLeft = B.r() < 0.5;
+    B.receipt = { x: fromLeft ? -0.05 : 1.05, y: 0.2 + B.r() * 0.5, vx: (fromLeft ? 1 : -1) * (0.22 + B.r() * 0.1), until: B.t + 5 };
+    B.fx.push({ type: "receipt" });
+  }
+  if (B.receipt) {
+    B.receipt.x += B.receipt.vx * dt;
+    B.receipt.y += Math.sin(B.t * 4) * 0.002;
+    if (B.t >= B.receipt.until) { B.receipt = null; B.nextReceipt = B.t + 15 + B.r() * 12; }
+  }
+}
+// A tap at (x, y), both 0–1 across the arena. Returns what happened for the effects layer.
+function taxmanTap(B, x = 0.5, y = 0.5) {
+  const S = B.setup;
+  if (B.receipt && Math.hypot(B.receipt.x - x, (B.receipt.y - y) * 1.6) < 0.11) {
+    B.receipt = null; B.nextReceipt = B.t + 15 + B.r() * 12; B.receipts++;
+    if (B.ko) B.bonusSteal += 0.01; else B.dmg += S.hp * 0.03;
+    return { kind: "receipt", dmg: 0, bonus: B.ko ? "+1% stolen" : "−3% health" };
+  }
+  B.combo = B.t - B.lastTap <= S.comboWindow / 1000 ? Math.min(RULES.comboMax, B.combo + S.comboGain) : Math.max(0, Math.floor(B.combo / 2));
+  B.lastTap = B.t;
   const crit = B.r() < S.critChance;
-  const dmg = S.tapDmg * (1 + B.combo / RULES.comboMax) * (crit ? 3 : 1);
+  let dmg = S.tapDmg * (1 + B.combo / RULES.comboMax) * (crit ? S.critMult : 1);
+  let kind = crit ? "crit" : "hit";
+  if (B.audit) {
+    if (Math.hypot(B.audit.x - x, (B.audit.y - y) * 1.4) < 0.1) { dmg *= 2.5; kind = "weak"; B.weak++; }
+    else { dmg *= RULES.auditBlock; kind = "blocked"; }
+  }
   B.dmg += dmg; B.taps++; if (crit) B.crits++;
-  return { dmg, crit, combo: B.combo };
+  if (!B.ko && B.dmg >= S.hp) { B.ko = true; B.fx.push({ type: "ko" }); }
+  return { kind, dmg, crit, combo: B.combo };
 }
 function taxmanResult(B) {
   const S = B.setup;
   const knocked = Math.min(1, B.dmg / S.hp);
   const extra = Math.max(0, B.dmg - S.hp);
-  const stealPct = Math.min(RULES.stealCap, Math.floor(extra / (S.hp * RULES.stealDmgPerPct)) / 100);
+  const stealPct = Math.min(S.stealCap, Math.floor(extra / (S.hp * RULES.stealDmgPerPct)) / 100 + B.bonusSteal);
   const taxed = Math.round(S.efforts * S.taxRate * (1 - knocked));
   const stolen = Math.round(S.efforts * stealPct);
   return { earned: S.efforts, taxRate: S.taxRate, knocked, taxed, stealPct, stolen, net: S.efforts - taxed + stolen, beaten: knocked >= 1 };
 }
 
-// ---------- trivia (science and maths) ----------
-const FACTS = [
-  ["Chemical symbol for gold?", "Au", ["Ag", "Gd", "Go"]],
-  ["Which planet has the most known moons?", "Saturn", ["Jupiter", "Uranus", "Neptune"]],
-  ["Roughly how fast is light?", "300,000 km/s", ["30,000 km/s", "3,000 km/s", "3 million km/s"]],
-  ["Which part of a cell makes most of its ATP?", "Mitochondria", ["Nucleus", "Ribosome", "Golgi body"]],
-  ["pH of pure water at 25°C?", "7", ["0", "5", "14"]],
-  ["Most common gas in Earth's air?", "Nitrogen", ["Oxygen", "Carbon dioxide", "Argon"]],
-  ["Hardest natural mineral?", "Diamond", ["Quartz", "Topaz", "Granite"]],
-  ["How many bones in an adult human?", "206", ["186", "226", "312"]],
-  ["Absolute zero in °C?", "−273.15", ["−100", "−459.67", "0"]],
-  ["Element with atomic number 1?", "Hydrogen", ["Helium", "Oxygen", "Carbon"]],
-  ["Unit of electrical resistance?", "Ohm", ["Volt", "Amp", "Watt"]],
-  ["Planet closest to the Sun?", "Mercury", ["Venus", "Mars", "Earth"]],
-  ["Water boils at sea level at how many °F?", "212", ["100", "180", "232"]],
-  ["Shape of a DNA molecule?", "Double helix", ["Single strand", "Triple helix", "Ring"]],
-  ["Largest organ of the human body?", "Skin", ["Liver", "Brain", "Lungs"]],
-  ["Chemical formula for table salt?", "NaCl", ["KCl", "NaOH", "CaCl₂"]],
-  ["Chromosomes in a typical human body cell?", "46", ["23", "44", "48"]],
-  ["Gas plants take in for photosynthesis?", "Carbon dioxide", ["Oxygen", "Nitrogen", "Hydrogen"]],
-  ["SI unit of force?", "Newton", ["Joule", "Pascal", "Watt"]],
-  ["A light-year measures…", "Distance", ["Time", "Brightness", "Speed"]],
-  ["Fe is the symbol for…", "Iron", ["Fluorine", "Lead", "Francium"]],
-  ["Which blood cells fight infection?", "White blood cells", ["Red blood cells", "Platelets", "Plasma"]],
-  ["Fastest land animal?", "Cheetah", ["Pronghorn", "Lion", "Greyhound"]],
-  ["Sound travels fastest through…", "Steel", ["Air", "Water", "A vacuum"]],
-  ["Main gas in the Sun?", "Hydrogen", ["Helium", "Oxygen", "Carbon"]],
-  ["Who came up with general relativity?", "Einstein", ["Newton", "Bohr", "Hawking"]],
-  ["Which planet has the Great Red Spot?", "Jupiter", ["Mars", "Saturn", "Neptune"]],
-  ["Water freezes at about how many kelvin?", "273", ["0", "100", "373"]],
-  ["Which vitamin does skin make in sunlight?", "D", ["A", "C", "K"]],
-  ["Which particle has a negative charge?", "Electron", ["Proton", "Neutron", "Photon"]],
-  ["Earth's core is mostly…", "Iron", ["Gold", "Silicon", "Lead"]],
-  ["Newton's second law: F = ?", "ma", ["mv", "mc²", "m/a"]],
-  ["Roughly how long does sunlight take to reach Earth?", "8 minutes", ["8 seconds", "1 hour", "1 day"]],
-  ["Which metal is liquid at room temperature?", "Mercury", ["Gallium", "Sodium", "Tin"]],
-  ["Interior angles of a triangle add up to…", "180°", ["90°", "270°", "360°"]],
-  ["A googol is 10 to the power of…", "100", ["10", "1,000", "a million"]],
-  ["What is 0! (zero factorial)?", "1", ["0", "Undefined", "∞"]],
-  ["Which of these is NOT prime?", "51", ["41", "43", "47"]],
-  ["π to two decimal places?", "3.14", ["3.12", "3.16", "3.41"]],
-  ["Next prime after 89?", "97", ["91", "93", "95"]],
-  ["How many sides does a hexagon have?", "6", ["5", "7", "8"]],
-  ["Which organ pumps blood?", "Heart", ["Lungs", "Kidney", "Liver"]],
-  ["What do bees make?", "Honey", ["Wax only", "Nectar", "Pollen"]],
-  ["H₂O is…", "Water", ["Hydrogen peroxide", "Salt", "Oxygen"]],
-];
-function mathQuestion(r) {
-  const kind = Math.floor(r() * 6);
-  let q, ans;
-  if (kind === 0) { const a = 12 + Math.floor(r() * 30), b = 3 + Math.floor(r() * 7); q = `${a} × ${b} = ?`; ans = a * b; }
-  else if (kind === 1) { const p = pick(r, [10, 15, 20, 25, 30, 40, 75]), n = (2 + Math.floor(r() * 18)) * 20; q = `${p}% of ${n} = ?`; ans = (p * n) / 100; }
-  else if (kind === 2) { const n = 11 + Math.floor(r() * 15); q = `${n}² = ?`; ans = n * n; }
-  else if (kind === 3) { const x = 2 + Math.floor(r() * 12), a = 2 + Math.floor(r() * 7), b = 1 + Math.floor(r() * 20); q = `${a}x + ${b} = ${a * x + b}. x = ?`; ans = x; }
-  else if (kind === 4) { const n = 5 + Math.floor(r() * 8); q = `2 to the power of ${n} = ?`; ans = 2 ** n; }
-  else { const b = 50 + Math.floor(r() * 400), a = b + 20 + Math.floor(r() * 500); q = `${a} − ${b} = ?`; ans = a - b; }
-  const wrong = new Set();
-  const nudges = [1, 2, 10, -1, -2, -10, 5, -5, ans >= 20 ? Math.round(ans * 0.1) : 3];
-  for (let i = 0; wrong.size < 3 && i < 40; i++) { const w = ans + pick(r, nudges) * (r() < 0.5 ? 1 : 2); if (w !== ans && w >= 0) wrong.add(w); }
-  for (let k = 1; wrong.size < 3; k++) wrong.add(ans + k); // always four options
-  return [q, String(ans), [...wrong].map(String)];
+// ---------- trivia: name one thing, rarer answers score more ----------
+const norm = (s) => String(s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+function lev(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
 }
-// Three questions, roughly half maths. `correct` is the index of the right option.
+function listPrompt(p) {
+  const answers = p.a.map(([ans, rarity, ...aliases]) => ({ ans, rarity, keys: [ans, ...aliases].map(norm) }));
+  return {
+    id: p.id, q: p.q, kind: "science",
+    check(text) {
+      const t = norm(text);
+      if (!t) return { valid: false };
+      let hit = answers.find((x) => x.keys.includes(t));
+      if (!hit && t.length >= 5) hit = answers.find((x) => x.keys.some((k) => k.length >= 5 && lev(t, k, t.length >= 9 ? 2 : 1) <= (t.length >= 9 ? 2 : 1)));
+      return hit ? { valid: true, rarity: hit.rarity, canon: hit.ans } : { valid: false };
+    },
+    sample(r, good) {
+      const pool = answers.filter((x) => (good ? x.rarity <= 2 : x.rarity === 3));
+      return pick(r, pool.length ? pool : answers).ans;
+    },
+    examples: answers.filter((x) => x.rarity === 3).slice(0, 3).map((x) => x.ans),
+  };
+}
+const isPrime = (n) => { if (n < 2 || n % 1) return false; for (let i = 2; i * i <= n; i++) if (n % i === 0) return false; return true; };
+// Numeric prompts are generated, so any correct number counts. Obvious picks (the first ones
+// people think of) score 1, the rest 2 or 3.
+function mathPrompt(r) {
+  const kinds = [
+    () => { const lo = 100 + Math.floor(r() * 300), hi = lo + 40 + Math.floor(r() * 30); const ok = (n) => n > lo && n < hi && isPrime(n);
+      const list = []; for (let n = lo + 1; n < hi; n++) if (ok(n)) list.push(n);
+      return { q: `Name a prime number between ${lo} and ${hi}`, ok, rank: (n) => (n === list[0] || n === list[list.length - 1] ? 1 : list.indexOf(n) % 2 ? 3 : 2), list }; },
+    () => { const lo = 200 + Math.floor(r() * 1500), hi = lo + 1200; const ok = (n) => n > lo && n < hi && Number.isInteger(Math.sqrt(n));
+      const list = []; for (let k = Math.ceil(Math.sqrt(lo + 1)); k * k < hi; k++) list.push(k * k);
+      return { q: `Name a square number between ${lo.toLocaleString("en-GB")} and ${hi.toLocaleString("en-GB")}`, ok, rank: (n) => (Math.sqrt(n) % 10 === 0 || n === list[0] ? 1 : Math.sqrt(n) % 5 === 0 ? 2 : 3), list }; },
+    () => { const fib = [144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946, 17711, 28657, 46368, 75025, 121393, 196418, 317811, 514229, 832040];
+      return { q: "Name a Fibonacci number bigger than 100", ok: (n) => fib.includes(n), rank: (n) => (n === 144 ? 1 : n < 1000 ? 2 : 3), list: fib }; },
+    () => { const list = []; for (let p = 10; p <= 40; p++) list.push(2 ** p);
+      return { q: "Name a power of 2 bigger than 1,000", ok: (n) => list.includes(n), rank: (n) => (n === 1024 ? 1 : n <= 8192 ? 2 : 3), list }; },
+    () => { const N = pick(r, [360, 720, 840, 1260, 2520]); const ok = (n) => n >= 10 && n <= 100 && N % n === 0;
+      const list = []; for (let n = 10; n <= 100; n++) if (ok(n)) list.push(n);
+      return { q: `Name a factor of ${N.toLocaleString("en-GB")} between 10 and 100`, ok, rank: (n) => (n % 10 === 0 ? 1 : n % 5 === 0 || n % 12 === 0 ? 2 : 3), list }; },
+    () => { const list = []; for (let k = 5; k <= 60; k++) list.push(k ** 3);
+      return { q: "Name a cube number bigger than 100", ok: (n) => list.includes(n), rank: (n) => (n === 125 || n === 1000 ? 1 : n < 1000 ? 2 : 3), list }; },
+    () => { const list = []; for (let k = 10; k <= 200; k++) { const t = (k * (k + 1)) / 2; if (t > 50) list.push(t); }
+      return { q: "Name a triangular number bigger than 50", ok: (n) => list.includes(n), rank: (n) => (n === 55 ? 1 : n < 150 ? 2 : 3), list }; },
+    () => { const s = 20 + Math.floor(r() * 5); const ok = (n) => n >= 100 && n <= 999 && String(n).split("").reduce((a, d) => a + Number(d), 0) === s;
+      const list = []; for (let n = 100; n <= 999; n++) if (ok(n)) list.push(n);
+      return { q: `Name a three-digit number whose digits add up to ${s}`, ok, rank: (n) => (String(n).includes("9") ? (n % 10 === 9 ? 1 : 2) : 3), list }; },
+    () => { const k = pick(r, [13, 17, 19, 23]); const ok = (n) => n >= 100 && n <= 300 && n % k === 0;
+      const list = []; for (let n = 100; n <= 300; n++) if (ok(n)) list.push(n);
+      return { q: `Name a multiple of ${k} between 100 and 300`, ok, rank: (n) => (n === list[0] || n === k * 10 ? 1 : n === list[1] ? 2 : 3), list }; },
+  ];
+  const k = kinds[Math.floor(r() * kinds.length)]();
+  return {
+    id: "math-" + hash(k.q), q: k.q, kind: "maths",
+    check(text) {
+      const t = String(text ?? "").replace(/[,\s]/g, "");
+      if (!/^\d+$/.test(t)) return { valid: false };
+      const n = Number(t);
+      return k.ok(n) ? { valid: true, rarity: k.rank(n), canon: n.toLocaleString("en-GB") } : { valid: false };
+    },
+    sample(r2, good) { const pool = k.list.filter((n) => (good ? k.rank(n) <= 2 : k.rank(n) === 3)); return String(pick(r2, pool.length ? pool : k.list)); },
+    examples: k.list.filter((n) => k.rank(n) === 3).slice(0, 3).map(String),
+  };
+}
 function triviaSet(seed) {
   const r = rng(seed);
+  const bank = root.EffortPrompts || [];
   const used = new Set(), out = [];
   while (out.length < RULES.triviaQuestions) {
-    let item;
-    if (r() < 0.45) item = mathQuestion(r);
-    else { let i; do { i = Math.floor(r() * FACTS.length); } while (used.has(i)); used.add(i); item = FACTS[i]; }
-    const opts = [item[1], ...item[2]];
-    for (let i = opts.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [opts[i], opts[j]] = [opts[j], opts[i]]; }
-    out.push({ q: item[0], options: opts, correct: opts.indexOf(item[1]) });
+    if (!bank.length || r() < 0.4) { out.push(mathPrompt(r)); continue; }
+    let i; do { i = Math.floor(r() * bank.length); } while (used.has(i) && used.size < bank.length);
+    used.add(i); out.push(listPrompt(bank[i]));
   }
   return out;
 }
 
 // ---------- Sunday: the squad raid ----------
-// members: [{ id, name, stats, equipped, pos, bot }]. Time is in seconds; call raidStep with real elapsed time.
+// members: [{ id, name, stats, equipped, inv, pos, bot, you }]. Time is in seconds; call raidStep with real elapsed time.
+// Effects the UI should play are pushed to R.fx as { type, ... } and drained by the screen.
+const BOSS = { name: "The Algorithm", title: "Lord of the Infinite Feed" };
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin } = {}) {
   const r = rng(seed);
   const n = members.length;
-  const avgGear = members.reduce((s, m) => s + gearPoints(m.equipped), 0) / Math.max(1, n);
+  const ms = members.map((m) => {
+    const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
+    const maxHp = Math.round(80 + g.guard * 10);
+    return { ...m, g, perks, gearPts: points, pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, dmg: 0, healed: 0, taken: 0,
+      cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind };
+  });
+  const avgGear = ms.reduce((s, m) => s + m.gearPts, 0) / Math.max(1, n);
   const lvl = Math.round((1 + avgGear * RULES.raidLvlPerGear) * 100) / 100;
   // Shorter test raids get a proportionally smaller boss so the pacing feels the same.
   const max = Math.round(RULES.raidHpPerMember * n * lvl * (minutes / 15));
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, over: false, result: null,
-    boss: { hp: max, max, phase: 1, next: null, feast: null },
-    members: members.map((m) => {
-      const g = withGear(m.stats, m.equipped);
-      const maxHp = Math.round(80 + g.guard * 10);
-      return { ...m, g, pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, dmg: 0, healed: 0, taken: 0,
-        cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0 };
-    }),
-    trivia: null, triviaRuns: 0, paralysed: false, log: [], events: [],
+    boss: { ...BOSS, hp: max, max, phase: 1, next: null, feast: null, warned: false },
+    members: ms, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
   };
   scheduleAttack(R);
   return R;
 }
 const ATTACKS = {
-  swipe: { label: "Swipe", what: "one person, usually the front", e: "🫳" },
-  stomp: { label: "Stomp", what: "front and middle", e: "🦶" },
-  scream: { label: "Scream", what: "everyone", e: "📢" },
-  feast: { label: "Feast", what: "hit it hard or it heals", e: "🍗" },
+  swipe: { label: "Infinite Swipe", what: "one person, usually the front", e: "🫳" },
+  stomp: { label: "Server Stomp", what: "front and middle rows", e: "🦶" },
+  scream: { label: "Notification Scream", what: "everyone", e: "📢" },
+  feast: { label: "Engagement Feast", what: "burst it or it heals", e: "🍗" },
 };
 function scheduleAttack(R) {
   const B = R.boss;
@@ -292,44 +385,52 @@ function scheduleAttack(R) {
     : B.phase === 2 ? ["swipe", "swipe", "stomp", "stomp", "scream", "feast"]
     : ["swipe", "stomp", "scream", "scream", "feast"];
   const brains = Math.max(0, ...R.members.filter((m) => m.alive).map((m) => m.g.brains));
-  B.next = { type: pick(R.r, pool), at: R.t + every, warnAt: R.t + every - RULES.raidTelegraph - brains * 0.08 };
+  B.next = { type: pick(R.r, pool), at: R.t + every, warnAt: R.t + every - RULES.raidTelegraph - brains * 0.05 };
+  B.warned = false;
 }
 const alive = (R) => R.members.filter((m) => m.alive);
 const canAct = (R, m) => m.alive && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
 // `you: true` marks the person playing on this screen, so the log reads "You raise" not "You raises".
 const nm = (m) => (m.you ? "You" : m.name);
 const vb = (m, them, you) => (m.you ? you : them);
-const say = (R, text, kind = "") => { R.log.unshift({ t: R.t, text, kind }); R.log.length = Math.min(R.log.length, 30); R.events.push({ text, kind }); };
+const say = (R, text, kind = "") => { R.log.unshift({ t: R.t, text, kind }); R.log.length = Math.min(R.log.length, 30); };
+const fx = (R, e) => R.fx.push(e);
 
 function raidTap(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m)) return null;
-  m.combo = R.t - m.lastTap <= (RULES.comboWindowMs + m.g.speed * 12) / 1000 ? Math.min(RULES.comboMax, m.combo + 1) : 0;
+  m.combo = R.t - m.lastTap <= (RULES.comboWindowMs + m.g.speed * 12) / 1000 ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
   m.lastTap = R.t;
-  const crit = R.r() < m.g.luck * 0.02;
-  let dmg = (2 + m.g.power * 0.4) * posOf(m.pos).mult * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 : 1);
-  if (m.swing > 0) { dmg *= 3; m.swing--; }
+  const crit = R.r() < m.g.luck * 0.02 + (m.perks.critChance || 0);
+  let dmg = (20 + m.g.power * 4) * posOf(m.pos).mult * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) : 1);
+  let swing = false;
+  if (m.swing > 0) { dmg *= 3; m.swing--; swing = true; }
+  if (R.boss.feast) { dmg *= m.perks.feast || 1; R.boss.feast.dealt += dmg; }
   R.boss.hp = Math.max(0, R.boss.hp - dmg);
   m.dmg += dmg;
-  if (R.boss.feast) R.boss.feast.dealt += dmg;
+  if (m.perks.lifesteal) m.hp = Math.min(m.max, m.hp + dmg * m.perks.lifesteal / 10); // damage is 10× health scale
   if (R.boss.hp <= 0) endRaid(R, "won");
-  return { dmg, crit };
+  return { dmg, crit, swing };
 }
-const abilityCd = (m) => ({ front: 25, mid: 20, back: 18 }[m.pos]) * (1 - m.g.speed * 0.03);
+const abilityCd = (m) => ({ front: 25, mid: 20, back: 18 }[m.pos]) * (1 - m.g.speed * 0.03) * (1 - (m.perks.cdr || 0));
 function raidAbility(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m) || R.t < m.cdUntil) return false;
   if (m.pos === "front") {
-    for (const f of alive(R).filter((x) => x.pos === "front")) f.shieldUntil = R.t + 8;
-    say(R, `${nm(m)} ${vb(m, "raises", "raise")} a shield wall`, "good");
+    const row = alive(R).filter((x) => x.pos === "front");
+    for (const f of row) f.shieldUntil = R.t + 8 + (m.perks.shield || 0);
+    fx(R, { type: "shield", by: m.id, ids: row.map((x) => x.id) });
+    say(R, `${nm(m)} ${vb(m, "raises", "raise")} a Shield Wall`, "good");
   } else if (m.pos === "mid") {
-    m.swing = 8;
-    say(R, `${nm(m)} ${vb(m, "winds", "wind")} up a big swing`, "good");
+    m.swing = 8 + (m.perks.swing || 0);
+    fx(R, { type: "swing", by: m.id });
+    say(R, `${nm(m)} ${vb(m, "winds", "wind")} up a Big Swing`, "good");
   } else {
     const hurt = alive(R).sort((a, b) => a.hp / a.max - b.hp / b.max)[0];
     if (!hurt) return false;
-    const heal = Math.min(hurt.max - hurt.hp, Math.round(hurt.max * 0.35));
+    const heal = Math.min(hurt.max - hurt.hp, Math.round(hurt.max * (0.35 + (m.perks.heal || 0))));
     hurt.hp += heal; m.healed += heal;
+    fx(R, { type: "heal", by: m.id, id: hurt.id, amt: heal });
     say(R, `${nm(m)} ${vb(m, "patches", "patch")} up ${hurt === m ? vb(m, "themself", "yourself") : nm(hurt).replace(/^You$/, "you")} (+${heal})`, "good");
   }
   m.cdUntil = R.t + abilityCd(m);
@@ -339,18 +440,24 @@ function raidMove(R, id, pos) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !m.alive || m.pos === pos || R.over) return false;
   m.pos = pos; m.moveUntil = R.t + Math.max(1.5, 4 - m.g.speed * 0.2); m.swing = 0;
+  fx(R, { type: "move", id: m.id, pos });
   say(R, `${nm(m)} ${vb(m, "moves", "move")} to the ${posOf(pos).label.toLowerCase()}`);
   return true;
 }
 
 function hit(R, m, base) {
   if (!m.alive) return 0;
-  let d = base * R.lvl ** 0.6 * (1 - Math.min(0.6, m.g.guard * 0.025));
+  if (m.perks.dodge && R.r() < m.perks.dodge) { fx(R, { type: "dodge", id: m.id }); return 0; }
+  let d = base * R.lvl ** 0.9 * (1 - Math.min(0.6, m.g.guard * 0.02));
   if (R.t < m.shieldUntil) d *= 0.4;
   d = Math.round(d);
   m.hp -= d; m.taken += d;
+  fx(R, { type: "hurt", id: m.id, amt: d });
+  if (m.perks.thorns) { const back = d * m.perks.thorns * 10; R.boss.hp = Math.max(0, R.boss.hp - back); m.dmg += back; }
+  if (m.hp <= 0 && m.secondWind) { m.hp = 1; m.secondWind = false; fx(R, { type: "secondWind", id: m.id }); say(R, `${nm(m)} ${vb(m, "refuses", "refuse")} to die (Second Wind)`, "good"); return d; }
   if (m.hp <= 0) {
     m.hp = 0; m.alive = false; m.swing = 0;
+    fx(R, { type: "down", id: m.id });
     say(R, `${nm(m)} ${vb(m, "is", "are")} down`, "bad");
     if (!R.trivia) startTrivia(R);
   }
@@ -363,70 +470,86 @@ function bossAttack(R) {
     const weights = up.map((m) => posOf(m.pos).aggro * (m.pos === "front" && R.t < m.shieldUntil ? 1.3 : 1));
     let x = R.r() * weights.reduce((s, w) => s + w, 0), target = up[0];
     for (let i = 0; i < up.length; i++) { x -= weights[i]; if (x <= 0) { target = up[i]; break; } }
+    fx(R, { type: "attack", attack: "swipe", ids: [target.id] });
     const d = hit(R, target, RULES.raidBossDmg * mult);
-    say(R, `Swipe hits ${target.you ? "you" : target.name} for ${d}`, "bad");
+    say(R, `Infinite Swipe hits ${target.you ? "you" : target.name} for ${d}`, "bad");
   } else if (type === "stomp") {
     let rows = up.filter((m) => m.pos !== "back");
     if (!rows.length) rows = up; // nobody in front: the stomp reaches the back
+    fx(R, { type: "attack", attack: "stomp", ids: rows.map((m) => m.id) });
     rows.forEach((m) => hit(R, m, RULES.raidBossDmg * 0.6 * mult));
-    say(R, `Stomp hits ${rows.length} of you`, "bad");
+    say(R, `Server Stomp hits ${rows.length} of you`, "bad");
   } else if (type === "scream") {
+    fx(R, { type: "attack", attack: "scream", ids: up.map((m) => m.id) });
     up.forEach((m) => hit(R, m, RULES.raidBossDmg * 0.45 * mult));
-    say(R, "Scream hits everyone", "bad");
+    say(R, "Notification Scream hits everyone", "bad");
   } else if (type === "feast") {
     // The target scales with who's standing, so a small squad isn't punished for being small.
-    const need = Math.round(up.length * 170 * R.lvl);
+    const need = Math.round(up.length * 1700 * R.lvl);
     B.feast = { until: R.t + 6, need, dealt: 0 };
-    say(R, `It's feasting. Deal ${need.toLocaleString("en-GB")} damage in 6s or it heals`, "warn");
+    fx(R, { type: "attack", attack: "feast", ids: [] });
+    say(R, `Engagement Feast. Deal ${need.toLocaleString("en-GB")} damage in 6s or it heals`, "warn");
   }
 }
 
+function triviaTime(m) { return RULES.triviaSeconds + Math.max(0, m.g.brains - 5) + (m.perks.trivia || 0); }
 function startTrivia(R) {
   R.triviaRuns++;
-  R.trivia = { qs: triviaSet(R.seed + R.triviaRuns * 7919), i: 0, until: R.t + RULES.triviaSeconds, answers: [{}, {}, {}], right: 0, wrong: 0, botPlan: {} };
+  const best = Math.max(...R.members.map(triviaTime));
+  R.trivia = { qs: triviaSet(R.seed + R.triviaRuns * 7919), i: 0, until: R.t + best, secs: best, answers: [{}, {}, {}], results: [], right: 0, wrong: 0, botPlan: {} };
   planBotAnswers(R);
-  say(R, "Someone's down. Answer 3 questions or the whole squad is paralysed", "warn");
+  fx(R, { type: "trivia" });
+  say(R, "Someone's down. Name 3 things or the whole squad is paralysed", "warn");
 }
 function planBotAnswers(R) {
   const T = R.trivia, Q = T.qs[T.i];
   T.botPlan = {};
   for (const m of R.members.filter((x) => x.bot)) {
-    const right = R.r() < 0.45 + m.g.brains * 0.04;
-    const wrongs = Q.options.map((_, i) => i).filter((i) => i !== Q.correct);
-    T.botPlan[m.id] = { at: R.t + 3 + R.r() * 14, choice: right ? Q.correct : pick(R.r, wrongs) };
+    const knows = R.r() < 0.4 + m.g.brains * 0.045;
+    const text = knows ? Q.sample(R.r, R.r() < 0.75) : pick(R.r, ["uhh", "idk", "pass", "42", "the sun?"]);
+    T.botPlan[m.id] = { at: R.t + 4 + R.r() * 15, text };
   }
 }
-function raidAnswer(R, id, choice) {
+function raidAnswer(R, id, text) {
   const T = R.trivia;
-  if (!T || T.answers[T.i][id] !== undefined) return false;
-  T.answers[T.i][id] = choice;
+  if (!T || T.answers[T.i][id]) return null;
+  const res = { text: String(text).slice(0, 40), ...T.qs[T.i].check(text) };
+  T.answers[T.i][id] = res;
   if (Object.keys(T.answers[T.i]).length >= R.members.length) resolveQuestion(R);
-  return true;
+  return res;
 }
-// Brainy players see some wrong answers crossed out.
-const hintsFor = (m) => Math.max(0, Math.min(2, Math.floor((m.g.brains - 4) / 3)));
 function resolveQuestion(R) {
   const T = R.trivia, Q = T.qs[T.i], votes = Object.values(T.answers[T.i]);
-  const right = votes.filter((v) => v === Q.correct).length;
-  const ok = votes.length > 0 && right >= votes.length - right;
+  const good = votes.filter((v) => v.valid);
+  const ok = votes.length > 0 && good.length >= votes.length - good.length;
+  const rarity = good.reduce((s, v) => s + v.rarity, 0);
   ok ? T.right++ : T.wrong++;
-  say(R, `Q${T.i + 1}: ${ok ? "right" : "wrong"} (${right}/${votes.length} picked “${Q.options[Q.correct]}”)`, ok ? "good" : "bad");
+  // Rare answers sink deeper: each rarity point knocks a slice off the boss.
+  const dive = Math.round(R.boss.max * RULES.rarityBossDmg * rarity);
+  if (ok && dive) { R.boss.hp = Math.max(1, R.boss.hp - dive); R.deepDive += dive; }
+  T.results.push({ q: Q.q, ok, rarity, dive, answers: { ...T.answers[T.i] }, examples: Q.examples });
+  fx(R, { type: "answer", ok, rarity, dive });
+  say(R, `“${Q.q}”: ${ok ? "pass" : "fail"} (${good.length}/${votes.length} valid${dive ? `, rare answers hit for ${dive.toLocaleString("en-GB")}` : ""})`, ok ? "good" : "bad");
   T.i++;
   if (T.wrong >= RULES.triviaFailAt || T.i >= T.qs.length) {
     const failed = T.wrong >= RULES.triviaFailAt;
     if (failed) {
       R.paralysed = true;
       alive(R).forEach((m) => (m.stunUntil = R.t + RULES.paralysedStunSec));
+      fx(R, { type: "paralysed" });
       say(R, `Paralysed. Everyone's stunned ${RULES.paralysedStunSec}s and starts tomorrow ${RULES.paralysedSteps.toLocaleString("en-GB")} steps down`, "bad");
     } else {
-      R.members.filter((m) => !m.alive).forEach((m) => { m.alive = true; m.hp = Math.round(m.max * 0.4); });
+      const back = R.members.filter((m) => !m.alive);
+      back.forEach((m) => { m.alive = true; m.hp = Math.round(m.max * 0.4); });
+      fx(R, { type: "revive", ids: back.map((m) => m.id) });
       say(R, "Trivia passed. The fallen are back up", "good");
     }
+    R.lastTrivia = { right: T.right, wrong: T.wrong, results: T.results, failed };
     R.trivia = null;
     if (!alive(R).length) endRaid(R, "wiped");
     else if (R.members.some((m) => !m.alive)) startTrivia(R); // someone fell during the questions
   } else {
-    T.until = R.t + RULES.triviaSeconds;
+    T.until = R.t + T.secs;
     planBotAnswers(R);
   }
 }
@@ -450,17 +573,18 @@ function raidStep(R, dt) {
   R.t += dt;
   const B = R.boss;
   const phase = B.hp / B.max > 0.6 ? 1 : B.hp / B.max > 0.3 ? 2 : 3;
-  if (phase !== B.phase) { B.phase = phase; say(R, phase === 2 ? "Phase 2: it hits harder and faster" : "Phase 3: it's enraged", "warn"); }
+  if (phase !== B.phase) { B.phase = phase; fx(R, { type: "phase", phase }); say(R, phase === 2 ? "Phase 2: it hits harder and faster" : "Phase 3: it's enraged", "warn"); }
   if (B.feast && R.t >= B.feast.until) {
-    if (B.feast.dealt < B.feast.need) { const heal = Math.round(B.max * 0.03); B.hp = Math.min(B.max, B.hp + heal); say(R, `It ate well. Healed ${heal.toLocaleString("en-GB")}`, "bad"); }
-    else say(R, "Feast interrupted", "good");
+    if (B.feast.dealt < B.feast.need) { const heal = Math.round(B.max * 0.03); B.hp = Math.min(B.max, B.hp + heal); fx(R, { type: "feastEnd", healed: heal }); say(R, `It ate well. Healed ${heal.toLocaleString("en-GB")}`, "bad"); }
+    else { fx(R, { type: "feastEnd", healed: 0 }); say(R, "Feast interrupted", "good"); }
     B.feast = null;
   }
+  if (B.next && !B.warned && R.t >= B.next.warnAt) { B.warned = true; fx(R, { type: "windup", attack: B.next.type }); }
   if (B.next && R.t >= B.next.at) { bossAttack(R); scheduleAttack(R); }
   for (const m of R.members) if (m.bot) botAct(R, m);
   const T = R.trivia;
   if (T) {
-    for (const [id, plan] of Object.entries(T.botPlan)) if (R.t >= plan.at) { raidAnswer(R, id, plan.choice); delete T.botPlan[id]; if (R.trivia !== T) break; }
+    for (const [id, plan] of Object.entries(T.botPlan)) if (R.t >= plan.at) { delete T.botPlan[id]; raidAnswer(R, id, plan.text); if (R.trivia !== T) break; }
     if (R.trivia === T && R.t >= T.until) resolveQuestion(R);
   }
   if (!R.over && R.t >= R.dur) endRaid(R, "timeout");
@@ -474,23 +598,25 @@ function endRaid(R, how) {
   const pool = how === "won" ? RULES.raidRewardPerMember * n * R.lvl
     : how === "timeout" ? RULES.raidRewardPerMember * n * R.lvl * frac * 0.5 : 0;
   // Half shared equally, half by what you did (damage, healing and hits taken for the team).
-  const work = (m) => m.dmg + m.healed * 20 + m.taken * 10;
+  const work = (m) => m.dmg + m.healed * 200 + m.taken * 100;
   const totalWork = R.members.reduce((s, m) => s + work(m), 0) || 1;
   R.result = {
-    how, frac, pool: Math.round(pool), lvl: R.lvl, paralysed: R.paralysed,
+    how, frac, pool: Math.round(pool), lvl: R.lvl, paralysed: R.paralysed, deepDive: R.deepDive,
     shares: R.members.map((m) => ({ id: m.id, name: m.name, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken,
-      reward: Math.round(pool * (0.5 / n + 0.5 * work(m) / totalWork)) })),
+      reward: Math.round(pool * (0.5 / n + 0.5 * work(m) / totalWork) * (1 + (m.perks.loot || 0))) })),
   };
-  say(R, how === "won" ? "Boss down!" : how === "timeout" ? "Time's up" : "Squad wiped", how === "won" ? "good" : "bad");
+  fx(R, { type: "end", how });
+  say(R, how === "won" ? "The Algorithm is down!" : how === "timeout" ? "Time's up" : "Squad wiped", how === "won" ? "good" : "bad");
 }
 
 root.Game = {
   DEFAULT_RULES, get RULES() { return RULES; }, setRules,
   hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
-  STATS, STAT_TOTAL, stats, POSITIONS, posOf, suggestedPosition,
-  GEAR, SLOTS, gearById, withGear, gearPoints,
-  taxmanSetup, taxmanStart, taxmanTap, taxmanResult,
-  triviaSet, FACTS,
-  ATTACKS, raidCreate, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, hintsFor,
+  xpFor, levelOf, levelProgress,
+  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition,
+  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
+  taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
+  norm, triviaSet, mathPrompt, listPrompt,
+  BOSS, ATTACKS, raidCreate, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
 };
 })(typeof window !== "undefined" ? window : globalThis);
