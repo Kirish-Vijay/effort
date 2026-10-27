@@ -30,14 +30,14 @@ Out-walk your mates. A step-counting game for friend squads: steps are money, a 
 
 - **App and rules**: push to `main`. Open apps notice the new `app.js` and reload when nothing's in progress. The server picks up a changed `game.js`/`items.js` within 10 minutes.
 - **Server**: deploy `supabase/functions/effort` (all three `.ts` files) as the `effort` function with JWT verification off (the function does its own auth with player tokens).
-- **Android app**: `android/` is Effort Steps, which reads steps from Health Connect and sends them every 15 minutes. GitHub Actions (`.github/workflows/android.yml`) builds it, checks it on an emulator and publishes signed builds at `releases/latest/download/effort-steps.apk`. The signing key is the `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` repo secrets; keep a copy of it, since updates only install over builds signed with the same key.
+- **Android app**: `android/` is Effort for Android: the game itself in a full-screen web view, plus what only an app can do. The game asks it (through `window.EffortAndroid`) for steps from Health Connect, short-video minutes from Usage access, and a 6:45pm reminder the phone schedules itself; it syncs steps and scrolling every 15 minutes. GitHub Actions (`.github/workflows/android.yml`) builds it, runs it on an emulator signed in as the `CI test (ignore)` account to check steps and scrolling reach the server, and publishes signed builds at `releases/latest/download/effort-steps.apk`. The signing key is the `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` repo secrets; keep a copy of it, since updates only install over builds signed with the same key.
 - **Notifications server**: deploy `supabase/functions/effort-push` (its `index.ts` and its copy of `rules.ts`) as `effort-push`, also with JWT verification off.
 
 ## How data gets in
 
 | What | iPhone | Android | Fallback |
 | --- | --- | --- | --- |
-| Steps | Shortcuts automation → `/log?t=TOKEN&steps=N` | Effort Steps app (`android/`, reads Health Connect, one tap to connect) → `/log`; HC Webhook → `/hc?t=TOKEN` also works | Me → Steps → Type them in |
-| Scrolling | Shortcuts "App is Opened/Closed" automations → `/scroll?t=TOKEN&ev=open\|close` | MacroDroid launch/close macros (same URLs), or Tasker → `/scroll?t=TOKEN&minutes=N` | Me → Scrolling → Type it in |
+| Steps | Shortcuts automation → `/log?t=TOKEN&steps=N` | Effort for Android (`android/`, one tap) → `/log`; HC Webhook → `/hc?t=TOKEN` also works | Me → Steps → Type them in |
+| Scrolling | Shortcuts "App is Opened/Closed" automations → `/scroll?t=TOKEN&ev=open\|close` | Effort for Android (Usage access) → `/scroll`, or MacroDroid launch/close macros (same URLs), or Tasker → `/scroll?t=TOKEN&minutes=N` | Me → Scrolling → Type it in |
 
 Each player's own links are in the app under **Me → Steps / Scrolling**.
