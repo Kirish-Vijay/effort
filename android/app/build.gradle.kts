@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "io.github.kirishvijay.effort"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "io.github.kirishvijay.effort"
         minSdk = 26
