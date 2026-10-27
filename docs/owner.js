@@ -108,6 +108,7 @@ function viewList() {
       <button class="btn sm ghost" data-act="signout">Sign out</button></div>
     <input type="search" data-input="q" value="${esc(S.q)}" placeholder="Search name, group or code" style="margin-bottom:12px" aria-label="Search">
     <div class="chips">${chip("all", "All")}${L.groups.map((g) => chip(g.id, `${g.name} · ${g.code}`)).join("")}${chip("none", "No group")}</div>
+    ${squadCard(L.groups.find((g) => g.id === S.group))}
     <div class="card list">${rows.length ? rows.map((p) => {
       const gs = groupsOf(p.id);
       return `<button class="list-row" data-act="open" data-id="${p.id}">
@@ -115,6 +116,18 @@ function viewList() {
         <span class="grow"><b>${esc(p.name)}</b><span class="small muted" style="display:block">${gs.length ? gs.map((g) => esc(g.name)).join(", ") : "No group"} · steps ${ago(p.steps_synced_at)} · scroll ${ago(p.scroll_synced_at)}</span></span>
         <span aria-hidden="true">›</span></button>`;
     }).join("") : `<div class="empty"><span class="e">🫥</span>Nobody matches.</div>`}</div>`;
+}
+
+// A squad's game state, and a switch that opens the 7pm Taxman and the Sunday raid right now for
+// that squad, for testing. It counts for real: it uses up today's Taxman fight for everyone in it.
+function squadCard(g) {
+  if (!g) return "";
+  const open = g.test_until && Date.parse(g.test_until) > Date.now();
+  return `<div class="card" style="margin-bottom:12px">
+    <div class="row spread"><b>${esc(g.name)} · ${esc(g.code)}</b><span class="small muted">Boss ${g.tier ?? 1}</span></div>
+    <p class="small muted" style="margin:6px 0 10px">${open ? `Test window open until ${new Date(g.test_until).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}.` : "Open the Taxman and the raid now, to try them with friends."} It counts for real: it uses up today's Taxman fight for everyone in the squad, and the raid pays out.</p>
+    <div class="btn-row"><button class="btn sm" data-act="test-window" data-id="${g.id}" data-min="15">${open ? "Reset to 15 min" : "Open for 15 min"}</button>${open ? `<button class="btn sm ghost" data-act="test-window" data-id="${g.id}" data-min="0">Close it</button>` : ""}</div>
+  </div>`;
 }
 
 function dayMap() {
@@ -257,6 +270,13 @@ document.addEventListener("click", async (e) => {
     else if (act === "back") { S.view = "list"; render(); await loadList(); }
     else if (act === "more") { S.days = S.days < 120 ? 120 : 365; await loadPlayer(S.player.player.id, true); }
     else if (act === "add-day") addDaySheet();
+    else if (act === "test-window") {
+      const min = Number(el.dataset.min);
+      if (min && !confirm("Open the Taxman and the raid for this squad now? It uses up today's Taxman fight for everyone in it.")) return;
+      await owner("test_window", { id: el.dataset.id, minutes: min });
+      toast(min ? "Open for 15 minutes" : "Closed");
+      await loadList();
+    }
     else if (act === "day") daySheet(el.dataset.day);
     else if (act === "copy-link") {
       try { await navigator.clipboard.writeText(el.dataset.link); toast("Link copied"); }

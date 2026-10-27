@@ -102,6 +102,8 @@ const S = {
   setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false,
 };
 const V = { tax: null, raid: null, result: null };
+// For poking at a live session from the browser console.
+window.EffortDebug = { S, V };
 const now = () => Date.now() + S.skew;
 
 // ---------- data ----------
@@ -267,9 +269,9 @@ function taxHero() {
   } else if (st === "done") {
     const k = Number(f.knocked);
     chip = `<span class="chip">${ic("check")} Done for today</span>`;
-    line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.`;
+    line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : k >= 0.05 ? `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.` : `He took the full ${Math.round(Number(f.rate) * 100)}%.`;
     btn = `<div class="rline total" style="margin-top:12px"><span>Banked tonight</span><span class="rv">${paid ? signedEfforts(paid.amount) : "–"}</span></div>
-      <p class="tiny faint" style="margin:6px 0 0">Steps after 7pm still count: they pay out after midnight on the same terms. Next fight <span data-count="${w.next}">${countdown(w.next - now())}</span>.</p>`;
+      <p class="tiny faint" style="margin:6px 0 0">Steps after 7pm still count: they pay out after midnight on the same terms.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
   } else if (st === "soon") {
     chip = `<span class="chip gold">${ic("clock")} Tonight · 7pm</span>`;
     line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Five minutes to knock him out.`;
@@ -912,7 +914,7 @@ async function joinRaid() {
   for (const m of r.roster) ANS[m.id] = m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id);
   V.raid = {
     raid: r.raid, roster: Object.fromEntries(r.roster.map((m) => [m.id, m])), my: r.me, R: null, host: false, A: null,
-    present: {}, joinedAt: now(), out: { taps: 0, ab: false, move: null, ans: null }, fxOut: [], snapAt: 0, snapFrom: null,
+    present: {}, heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, move: null, ans: null }, fxOut: [], snapAt: 0,
     lastSent: 0, lastSave: now(), q: null, taps: 0, lvlBefore: level(), rosterKey: "",
   };
   S.view = "raid";
@@ -934,12 +936,12 @@ function connectRaid() {
     });
 }
 // The host is whoever's been here longest and is still sending. Everyone works it out the same way.
+// Anyone ahead of you who has gone quiet for 4 seconds (a frozen or locked phone) is skipped.
 function elect() {
   const v = V.raid; if (!v || v.ended) return;
-  const t = now();
-  const ids = Object.keys(v.present).filter((id) => !(id === v.snapFrom && id !== v.my && t - v.snapAt > 4000 && t - v.joinedAt > 4000))
-    .sort((a, b) => v.present[a] - v.present[b] || (a < b ? -1 : 1));
-  const host = ids[0];
+  const t = now(), patient = t - v.joinedAt < 4000;
+  const ids = Object.keys(v.present).sort((a, b) => v.present[a] - v.present[b] || (a < b ? -1 : 1));
+  const host = ids.find((id) => id === v.my || patient || t - (v.heard[id] || 0) < 4000);
   if (host === v.my && !v.host) becomeHost();
   else if (host && host !== v.my && v.host) { v.host = false; }
   if (v.host) syncMembers();
@@ -970,10 +972,15 @@ function syncMembers() {
   for (const id of Object.keys(v.present)) if (v.roster[id] && !R.members.some((m) => m.id === id)) G.raidAddMember(R, fighter(id));
   for (const m of R.members) m.away = !(m.id in v.present);
 }
+// Nobody taps faster than about 15 times a second; anything beyond that from a squad-mate's phone is dropped.
+const TAPS_PER_SEC = 15;
 function onInput(p) {
   const v = V.raid; if (!v?.host || !v.R || !p || !v.roster[p.id]) return;
-  const R = v.R;
-  for (let i = 0; i < Math.min(40, p.taps | 0); i++) G.raidTap(R, p.id);
+  const R = v.R, t = performance.now(), b = (v.tapBudget[p.id] ??= { left: TAPS_PER_SEC, at: t });
+  b.left = Math.min(TAPS_PER_SEC, b.left + ((t - b.at) / 1000) * TAPS_PER_SEC); b.at = t;
+  const taps = Math.min(Math.floor(b.left), Math.max(0, p.taps | 0));
+  b.left -= taps;
+  for (let i = 0; i < taps; i++) G.raidTap(R, p.id);
   if (p.ab) G.raidAbility(R, p.id);
   if (p.move) G.raidMove(R, p.id, p.move);
   if (p.ans != null) G.raidAnswer(R, p.id, String(p.ans).slice(0, 40));
@@ -985,7 +992,7 @@ function onSnapshot(p) {
     if ((v.present[p.host] ?? Infinity) <= (v.present[v.my] ?? Infinity)) v.host = false;
     else return;
   }
-  v.snapAt = now(); v.snapFrom = p.host;
+  v.snapAt = now(); v.heard[p.host] = v.snapAt;
   const R = G.raidImport(p.R);
   const grew = !v.R || R.members.length !== v.R.members.length;
   v.R = R;
@@ -1022,8 +1029,8 @@ function raidTick() {
       v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, ...o } });
       v.out = { taps: 0, ab: false, move: null, ans: null };
     }
-    // Nobody's hosting (everyone else dropped out): the host's last snapshot is the fight, take over.
-    if (v.R && t - v.snapAt > 4000 && t - v.joinedAt > 4000) elect();
+    // The host has gone quiet: work out who takes over (maybe us, from the last snapshot).
+    if (t - v.snapAt > 4000) elect();
     // The fight's over and the host vanished before paying out: report it ourselves.
     if (v.R && (v.R.over || t > Date.parse(v.raid.ends_at) + 8000) && t - v.snapAt > 5000 && !v.finishing) reportRaid(v.R);
   }

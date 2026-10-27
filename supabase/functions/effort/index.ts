@@ -331,11 +331,7 @@ Deno.serve(async (req) => {
         if (!g) return fail("No group with that code", 404);
         const { data: mem } = await db.from("memberships").select(`team, joined_at, players(${PUBLIC_PLAYER_COLS})`).eq("group_id", g.id).order("joined_at");
         const players = (mem ?? []).map((m: any) => ({ ...m.players, team: m.team, joined_at: m.joined_at }));
-        const [data, spins] = await Promise.all([
-          dataFor(players.map((p) => p.id), 800),
-          db.from("forfeit_spins").select("week_start,loser_id,forfeit,slice,slices,spun_at").eq("group_id", g.id).order("week_start", { ascending: false }).limit(12),
-        ]);
-        return json({ ok: true, group: publicGroup(g), players, ...data, spins: spins.data ?? [] });
+        return json({ ok: true, group: publicGroup(g), players });
       }
 
       case "signup": {
