@@ -1,0 +1,6 @@
+release.jks
+.gradle/
+build/
+app/build/
+local.properties
+keystore-password.txt

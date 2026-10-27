@@ -1,0 +1,111 @@
+# Builds the Effort Steps Android app, checks it on an emulator, and publishes it as a download
+# (github.com/Kirish-Vijay/effort/releases/latest/download/effort-steps.apk).
+# It only publishes builds signed with the real key (the ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD
+# secrets), so nobody installs a build that a later update can't replace.
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.key.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Signing key
+        id: key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/release.jks
+            echo "signed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No signing key secret yet: building a test build that won't be published."
+            echo "signed=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+      - run: cp android/app/build/outputs/apk/release/app-release.apk effort-steps.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: effort-steps
+          path: effort-steps.apk
+
+  emulator:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: effort-steps
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Open it, connect, check the screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb install -r effort-steps.apk
+            adb shell am start -W -a android.intent.action.VIEW -d "effort://connect?t=CItestToken0000000" io.github.kirishvijay.effort
+            sleep 6
+            adb exec-out screencap -p > 1-before-permission.png
+            adb shell uiautomator dump /sdcard/ui1.xml && adb pull /sdcard/ui1.xml ui1.xml
+            adb shell pm grant io.github.kirishvijay.effort android.permission.health.READ_STEPS
+            adb shell am force-stop io.github.kirishvijay.effort
+            adb shell am start -W -n io.github.kirishvijay.effort/.MainActivity
+            sleep 10
+            adb exec-out screencap -p > 2-connected.png
+            adb shell uiautomator dump /sdcard/ui2.xml && adb pull /sdcard/ui2.xml ui2.xml
+            grep -o 'text="[^"]*"' ui1.xml ui2.xml
+            grep -q "Connect your steps" ui1.xml
+            grep -q "Steps today" ui2.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-screens
+          path: |
+            *.png
+            *.xml
+
+  publish:
+    needs: [build, emulator]
+    if: needs.build.outputs.signed == '1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: effort-steps
+      - name: Publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete steps-app --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create steps-app effort-steps.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+            --title "Effort Steps for Android" \
+            --notes "Connects your phone's steps to Effort. Install it, open Effort, go to Me → Steps and tap Connect steps."
