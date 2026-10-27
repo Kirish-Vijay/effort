@@ -25,7 +25,7 @@ const QUESTIONS = [
   { id: "morning", q: "First thing in the morning?", type: "choice", options: [
     ["coffee", "Coffee", "☕"], ["out", "Gym", "🏋️"], ["snooze", "Snooze", "😴"],
     ["music", "Music on", "🔊"], ["stretch", "Stretch", "🧘"], ["scroll", "Phone", "📱"]] },
-  { id: "laugh", q: "You have to get rid of one. Who goes?", type: "choice", options: [
+  { id: "laugh", q: "You have to slime one of the following. Who goes?", type: "choice", options: [
     ["giggle", "The Duolingo owl", "🦉"], ["snort", "Peppa Pig", "🐷"], ["cackle", "Clippy", "📎"],
     ["silent", "Mr Blobby", "🎈"], ["boom", "Barney", "🦖"], ["wheeze", "Crazy Frog", "🐸"]] },
   { id: "hat", q: "Pick a hat", type: "choice", options: [
