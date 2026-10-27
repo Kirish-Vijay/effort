@@ -714,7 +714,8 @@ function viewQuiz() {
       <p class="small faint" style="text-align:center">12 quick ones. They decide your look, your stats and your class.</p></section>`;
     return;
   }
-  if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>`;
+  // A question can show photos instead of emoji (q.pics: answer -> image), with the photo credits under it.
+  if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""} ${q.pics ? "pics" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${q.pics?.[v] ? `<img src="${esc(q.pics[v])}" alt="">` : e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>${q.credit ? `<p class="tiny faint credit">${q.credit}</p>` : ""}`;
   else if (q.type === "hue") body = `<input type="range" class="hue-slider" min="0" max="359" value="${a.hue ?? 30}" data-hue aria-label="Colour"><button class="btn gold block" style="margin-top:14px" data-act="quiz-next">This one</button>`;
   else if (q.type === "number") body = `<form data-form="quiz-value"><input name="v" type="number" inputmode="numeric" min="1" max="99" required class="big-input" value="${esc(a.number ?? "")}" placeholder="7" aria-label="Number"><button class="btn gold block" style="margin-top:12px">Next</button></form>`;
   else body = `<form data-form="quiz-value"><input name="v" type="text" maxlength="30" required class="big-input" value="${esc(a.word ?? "")}" placeholder="${esc(q.placeholder)}" autocomplete="off" aria-label="${esc(q.q)}"><button class="btn gold block" style="margin-top:12px">Make me</button></form>`;

@@ -27,7 +27,9 @@ const QUESTIONS = [
     ["music", "Music on", "🔊"], ["stretch", "Stretch", "🧘"], ["scroll", "Phone", "📱"]] },
   { id: "laugh", q: "You have to slime one of the following. Who goes?", type: "choice", options: [
     ["giggle", "The Duolingo owl", "🦉"], ["snort", "Peppa Pig", "🐷"], ["cackle", "Clippy", "📎"],
-    ["silent", "Mr Blobby", "🎈"], ["boom", "Barney", "🦖"], ["wheeze", "Crazy Frog", "🐸"]] },
+    ["silent", "Mr Blobby", "🎈"], ["boom", "Barney", "🦖"], ["wheeze", "Crazy Frog", "🐸"]],
+    pics: { giggle: "img/slime/duo.jpg", snort: "img/slime/peppa.jpg", cackle: "img/slime/clippy.jpg", silent: "img/slime/blobby.jpg", boom: "img/slime/barney.jpg", wheeze: "img/slime/frog.jpg" },
+    credit: 'Photos from Wikimedia Commons, cropped: <a href="https://commons.wikimedia.org/wiki/File:Peppa_Pig_and_George_in_Peppa_Pig_World_at_Paultons_Park.jpg" target="_blank" rel="noopener">Peppa Pig</a> by Paultons Park (CC BY 2.0), <a href="https://commons.wikimedia.org/wiki/File:Mr_Blobby,_Nunton_-_geograph.org.uk_-_2511830.jpg" target="_blank" rel="noopener">Mr Blobby</a> by Maigheach-gheal (CC BY-SA 2.0), <a href="https://commons.wikimedia.org/wiki/File:Barney_show_in_Qatar_(4340543390).jpg" target="_blank" rel="noopener">Barney</a> by D@LY3D (CC BY 2.0), <a href="https://commons.wikimedia.org/wiki/File:Clippy_fanart.png" target="_blank" rel="noopener">Clippy</a> by wunkypunk (CC BY-SA 3.0), <a href="https://commons.wikimedia.org/wiki/File:Person_in_CrazyFrog_costume_(from_cropped_PublicTransport_CrazyFrog).jpg" target="_blank" rel="noopener">Crazy Frog</a> and the <a href="https://commons.wikimedia.org/wiki/File:Duolingo_logo_(2019).svg" target="_blank" rel="noopener">Duolingo logo</a> (public domain).' },
   { id: "hat", q: "Pick a hat", type: "choice", options: [
     ["beanie", "Beanie", "🧶"], ["cap", "Cap", "🧢"], ["bucket", "Bucket hat", "🎣"], ["flowers", "Flower crown", "🌼"],
     ["wizard", "Wizard hat", "🔮"], ["band", "Sweatband", "🎾"], ["none", "No hat", "💇"]] },
