@@ -7,6 +7,7 @@
 const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
 const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
 const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
+const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push";
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
@@ -99,7 +100,7 @@ async function share(text, url) {
 const S = {
   view: "boot", tab: store.get("tab") || "today", token: store.get("token"), D: null, skew: 0,
   answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null, retake: false,
-  setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false,
+  setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false, push: "unknown",
 };
 const V = { tax: null, raid: null, result: null };
 // For poking at a live session from the browser console.
@@ -129,7 +130,12 @@ function saveToken(token) {
   history.replaceState(null, "", `${APP_URL}?me=${token}`);
 }
 function signOut(msg) {
-  store.del("token");
+  // This phone stops getting pings for the account it's leaving.
+  if (S.token && "serviceWorker" in navigator) {
+    const token = S.token;
+    currentSub().then((sub) => sub && callPush("unsubscribe", { token, endpoint: sub.endpoint })).catch(() => {});
+  }
+  store.del("token"); store.del("pushSynced");
   Object.assign(S, { token: null, D: null, view: "welcome" });
   history.replaceState(null, "", APP_URL);
   closeSheet(); render();
@@ -180,6 +186,69 @@ function hydratePortraits() {
 window.addEventListener("arena3d-ready", hydratePortraits);
 const head2d = (answers) => Walker.svg(answers, { crop: "head", mood: "fresh" });
 const face = (id, size = 52) => `<div class="face has-fallback" style="width:${size}px;height:${size}px"><span class="fb">${head2d(ANS[id])}</span>${portraitImg("walker", id, { w: size * 2, h: size * 2, frame: "head" })}</div>`;
+
+// ---------- notifications ----------
+// A ping at 6:45pm, 15 minutes before the Taxman (and before the raid on Sunday). The server sends it;
+// this phone just has to sign up. iPhones only allow it once Effort is on the Home Screen.
+const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+async function callPush(action, body) {
+  const res = await fetch(`${PUSH}/${action}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const data = await res.json().catch(() => ({ ok: false, error: "Couldn't reach the server" }));
+  if (!res.ok || data.ok === false) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+const swReady = () => navigator.serviceWorker.ready;
+const currentSub = () => swReady().then((r) => r.pushManager.getSubscription()).catch(() => null);
+// on | off | install (iPhone, not on the Home Screen yet) | denied | unsupported
+async function pushState() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return detectPlatform() === "ios" && !isStandalone() ? "install" : "unsupported";
+  if (Notification.permission === "denied") return "denied";
+  const sub = await currentSub();
+  return sub && Notification.permission === "granted" ? "on" : "off";
+}
+async function refreshPush() {
+  const st = await pushState();
+  if (st === S.push) return;
+  S.push = st;
+  if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+}
+const b64ToBytes = (b64) => { const s = atob((b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(s, (c) => c.charCodeAt(0)); };
+async function enablePush() {
+  const st = await pushState();
+  if (st === "install") return toast("Add Effort to your Home Screen first, then open it from there");
+  if (st === "unsupported") return toast("This browser can't do notifications. Use the calendar instead");
+  if ((await Notification.requestPermission()) !== "granted") { S.push = await pushState(); render(); return toast("Notifications weren't allowed"); }
+  try {
+    const reg = await swReady();
+    const { key } = await callPush("key");
+    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) }));
+    await callPush("subscribe", { token: S.token, sub: sub.toJSON() });
+    store.set("pushSynced", S.D?.today.day || "");
+    S.push = "on"; render(); FX.play("levelup");
+    toast("You'll get a ping at 6:45pm");
+  } catch (e) { toast(`Couldn't turn them on: ${e.message}`); }
+}
+async function disablePush() {
+  const sub = await currentSub();
+  if (sub) { callPush("unsubscribe", { token: S.token, endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+  S.push = "off"; render(); toast("Notifications off");
+}
+// Once a day, remind the server this phone still wants them (it forgets phones that stop answering).
+async function keepPushAlive() {
+  if (!S.token || !("serviceWorker" in navigator) || !("PushManager" in window) || store.get("pushSynced") === S.D?.today.day) return;
+  const sub = await currentSub();
+  if (!sub || Notification.permission !== "granted") return;
+  callPush("subscribe", { token: S.token, sub: sub.toJSON() }).then(() => store.set("pushSynced", S.D?.today.day || "")).catch(() => {});
+}
+function pushBlock() {
+  switch (S.push) {
+    case "on": return `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("bell")} Pings on</span><span class="row" style="gap:6px"><button class="btn xs" data-act="push-test">Send a test</button><button class="btn xs" data-act="push-off">Turn off</button></span></div>`;
+    case "install": return `<div class="guide small">On iPhone, notifications only work from the Home Screen app: tap <b>Share</b> → <b>Add to Home Screen</b>, open Effort from there, then turn them on.</div>`;
+    case "denied": return `<div class="guide small">Notifications are blocked for Effort. Allow them in your phone's settings (or the browser's site settings), then come back here.</div>`;
+    case "unsupported": return `<p class="small muted" style="margin:0">This browser can't do notifications. Use the calendar below.</p>`;
+    default: return `<button class="btn gold block" data-act="push-on">${ic("bell")} Ping me at 6:45pm</button>`;
+  }
+}
 
 // ---------- shell ----------
 function render() {
@@ -275,7 +344,7 @@ function taxHero() {
   } else if (st === "soon") {
     chip = `<span class="chip gold">${ic("clock")} Tonight · 7pm</span>`;
     line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Five minutes to knock him out.`;
-    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me at 6:45pm</button>` : ""}`;
   } else {
     chip = `<span class="chip red">${ic("warning")} Missed tonight</span>`;
     line = `No fight, so he takes the full ${Math.round(T.taxRate * 100)}% when today settles after midnight.`;
@@ -492,8 +561,10 @@ function tabMe() {
       <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} Track it</button><button class="btn sm" data-act="log-scroll">${ic("edit")} Type it in</button></div>
     </section>
     <section class="panel">
-      <div class="ptitle"><span class="ic-badge">${ic("calendar")}</span><h2 class="ol-sm">Reminders</h2></div>
-      <p class="small muted" style="margin:0 0 10px">The Taxman is only around 7pm to 7:05pm, and the raid is Sunday 7pm to 7:15pm. Put them in your calendar so you don't miss them.</p>
+      <div class="ptitle"><span class="ic-badge">${ic("bell")}</span><h2 class="ol-sm">Reminders</h2></div>
+      <p class="small muted" style="margin:0 0 10px">The Taxman is only around 7pm to 7:05pm, and the raid is Sunday 7pm to 7:15pm. Get a ping at 6:45pm so you don't miss them.</p>
+      ${pushBlock()}
+      <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
     </section>
     <section class="panel">
@@ -517,7 +588,7 @@ function reminderButtons() {
   const w = S.D.windows, gstamp = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(t).replace(/\D/g, "").replace(/^(\d{8})/, "$1T");
   const gcal = (text, start, mins, rule) => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(text)}&dates=${gstamp(start)}/${gstamp(start + mins * 60000)}&ctz=Europe/London&recur=${encodeURIComponent("RRULE:" + rule)}&details=${encodeURIComponent(APP_URL)}`;
   const taxAt = w.tax.test ? w.tax.next : w.tax.opens > now() ? w.tax.opens : w.tax.next;
-  return `<a class="btn sm gold block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
+  return `<a class="btn sm block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
     <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman", taxAt, 5, "FREQ=DAILY")}">Google: 7pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid", w.raid.test ? w.raid.closes : w.raid.opens, 15, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
 }
 
@@ -687,7 +758,9 @@ function viewSetup() {
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss 7pm</h1>
-      <p class="muted">The Taxman is only around for five minutes a day, and the raid for fifteen on Sunday. Put them in your calendar.</p>
+      <p class="muted">The Taxman is only around for five minutes a day, and the raid for fifteen on Sunday. We'll ping you at 6:45pm.</p>
+      ${pushBlock()}
+      <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
       <p class="small faint" style="margin:14px 0">Tip: add Effort to your home screen (Share → Add to Home Screen on iPhone, ⋮ → Add to Home screen on Android) so it opens like an app.</p>
       <button class="btn gold xl block" data-act="setup-done">Let's go ${ic("arrowRight")}</button>`}
@@ -709,6 +782,7 @@ async function finishQuiz() {
   store.del("draftAnswers");
   await load();
   S.view = S.invite ? "setup" : "squad"; S.setupStep = "steps"; S.invite = null;
+  refreshPush();
   render(); scrollTo(0, 0);
 }
 function quizAdvance() {
@@ -1461,6 +1535,9 @@ document.addEventListener("click", async (e) => {
   if (d.move && V.raid) { raidAct("move", d.move); FX.play("tap"); return; }
   switch (d.act) {
     case "close-sheet": closeSheet(); break;
+    case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
+    case "push-off": disablePush(); break;
+    case "push-test": try { await callPush("test", { token: S.token }); toast("Sent. It should arrive in a few seconds"); } catch (err) { toast(err.message); } break;
     case "start": S.view = "quiz"; S.qi = 0; S.retake = false; render(); break;
     case "quiz-back": if (S.qi > (S.retake ? 1 : 0)) { S.qi--; render(); } else { S.view = S.retake ? "main" : "welcome"; S.retake = false; render(); } break;
     case "quiz-next": quizAdvance(); break;
@@ -1534,7 +1611,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
 
 // ---------- boot ----------
 (async function boot() {
-  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register("sw.js").catch(() => {});
   checkForUpdate();
   render();
   const params = new URLSearchParams(location.search);
@@ -1549,6 +1626,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
     }
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
     S.view = "main"; render();
+    refreshPush(); keepPushAlive();
     if (inviteCode && squad()?.code !== inviteCode.toUpperCase()) {
       try {
         const inv = await lookupInvite(inviteCode);

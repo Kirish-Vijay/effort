@@ -23,12 +23,14 @@ Out-walk your mates. A step-counting game for friend squads: steps are money, a 
 - **The wallet is a ledger.** Every change is a row in `ledger` (a day's steps, a fight, a raid, the weekly payment, a purchase), unique per player and thing, so nothing is paid twice. Balance, XP and owned gear are all sums over it. Purchases go through the `spend` database function, which locks per player.
 - **Settling** happens when someone opens the app (`/game`): any finished days and last week's table are paid out then.
 - **Live raids**: the first squad member in becomes the host. Their phone runs the fight and streams it to the others over Supabase Realtime about 7 times a second; the others send their taps. If the host's phone goes quiet for 4 seconds, the next one takes over from the last snapshot. The host saves the fight to the server every 15 seconds. At the end the server works out everyone's pay itself from their real gear and steps. If nobody reports the end, the next `/game` call pays out from the last saved snapshot.
+- **Notifications**: a ping at 6:45pm, 15 minutes before the Taxman (on Sunday it's about the raid). Players turn it on under Me → Reminders; on iPhone it only works once Effort is on the Home Screen. The `effort-push` function sends it: a database timer (`pg_cron` job `effort-evening-ping`) calls it at :45 past every hour, and it pings whoever's local time is 6:45pm, once a day each. Its signing keys were made on first use and live in `app_config`.
 - **Testing a fight early**: on `owner.html`, pick a squad and open a 15-minute test window. It opens the Taxman and a raid for that squad straight away, and it counts for real.
 
 ## Deploying
 
 - **App and rules**: push to `main`. Open apps notice the new `app.js` and reload when nothing's in progress. The server picks up a changed `game.js`/`items.js` within 10 minutes.
 - **Server**: deploy `supabase/functions/effort` (all three `.ts` files) as the `effort` function with JWT verification off (the function does its own auth with player tokens).
+- **Notifications server**: deploy `supabase/functions/effort-push` (its `index.ts` and its copy of `rules.ts`) as `effort-push`, also with JWT verification off.
 
 ## How data gets in
 
