@@ -15,6 +15,15 @@ const DEFAULT_RULES = {
   taxPerOverMin: 0.005,     // +0.5% tax per minute scrolled over budget
   taxMaxExtra: 0.20,
   stealCap: 0.30,           // beat the Taxman, keep tapping: steal up to +30%
+  paceTax: 0.05,            // beat the squad's average steps today: 5 points less tax; fall 10% short: 5 more
+  // Walking is the point. In the Sunday raid your steps this week, against the squad's average, decide how hard you hit.
+  strideMin: 0.5,           // half the squad average or less: half damage
+  strideMax: 1.6,           // the hardest walker hits up to 60% harder
+  stepsShare: 0.5,          // half of the raid's reward is split by steps walked, half by what you did in the fight
+  topLoot: 0.25,            // the week's top walker gets +25% on their share...
+  lastLoot: -0.25,          // ...the week's lowest walker gets 25% less...
+  slackerTax: 0.1,          // ...and pays 10% of their week's Efforts to the top walker
+  slackerAggro: 2.5,        // the boss goes for the lowest walker this many times as often
   windowHour: 19,           // battles open at 7pm
   dailyWindowMin: 5,
   raidMin: 15,
@@ -83,7 +92,15 @@ function money(efforts, short) {
 }
 const scrollBudget = (steps) => Math.min(RULES.scrollBudgetMax, Math.floor((steps || 0) / 1000) * RULES.scrollMinPer1kSteps);
 const overBudget = (steps, scrollMin) => Math.max(0, (scrollMin || 0) - scrollBudget(steps));
-const taxRate = (steps, scrollMin) => RULES.baseTax + Math.min(RULES.taxMaxExtra, overBudget(steps, scrollMin) * RULES.taxPerOverMin);
+// Your cut depends on scrolling, and on how you walked against the squad today (if we know their average).
+function pace(steps, squadAvg) {
+  if (!squadAvg) return 0;
+  if (steps >= squadAvg * 1.1) return 1;
+  if (steps < squadAvg * 0.9) return -1;
+  return 0;
+}
+const taxRate = (steps, scrollMin, squadAvg) =>
+  Math.round(Math.max(0, RULES.baseTax + Math.min(RULES.taxMaxExtra, overBudget(steps, scrollMin) * RULES.taxPerOverMin) - pace(steps, squadAvg) * RULES.paceTax) * 1000) / 1000;
 
 // ---------- levels ----------
 const xpFor = (level) => RULES.xpPerLevel * (level - 1) ** 2;
@@ -191,11 +208,11 @@ const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RUL
 // ---------- 7pm: the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
 // (only the moving weak spot takes proper damage), and golden receipts fly past for bonus loot.
-function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {}, level = 1 }) {
+function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {}, level = 1, squadAvg = 0 }) {
   const efforts = effortsFromSteps(steps), over = overBudget(steps, scrollMin);
   const { g, perks } = loadout(st, equipped, inv);
   return {
-    efforts, over, taxRate: taxRate(steps, scrollMin), perks,
+    efforts, over, taxRate: taxRate(steps, scrollMin, squadAvg), pace: pace(steps, squadAvg), squadAvg, perks,
     level,
     // He keeps pace with you: every level you gain, he gets tougher (and you can steal a bit more).
     hp: Math.round((RULES.taxmanBaseHp + efforts * RULES.taxmanHpPerEffort + over * RULES.taxmanHpPerOverMin) * (1 + RULES.taxmanPerLevel * (level - 1))),
@@ -374,25 +391,36 @@ function triviaSet(seed, count = 3) {
 // ---------- Sunday: the squad raid ----------
 // members: [{ id, name, stats, equipped, inv, pos, bot, you }]. Time is in seconds; call raidStep with real elapsed time.
 // Effects the UI should play are pushed to R.fx as { type, ... } and drained by the screen.
+// The week's table: everyone ranked by steps, with the stride that sets their raid damage.
+// Top and bottom only get titles when there's a real gap between them.
+function weekTable(members) {
+  const avg = members.reduce((s, m) => s + (m.weekSteps || 0), 0) / Math.max(1, members.length);
+  const rows = members.map((m) => ({ id: m.id, name: m.name, you: !!m.you, weekSteps: m.weekSteps || 0,
+    stride: avg > 0 ? Math.round(clamp((m.weekSteps || 0) / avg, RULES.strideMin, RULES.strideMax) * 100) / 100 : 1, title: null }));
+  rows.sort((a, b) => b.weekSteps - a.weekSteps);
+  if (rows.length >= 2 && rows[0].weekSteps > rows[rows.length - 1].weekSteps) { rows[0].title = "top"; rows[rows.length - 1].title = "last"; }
+  return { avg, rows };
+}
+
 // The ladder: beat a boss and next Sunday you face the next one. After the last, it loops with
 // everything twice as tough (and twice as rich) each lap, so it never stops getting harder. hp/dmg/reward are multipliers; speed scales the gap between attacks.
 const BOSSES = [
-  { id: "notification", name: "The Notification", title: "Small, pink, and utterly convinced it's urgent", hp: 1, dmg: 1, speed: 1, reward: 1,
-    attacks: { swipe: "Ping", stomp: "Badge Bounce", scream: "Ding Ding Ding", feast: "Unread Pile-Up" } },
-  { id: "autoplay", name: "Autoplay", title: "Starts the next one before you've agreed to anything", hp: 1.12, dmg: 1.05, speed: 0.97, reward: 1.4,
-    attacks: { swipe: "Next Episode Bite", stomp: "Binge Stampede", scream: "Are You Still Watching?", feast: "Season Two" } },
-  { id: "leftonread", name: "Left On Read", title: "Saw your message at 9:14. Chose silence", hp: 1.25, dmg: 1.1, speed: 0.94, reward: 1.9,
-    attacks: { swipe: "Cold Shoulder", stomp: "Seen Slam", scream: "Typing… Stops", feast: "Ghosting" } },
-  { id: "scroll", name: "The Infinite Scroll", title: "Goes round and round. So, it turns out, do you", hp: 1.4, dmg: 1.16, speed: 0.91, reward: 2.5,
-    attacks: { swipe: "Thumb Whip", stomp: "Refresh Slam", scream: "Pull-To-Refresh Wail", feast: "Endless Feed" } },
-  { id: "kraken", name: "Brainrot Kraken", title: "Each tentacle holds a forty-second video about nothing", hp: 1.55, dmg: 1.22, speed: 0.88, reward: 3.2,
-    attacks: { swipe: "Tentacle Scroll", stomp: "Ink Dump", scream: "Brainrot Wail", feast: "Content Binge" } },
-  { id: "algorithm", name: "The Algorithm", title: "Knows what you want before you do. It's never a walk", hp: 1.72, dmg: 1.3, speed: 0.85, reward: 4,
-    attacks: { swipe: "Recommended For You", stomp: "Server Stomp", scream: "Notification Scream", feast: "Engagement Feast" } },
-  { id: "dragon", name: "Doomscroll Dragon", title: "Hoards your screen time. Breathes 3am", hp: 1.9, dmg: 1.38, speed: 0.82, reward: 5,
-    attacks: { swipe: "Thumb Claw", stomp: "Screen Time Slam", scream: "3am Breath", feast: "Just One More" } },
+  { id: "notification", name: "Brett", title: "A slime. Doesn't go away", hp: 1, dmg: 1, speed: 1, reward: 1,
+    attacks: { swipe: "Slap", stomp: "Belly Flop", scream: "Screech", feast: "Gorge" } },
+  { id: "autoplay", name: "Rory", title: "All teeth, no manners", hp: 1.12, dmg: 1.05, speed: 0.97, reward: 1.4,
+    attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Spore Cloud", feast: "Gorge" } },
+  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.25, dmg: 1.1, speed: 0.94, reward: 1.9,
+    attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain" } },
+  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.4, dmg: 1.16, speed: 0.91, reward: 2.5,
+    attacks: { swipe: "Gust", stomp: "Downdraft", scream: "Howl", feast: "Siphon" } },
+  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.55, dmg: 1.22, speed: 0.88, reward: 3.2,
+    attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour" } },
+  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.72, dmg: 1.3, speed: 0.85, reward: 4,
+    attacks: { swipe: "Club Swing", stomp: "Ground Pound", scream: "War Cry", feast: "Feast" } },
+  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.9, dmg: 1.38, speed: 0.82, reward: 5,
+    attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Fire Roar", feast: "Hoard" } },
 ];
-// tier starts at 1. Tier 8 is The Algorithm again on lap 2, and so on.
+// tier starts at 1. Tier 8 is Brett again on lap 2, and so on.
 function bossFor(tier) {
   const t = Math.max(1, Math.floor(tier || 1)), lap = Math.floor((t - 1) / BOSSES.length), b = BOSSES[(t - 1) % BOSSES.length];
   const k = 2 ** lap, rk = (BOSSES[BOSSES.length - 1].reward * 1.1) ** lap; // lap 2 starts richer than the final boss of lap 1
@@ -401,10 +429,12 @@ function bossFor(tier) {
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1 } = {}) {
   const r = rng(seed);
   const n = members.length;
+  const table = weekTable(members);
   const ms = members.map((m) => {
     const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
     const maxHp = Math.round(80 + g.guard * 10);
-    return { ...m, g, perks, gearPts: points, pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, dmg: 0, healed: 0, taken: 0,
+    const row = table.rows.find((x) => x.id === m.id);
+    return { ...m, g, perks, gearPts: points, weekSteps: row.weekSteps, stride: row.stride, title: row.title, pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, dmg: 0, healed: 0, taken: 0,
       cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind };
   });
   // Boss level tracks how much stronger gear makes the squad than their bare stats (damage × toughness × perks),
@@ -425,16 +455,16 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
     // Balanced for a squad of four; smaller squads take lighter hits. Short test raids pay proportionally less.
     sizeDmg: Math.min(1, 0.4 + 0.15 * n), timeShare: Math.min(1, minutes / 15),
     boss: { ...def, hp: max, max, phase: 1, next: null, feast: null, warned: false },
-    members: ms, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
+    members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
   };
   scheduleAttack(R);
   return R;
 }
 const ATTACKS = {
-  swipe: { label: "Infinite Swipe", what: "one person, usually the front", e: "🫳" },
-  stomp: { label: "Server Stomp", what: "front and middle rows", e: "🦶" },
-  scream: { label: "Notification Scream", what: "everyone", e: "📢" },
-  feast: { label: "Engagement Feast", what: "burst it or it heals", e: "🍗" },
+  swipe: { label: "Strike", what: "one person, usually the front", e: "🫳" },
+  stomp: { label: "Stomp", what: "front and middle rows", e: "🦶" },
+  scream: { label: "Scream", what: "everyone", e: "📢" },
+  feast: { label: "Feast", what: "hit it hard or it heals", e: "🍗" },
 };
 function scheduleAttack(R) {
   const B = R.boss;
@@ -449,7 +479,8 @@ function scheduleAttack(R) {
 function swipeTarget(R) {
   const up = alive(R);
   if (!up.length) return null;
-  const weights = up.map((m) => posOf(m.pos).aggro * (m.pos === "front" && R.t < m.shieldUntil ? 1.3 : 1));
+  // The week's lowest walker draws far more of the boss's attention.
+  const weights = up.map((m) => posOf(m.pos).aggro * (m.pos === "front" && R.t < m.shieldUntil ? 1.3 : 1) * (m.title === "last" ? RULES.slackerAggro : 1));
   let x = R.r() * weights.reduce((s, w) => s + w, 0);
   for (let i = 0; i < up.length; i++) { x -= weights[i]; if (x <= 0) return up[i]; }
   return up[up.length - 1];
@@ -478,7 +509,8 @@ function raidTap(R, id) {
   m.combo = R.t - m.lastTap <= (RULES.comboWindowMs + m.g.speed * 12) / 1000 ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
   m.lastTap = R.t;
   const crit = R.r() < m.g.luck * 0.02 + (m.perks.critChance || 0);
-  let dmg = (20 + m.g.power * 4) * posOf(m.pos).mult * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) : 1);
+  // Stride: walk more than the squad this week and every hit lands harder.
+  let dmg = (20 + m.g.power * 4) * m.stride * posOf(m.pos).mult * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) : 1);
   let swing = false;
   if (m.swing > 0) { dmg *= 3; m.swing--; swing = true; }
   if (R.boss.feast) { dmg *= m.perks.feast || 1; R.boss.feast.dealt += dmg; }
@@ -678,13 +710,22 @@ function endRaid(R, how) {
   const frac = 1 - R.boss.hp / R.boss.max;
   const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
   const pool = how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0;
-  // Half shared equally, half by what you did (damage, healing and hits taken for the team).
+  // Split: half by steps walked this week, half by what you did in the fight (damage, healing, hits taken).
   const work = (m) => m.dmg + m.healed * 200 + m.taken * 100;
   const totalWork = R.members.reduce((s, m) => s + work(m), 0) || 1;
+  const totalSteps = R.members.reduce((s, m) => s + m.weekSteps, 0);
+  const stepPart = (m) => (totalSteps > 0 ? m.weekSteps / totalSteps : 1 / n);
+  const titleLoot = (m) => (m.title === "top" ? RULES.topLoot : m.title === "last" ? RULES.lastLoot : 0);
+  // Weekly settlement, win or lose: the lowest walker pays a cut of their week's Efforts to the top walker.
+  const top = R.members.find((m) => m.title === "top"), last = R.members.find((m) => m.title === "last");
+  const settle = top && last ? { from: last.id, to: top.id, amount: Math.round(RULES.slackerTax * last.weekSteps / RULES.stepsPerEffort) } : null;
   R.result = {
-    how, frac, pool: Math.round(pool), lvl: R.lvl, tier: R.tier, boss: R.boss.name, paralysed: R.paralysed, deepDive: R.deepDive,
-    shares: R.members.map((m) => ({ id: m.id, name: m.name, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken,
-      reward: Math.round(pool * (0.5 / n + 0.5 * work(m) / totalWork) * (1 + (m.perks.loot || 0))) })),
+    how, frac, pool: Math.round(pool), lvl: R.lvl, tier: R.tier, boss: R.boss.name, paralysed: R.paralysed, deepDive: R.deepDive, settle,
+    shares: R.members.map((m) => {
+      const reward = Math.round(pool * (RULES.stepsShare * stepPart(m) + (1 - RULES.stepsShare) * work(m) / totalWork) * Math.max(0, 1 + (m.perks.loot || 0) + titleLoot(m)));
+      const tax = settle ? (m.id === settle.to ? settle.amount : m.id === settle.from ? -settle.amount : 0) : 0;
+      return { id: m.id, name: m.name, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken, weekSteps: m.weekSteps, stride: m.stride, title: m.title, reward, tax, total: reward + tax };
+    }),
   };
   fx(R, { type: "end", how });
   say(R, how === "won" ? `${R.boss.name} is down!` : how === "timeout" ? "Time's up" : "Squad wiped", how === "won" ? "good" : "bad");
@@ -694,6 +735,7 @@ root.Game = {
   DEFAULT_RULES, get RULES() { return RULES; }, setRules,
   hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
+  pace, weekTable,
   STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition,
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,

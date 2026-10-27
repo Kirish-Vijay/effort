@@ -465,3 +465,28 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .ability .ic-slot .ic { filter: none; }
 .plate .st .ic { font-size: 11px; }
 .dock button .ic { width: 24px; height: 24px; }
+
+/* The weekly table */
+.wtable { display: grid; gap: 6px; }
+.wrow { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 14px; background: var(--inset); border: 2px solid var(--ink); }
+.wrow .wn { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font: 400 15px/1 var(--display); background: #26356f; border: 2px solid var(--ink); }
+.wrow b { font: 400 15px/1.1 var(--display); margin-right: 6px; }
+.wrow .chip { height: 18px; font-size: 9.5px; padding: 0 6px; vertical-align: 2px; }
+.wbar { display: block; height: 6px; margin-top: 6px; border-radius: 9px; background: rgba(255,255,255,.08); overflow: hidden; }
+.wbar s { display: block; height: 100%; border-radius: 9px; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+.wrow .ws { text-align: right; display: grid; gap: 3px; }
+.wrow .ws b { margin: 0; font-size: 16px; }
+.wrow .ws small { font: 700 11px/1 var(--ui); color: var(--text-2); }
+.wrow .ws small.up { color: #9df0b9; } .wrow .ws small.down { color: #ff9aa3; }
+.wrow.me { box-shadow: 0 0 0 2px var(--cyan) inset; }
+.wrow.top { background: linear-gradient(90deg, rgba(255,200,61,.16), var(--inset) 60%); }
+.wrow.top .wn { background: linear-gradient(180deg, var(--gold-hi), var(--gold-lo)); color: #3a2400; font-size: 16px; }
+.wrow.top .wbar s { background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi)); }
+.wrow.last { background: linear-gradient(90deg, rgba(255,77,94,.14), var(--inset) 60%); }
+.wrow.last .wn { background: linear-gradient(180deg, var(--red-hi), var(--red-lo)); }
+.wrow.last .wbar s { background: linear-gradient(90deg, var(--red-lo), var(--red)); }
+.plate.top { border-color: var(--gold); }
+.plate.last { border-color: var(--red); }
+.plate .tt { margin-right: 3px; font-size: 11px; vertical-align: -1px; }
+.plate.top .tt { color: var(--gold); } .plate.last .tt { color: var(--red); }
+.rtable td .ic { font-size: 12px; vertical-align: -1px; }

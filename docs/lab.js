@@ -29,6 +29,7 @@ const fresh = () => ({
   v: 3, answers: Walker.fallbackAnswers("lab-" + Math.floor(Math.random() * 1e9)), name: "You", fromApp: false,
   wallet: 1500, xp: 0, inv: {}, equipped: {}, steps: 9000, scroll: 25, debt: 0,
   bots: 3, botGear: "some", raidMin: 15, pos: null, rules: {}, history: [], shopTab: "class", tier: 1, no3d: false,
+  week: 60000, botPace: "mixed",
 });
 let L;
 try {
@@ -40,6 +41,8 @@ try {
 for (const [slot, id] of Object.entries(L.equipped)) if (!G.itemById(id)) delete L.equipped[slot];
 for (const id of Object.keys(L.inv)) if (!G.itemById(id)) delete L.inv[id];
 L.bots = Math.min(5, Math.max(1, L.bots | 0)); // raids are a squad fight: at least one teammate
+if (!Number.isFinite(L.week)) L.week = 60000;
+if (!["lazy", "mixed", "keen"].includes(L.botPace)) L.botPace = "mixed";
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(L)); } catch { /* private mode: still works this session */ } };
 G.setRules(L.rules);
 
@@ -63,7 +66,16 @@ const level = () => G.levelOf(L.xp);
 function addHistory(text, delta, kind = "") { L.history.unshift({ text, delta, kind, at: Date.now() }); L.history.length = Math.min(L.history.length, 12); }
 // Returns how many levels were gained.
 function gainXp(n) { const before = level(); L.xp += Math.max(0, Math.round(n)); return level() - before; }
-const taxSetup = () => G.taxmanSetup({ steps: effectiveSteps(), scrollMin: L.scroll, stats: myStats(), equipped: L.equipped, inv: L.inv, level: level() });
+// How the bots walk this week (playtest setting). Today's steps are roughly a seventh of the week.
+const BOT_NAMES = ["Priya", "Tom", "Jas", "Mo", "Ellie"];
+const PACE = { lazy: [52000, 38000, 30000, 24000, 45000], mixed: [95000, 62000, 48000, 28000, 80000], keen: [120000, 98000, 90000, 75000, 110000] };
+const botWeek = (i) => PACE[L.botPace][i];
+const squadAvgToday = () => {
+  const all = [effectiveSteps(), ...BOT_NAMES.slice(0, L.bots).map((_, i) => botWeek(i) / 7)];
+  return all.reduce((a, b) => a + b, 0) / all.length;
+};
+const weekRows = () => G.weekTable([{ id: "me", you: true, name: L.name, weekSteps: L.week }, ...BOT_NAMES.slice(0, L.bots).map((name, i) => ({ id: "bot" + i, name, weekSteps: botWeek(i) }))]);
+const taxSetup = () => G.taxmanSetup({ steps: effectiveSteps(), scrollMin: L.scroll, stats: myStats(), equipped: L.equipped, inv: L.inv, level: level(), squadAvg: squadAvgToday() });
 
 const PERKS = {
   critChance: (v) => `+${Math.round(v * 100)}% critical hit chance`,
@@ -122,6 +134,21 @@ function render() {
   syncSliders();
 }
 
+// ---------- This week: the table everything hangs off ----------
+function weekPanel() {
+  const T = weekRows(), top = Math.max(1, ...T.rows.map((r) => r.weekSteps));
+  return `<section class="panel" id="week-panel">
+      <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">This week</h2><span class="side chip">Avg ${fmt(T.avg)}</span></div>
+      <div class="wtable">${T.rows.map((r, i) => `<div class="wrow ${r.you ? "me" : ""} ${r.title || ""}">
+          <span class="wn">${r.title === "top" ? ic("crown") : i + 1}</span>
+          <span class="grow"><b>${esc(r.you ? "You" : r.name)}</b>${r.title === "top" ? '<span class="chip gold">Top walker</span>' : r.title === "last" ? '<span class="chip red">Dead weight</span>' : ""}
+            <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i></span>
+          <span class="ws"><b class="num">${fmt(r.weekSteps)}</b><small class="${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} power</small></span>
+        </div>`).join("")}</div>
+      <p class="tiny faint" style="margin:10px 0 0">Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). Top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week. Dead weight hits softer, gets hunted by the boss and pays up.</p>
+    </section>`;
+}
+
 // ---------- Daily ----------
 function dayTiles() {
   const S = taxSetup(), stake = Math.round(S.efforts * S.taxRate);
@@ -131,7 +158,10 @@ function dayTiles() {
       <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(S.hp)}</div></div>
       <div class="tile cyan"><div class="k">${ic("phone")} Scroll budget</div><div class="v">${G.scrollBudget(effectiveSteps())}<small>min</small></div></div>
     </div>
-    ${L.debt ? `<div class="chip red" style="margin-top:10px">${ic("bolt")} Paralysed: −${fmt(L.debt)} steps today</div>` : ""}`;
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">
+      ${S.pace > 0 ? `<span class="chip green">${ic("steps")} Ahead of the squad today · −${Math.round(G.RULES.paceTax * 100)}% tax</span>` : S.pace < 0 ? `<span class="chip red">${ic("steps")} Behind the squad today · +${Math.round(G.RULES.paceTax * 100)}% tax</span>` : `<span class="chip">${ic("steps")} Level with the squad today</span>`}
+      ${L.debt ? `<span class="chip red">${ic("bolt")} Paralysed: −${fmt(L.debt)} steps today</span>` : ""}
+    </div>`;
 }
 function tabDaily() {
   const S = taxSetup();
@@ -146,17 +176,23 @@ function tabDaily() {
         <div class="btn-row" style="margin-top:10px"><button class="btn sm" data-act="tax" data-sec="60">${ic("timer")} 1-min test</button><button class="btn sm red" data-act="skip-tax">Pay and skip</button></div>
       </div>
     </section>
+    ${weekPanel()}
     <section class="panel">
-      <div class="ptitle"><span class="ic-badge blue">${ic("steps")}</span><h2 class="ol-sm">Your day</h2><span class="side chip">Playtest</span></div>
+      <div class="ptitle"><span class="ic-badge blue">${ic("steps")}</span><h2 class="ol-sm">Your steps</h2><span class="side chip">Playtest</span></div>
       <div class="slider"><div class="row"><label for="steps">${ic("steps")} Steps</label><output id="o-steps">${fmt(L.steps)}</output></div>
         <input id="steps" type="range" min="0" max="30000" step="500" value="${L.steps}" data-input="steps" aria-label="Steps today"></div>
-      <div class="slider" style="margin-bottom:0"><div class="row"><label for="scroll">${ic("phone")} Short-video scrolling</label><output id="o-scroll">${L.scroll}<small class="faint" style="font:600 12px var(--ui)"> min</small></output></div>
+      <div class="slider"><div class="row"><label for="scroll">${ic("phone")} Short-video scrolling</label><output id="o-scroll">${L.scroll}<small class="faint" style="font:600 12px var(--ui)"> min</small></output></div>
         <input id="scroll" type="range" min="0" max="180" step="5" value="${L.scroll}" data-input="scroll" aria-label="Minutes of scrolling"></div>
+      <div class="slider"><div class="row"><label for="week">${ic("trophy")} Steps this week</label><output id="o-week">${fmt(L.week)}</output></div>
+        <input id="week" type="range" min="0" max="150000" step="1000" value="${L.week}" data-input="week" aria-label="Steps this week"></div>
+      <span class="field-label">How hard the squad walks</span>
+      <div class="seg">${[["lazy", "Lazy"], ["mixed", "Mixed"], ["keen", "Keen"]].map(([k, l]) => `<button data-pace="${k}" aria-pressed="${L.botPace === k}">${l}</button>`).join("")}</div>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How it works</h2></div>
       <div class="how">
         <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort. ${PER_E()} Efforts make 1 Endeavour. More steps also make you hit harder tonight.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more. Your week decides your power on Sunday.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>The Taxman calls at 7pm</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% of the day's Efforts. Scrolling over your budget pushes it towards ${Math.round((G.RULES.baseTax + G.RULES.taxMaxExtra) * 100)}%.</span></div></div>
         <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>Tap to fight back</b><span>${G.RULES.dailyWindowMin} minutes. Every hit cuts the tax; knock him out and you keep everything. Keep tapping to steal up to ${Math.round(S.stealCap * 100)}% extra. Stop and he heals.</span></div></div>
         <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>About every ${G.RULES.auditEvery + G.RULES.auditFor}s he Audits you: only the moving target takes damage. Golden receipts knock off 3% of his health, or add 1% to your haul once he's down.</span></div></div>
@@ -190,15 +226,15 @@ function botSquad() {
   const bots = names.slice(0, L.bots).map((name, i) => {
     const answers = Walker.fallbackAnswers("bot-" + name);
     const stats = G.stats(answers);
-    return { id: "bot" + i, name, answers, stats, equipped: botKit(G.classOf(stats).id, L.botGear), inv: {}, bot: true };
+    return { id: "bot" + i, name, answers, stats, equipped: botKit(G.classOf(stats).id, L.botGear), inv: {}, bot: true, weekSteps: botWeek(i) };
   });
   // Fill the rows the player isn't covering so a test squad always has some shape.
   const mine = L.pos || G.suggestedPosition(st);
   const need = ["front", "back", "mid"].filter((p) => p !== mine);
   bots.forEach((b, i) => (b.pos = need[i] || G.suggestedPosition(b.stats)));
-  return [{ id: "me", you: true, name: L.name, answers: L.answers, stats: st, equipped: L.equipped, inv: L.inv, pos: mine }, ...bots];
+  return [{ id: "me", you: true, name: L.name, answers: L.answers, stats: st, equipped: L.equipped, inv: L.inv, pos: mine, weekSteps: L.week }, ...bots];
 }
-const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward;
+const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
 function tabRaid() {
   const st = myStats(), cls = myClass(), sug = G.suggestedPosition(st), pos = L.pos || sug;
   const preview = G.raidCreate(botSquad(), { minutes: L.raidMin, seed: 1, tier: L.tier });
@@ -213,11 +249,12 @@ function tabRaid() {
           <div class="tile red"><div class="k">${ic("heart")} Health</div><div class="v num">${fmt(boss.max)}</div></div>
           <div class="tile"><div class="k">${ic("upgrade")} Boss level</div><div class="v">${preview.lvl.toFixed(2)}<small>from gear</small></div></div>
           <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(preview))}<small>squad</small></div></div>
-          <div class="tile"><div class="k">${ic("timer")} Length</div><div class="v">${L.raidMin}<small>min</small></div></div>
+          <div class="tile ${preview.members[0].stride > 1 ? "green" : preview.members[0].stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${preview.members[0].stride.toFixed(2)}<small>from steps</small></div></div>
         </div>
         <button class="btn green xl block" style="margin-top:14px" data-act="raid">${ic("raid")} Start raid</button>
       </div>
     </section>
+    ${weekPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${boss.lap}</span></div>
       <div class="ladder">${G.BOSSES.map((b, i) => {
@@ -249,6 +286,7 @@ function tabRaid() {
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
       <div class="how">
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad average set how hard you hit (×${G.RULES.strideMin}–×${G.RULES.strideMax}). Half the loot is split by steps, half by what you did in the fight. The lowest walker is hunted by the boss and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker.</span></div></div>
         <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, takes ${p.aggro}% of single hits, ${p.ability}`).join(". ")}. Moving takes a few seconds.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early: single hits, stomps on the front two rows, screams on everyone, and a feast that heals it unless you burst it.</span></div></div>
         <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down. Rare answers hurt the boss.</span></div></div>
@@ -331,6 +369,8 @@ const KNOBS = [
     ["auditEvery", "Seconds between Audits"], ["auditFor", "Audit length (s)"], ["auditBlock", "Damage through an Audit", "share"], ["stealDmgPerPct", "Damage per 1% stolen", "× his health"], ["comboWindowMs", "Combo window (ms)"]]],
   ["Raid", [["raidHpPerMember", "Boss health per member"], ["raidLvlCurve", "How much gear raises the boss", "1 = fully"], ["raidPerkWeight", "Weight of each gear perk"], ["raidRewardCurve", "Reward growth vs boss level"],
     ["raidAtkEvery", "Seconds between attacks"], ["raidBossDmg", "Single-hit damage"], ["raidRewardPerMember", "Win reward per member per level", "Efforts"]]],
+  ["Competition", [["strideMin", "Lowest raid power", "×"], ["strideMax", "Highest raid power", "×"], ["stepsShare", "Share of loot split by steps"], ["topLoot", "Top walker loot bonus"], ["lastLoot", "Lowest walker loot change"],
+    ["slackerTax", "Lowest walker pays this share of their week"], ["slackerAggro", "How much more the boss targets them", "×"], ["paceTax", "Daily tax swing vs squad average"]]],
   ["Trivia", [["triviaSeconds", "Seconds per question"], ["triviaFailShare", "Share wrong that paralyses"], ["rarityBossDmg", "Boss damage per rarity point", "share of health"], ["paralysedSteps", "Step penalty when paralysed"], ["paralysedStunSec", "Stun when paralysed (s)"]]],
   ["Economy", [["stepsPerEffort", "Steps per Effort"], ["dailyEffortCap", "Most Efforts a day"], ["xpPerLevel", "XP curve", "level n needs this × (n−1)²"], ["dealDiscount", "Deal discount"]]],
 ];
@@ -522,6 +562,10 @@ function startRaid() {
   V.raid.timer = setInterval(raidTick, 50);
   FX.play("roar");
   setTimeout(() => V.raid && banner(V.raid.R.boss.name, V.raid.R.boss.title), 150);
+  const me = V.raid.R.members.find((m) => m.id === "me");
+  if (me.title === "top") setTimeout(() => toast(`Top walker this week: you hit ×${me.stride.toFixed(2)}`), 1600);
+  else if (me.title === "last") setTimeout(() => toast(`Dead weight this week: ×${me.stride.toFixed(2)} power, and the boss knows it`), 1600);
+  else setTimeout(() => toast(`Your steps give you ×${me.stride.toFixed(2)} power`), 1600);
 }
 function renderRaid() {
   const R = V.raid.R, three = use3d();
@@ -544,7 +588,7 @@ function renderRaid() {
   if (three) {
     V.raid.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: !!m.you, answers: m.answers, pos: m.pos })) });
     if (!V.raid.A) return renderRaid();
-    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.you ? "me" : ""}" id="np-${m.id}">${esc(m.you ? "You" : m.name)}<span class="st"></span><i><s></s></i></div>`).join("");
+    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.you ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.you ? "You" : m.name)}<span class="st"></span><i><s></s></i></div>`).join("");
   }
   V.raid.abRow = null;
   paintRaid();
@@ -734,12 +778,13 @@ function renderResult() {
       </section>`;
   } else {
     const R = res.R, out = R.result, mine = out.shares.find((s) => s.id === "me"), T = R.lastTrivia;
-    won = out.how === "won"; amount = mine.reward;
+    won = out.how === "won"; amount = mine.total;
     title = { won: "Victory", timeout: "Time up", wiped: "Defeat" }[out.how];
     sub = `${esc(R.boss.name)} · ${Math.round(out.frac * 100)}% dealt in ${mmss(R.t)}${R.triviaRuns ? ` · ${R.triviaRuns} trivia round${R.triviaRuns === 1 ? "" : "s"}` : ""}`;
     body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed.</b><span class="small muted">Everyone starts tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></section>` : ""}
-      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Damage</th><th>Healed</th><th>Taken</th><th>Reward</th></tr>
-        ${out.shares.map((s) => `<tr class="${s.id === "me" ? "me" : ""}"><td>${esc(s.id === "me" ? "You" : s.name)}</td><td>${fmt(s.dmg)}</td><td>${fmt(s.healed)}</td><td>${fmt(s.taken)}</td><td>${fmt(s.reward)}</td></tr>`).join("")}</table></section>
+      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Steps</th><th>Damage</th><th>Loot</th><th>Tax</th></tr>
+        ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === "me" ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}${esc(s.id === "me" ? "You" : s.name)}</td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmt(s.dmg)}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
+        ${out.settle ? `<p class="small muted" style="margin:10px 0 0">${ic("coins")} Weekly settlement: ${esc(out.shares.find((x) => x.id === out.settle.from).id === "me" ? "you" : out.shares.find((x) => x.id === out.settle.from).name)} (lowest walker) paid ${esc(out.shares.find((x) => x.id === out.settle.to).id === "me" ? "you" : out.shares.find((x) => x.id === out.settle.to).name)} ${fmt(out.settle.amount)} Efforts.</p>` : ""}</section>
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
         ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === "me" ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
       <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
@@ -765,7 +810,7 @@ function xpFor(res) {
 }
 function countUp(el, to) {
   const start = performance.now(), dur = 900;
-  const step = (now) => { const k = Math.min(1, (now - start) / dur); el.textContent = fmt(to * (1 - (1 - k) ** 3)); if (k < 1) requestAnimationFrame(step); else FX.play("coin"); };
+  const step = (now) => { const k = Math.min(1, (now - start) / dur), v = Math.round(to * (1 - (1 - k) ** 3)); el.textContent = (v < 0 ? "−" : "") + fmt(Math.abs(v)); if (k < 1) requestAnimationFrame(step); else FX.play(to < 0 ? "lose" : "coin"); };
   requestAnimationFrame(step);
 }
 function collect() {
@@ -778,12 +823,12 @@ function collect() {
     text = `Taxman: earned ${r.earned}, taxed ${r.taxed}, stole ${r.stolen}`;
   } else {
     const out = res.R.result, mine = out.shares.find((s) => s.id === "me");
-    amount = mine.reward;
+    amount = mine.total;
     if (out.paralysed) L.debt = G.RULES.paralysedSteps;
     if (out.how === "won") L.tier = res.R.tier + 1;
     text = `${res.R.boss.name}: ${{ won: "won", timeout: "out of time", wiped: "wiped" }[out.how]}${out.paralysed ? ", paralysed" : ""}`;
   }
-  L.wallet += amount;
+  L.wallet = Math.max(0, L.wallet + amount);
   const ups = gainXp(xpFor(res));
   addHistory(text, amount);
   save();
@@ -836,6 +881,7 @@ document.addEventListener("click", (e) => {
   if (d.tab) { V.tab = d.tab; render(); window.scrollTo(0, 0); FX.play("tap"); return; }
   if (d.pos) { L.pos = d.pos; save(); render(); return; }
   if (d.bots) { L.bots = Number(d.bots); save(); render(); return; }
+  if (d.pace) { L.botPace = d.pace; save(); render(); return; }
   if (d.botgear) { L.botGear = d.botgear; save(); render(); return; }
   if (d.raidmin) { L.raidMin = Number(d.raidmin); save(); render(); return; }
   if (d.shoptab) { L.shopTab = d.shoptab; save(); render(); return; }
@@ -891,10 +937,12 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("input", (e) => {
   const t = e.target;
-  if (t.dataset.input === "steps" || t.dataset.input === "scroll") {
-    L[t.dataset.input] = Number(t.value); save();
-    $(`#o-${t.dataset.input}`).firstChild.textContent = t.dataset.input === "steps" ? fmt(L.steps) : L.scroll;
+  if (["steps", "scroll", "week"].includes(t.dataset.input)) {
+    const k = t.dataset.input;
+    L[k] = Number(t.value); save();
+    $(`#o-${k}`).firstChild.textContent = k === "scroll" ? L.scroll : fmt(L[k]);
     $("#day-tiles").innerHTML = dayTiles();
+    $("#week-panel").outerHTML = weekPanel();
     syncSliders();
   }
 });
