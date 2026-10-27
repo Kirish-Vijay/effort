@@ -8,9 +8,11 @@ const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
 const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
 const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
 const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push";
-// HC Webhook (open source, github.com/mcnaveen/health-connect-webhook): the free download of the app that
-// sends Android steps from Health Connect. Always the newest release.
-const HC_APK = "https://github.com/mcnaveen/health-connect-webhook/releases/latest/download/app-foss-release.apk";
+// Effort Steps, the small Android app that reads steps from Health Connect (android/ in the repo).
+// effort://connect?t=TOKEN opens it signed in; as a Chrome intent link it downloads the app instead
+// if it isn't installed yet.
+const STEPS_APK = "https://github.com/Kirish-Vijay/effort/releases/latest/download/effort-steps.apk";
+const stepsAppLink = (token) => `intent://connect?t=${token}#Intent;scheme=effort;package=io.github.kirishvijay.effort;S.browser_fallback_url=${encodeURIComponent(STEPS_APK)};end`;
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
@@ -314,7 +316,7 @@ function noSquadPanel() {
 function syncChip() {
   const m = me(), fresh = m.steps_synced_at && Date.now() - Date.parse(m.steps_synced_at) < 3 * 3600000;
   if (!m.steps_synced_at) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps aren't syncing · set up</button>`;
-  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : ""}`;
+  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : m.steps_source === "android-app" ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
 }
 function dayTiles() {
   const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll;
@@ -555,7 +557,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
-      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android" || /health/.test(m.steps_source || "") ? "Health Connect" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
+      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort Steps app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
       <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
     </section>
     <section class="panel">
@@ -620,14 +622,11 @@ function setupBody(kind) {
         <li>In the <b>Automation</b> tab: <b>+</b> → <b>Time of Day</b> → <b>18:50</b>, <b>Daily</b>, <b>Run Immediately</b> → <b>Effort Steps</b>. That's your steps in before the Taxman.</li>
         <li>Make two more for <b>13:00</b> and <b>23:50</b>, so the squad table stays live and the whole day counts.</li>
       </ol>`;
-    else if (p === "android") body = `<ol class="steps-list">
-        <li>Your steps need to reach <b>Health Connect</b>. Samsung: <b>Samsung Health → Settings → Health Connect</b>, turn it on. Google Fit or Fitbit: turn on Health Connect in its settings.</li>
-        <li>Get <b>HC Webhook</b>, free:<a class="btn sm green block" style="margin:8px 0 4px" href="${HC_APK}">${ic("phone")} Download HC Webhook (4 MB)</a>Open the download. If Android asks, tap <b>Settings</b> → <b>Allow from this source</b>, go back and tap <b>Install</b>. If Play Protect warns you, tap <b>More details → Install anyway</b> (it's open source, it just isn't on the Play Store).</li>
-        <li>Open HC Webhook, tap <b>Grant Permissions</b> and allow <b>Steps</b>.</li>
-        <li>Add this webhook URL, tick <b>Steps</b> only:${box(`${API}/hc?t=${t}`)}</li>
-        <li>Sync mode <b>Interval</b>, every <b>30 minutes</b>. Tap <b>Save configuration</b>, then <b>Sync Now</b>.</li>
-      </ol>
-      <p class="small muted">If your phone kills background apps, set HC Webhook's battery use to <b>Unrestricted</b> (long-press the app → App info → Battery).</p>`;
+    else if (p === "android") body = `<p class="small" style="margin-top:0">Two taps, about a minute.</p>
+      <a class="btn gold block" href="${STEPS_APK}">${ic("phone")} 1. Get the Effort Steps app</a>
+      <p class="tiny faint" style="margin:6px 2px 12px">Free, about 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
+      <a class="btn green block" href="${stepsAppLink(t)}">${ic("steps")} 2. Connect steps</a>
+      <p class="tiny faint" style="margin:6px 2px 0">Opens the app signed in as you. Tap <b>Connect steps</b> and <b>Allow</b>, and it syncs every 15 minutes from then on. Samsung Health? Also turn on <b>Settings → Health Connect</b> in Samsung Health.</p>`;
     else body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
   } else {
     if (p === "ios") body = `<p class="small">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>

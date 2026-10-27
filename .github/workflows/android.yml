@@ -84,7 +84,8 @@ jobs:
             adb shell uiautomator dump /sdcard/ui2.xml && adb pull /sdcard/ui2.xml ui2.xml
             grep -o 'text="[^"]*"' ui1.xml ui2.xml
             grep -q "Connect your steps" ui1.xml
-            grep -q "Steps today" ui2.xml
+            # A made-up account: the app reads the steps, the server turns it away, and the app asks to connect again.
+            grep -q "Open Effort, go to Me" ui2.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

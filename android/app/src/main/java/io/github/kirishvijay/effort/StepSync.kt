@@ -19,6 +19,8 @@ import java.net.URL
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 
+class Unlinked : IllegalStateException("This phone's link to your account has expired. Open Effort and tap Connect steps again")
+
 // Reads today's and yesterday's step totals from Health Connect and sends them to the player's
 // Effort account. Health Connect's aggregate counts phone and watch steps once, not twice.
 object StepSync {
@@ -58,7 +60,13 @@ object StepSync {
                 ),
             )
             val steps = result[StepsRecord.COUNT_TOTAL] ?: 0L
-            post(token, day.toString(), steps)
+            try {
+                post(token, day.toString(), steps)
+            } catch (e: Unlinked) {
+                // The account this phone was linked to is gone: forget it, so the app asks to connect again.
+                prefs(c).edit().remove("token").apply()
+                throw e
+            }
             if (day == today) todaySteps = steps
         }
         prefs(c).edit().putLong("syncedAt", System.currentTimeMillis()).putLong("syncedSteps", todaySteps).apply()
@@ -76,7 +84,7 @@ object StepSync {
             val body = JSONObject().put("token", token).put("steps", steps).put("date", date).put("source", "android-app")
             conn.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = conn.responseCode
-            if (code == 401) throw IllegalStateException("This phone's link to your account has expired. Open Effort and tap Connect steps again")
+            if (code == 401) throw Unlinked()
             if (code !in 200..299) throw IllegalStateException("Effort's server said no ($code). Try again in a bit")
         } finally {
             conn.disconnect()
