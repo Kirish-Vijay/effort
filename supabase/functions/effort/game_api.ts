@@ -230,7 +230,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (settled || squad) L = (await ledgerFor(db, [player.id]))[player.id];
       const today = localDate(now, tz);
       const tw = taxWindow(now, tz, test), rw = raidWindow(now, test);
-      const [{ data: fight }, debt, scroll] = await Promise.all([
+      const [{ data: fight }, debt, { data: scroll }] = await Promise.all([
         db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", today).maybeSingle(),
         debtFor(db, player.id, today),
         db.from("daily_scroll").select("minutes,auto_minutes").eq("player_id", player.id).eq("day", today).maybeSingle(),
