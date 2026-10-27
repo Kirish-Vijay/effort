@@ -30,6 +30,31 @@ const nat = (fn, ...args) => {
   if (typeof NATIVE?.[fn] !== "function") return false;
   try { NATIVE[fn](...args); return true; } catch { return false; }
 };
+// A newer Android app: each release is titled "Effort for Android 1.<build>", the same as the app's own version.
+// Checked at most every 6 hours (GitHub allows 60 lookups an hour per phone).
+const appBuild = (v) => Number(String(v || "").match(/\d+\.(\d+)/)?.[1] || 0);
+async function checkAppUpdate() {
+  const mine = appBuild(S.native?.version);
+  if (!NATIVE || !mine) return;
+  const cached = store.get("appLatest");
+  let latest = cached && Date.now() - cached.at < 6 * 3600000 ? cached.build : null;
+  if (latest == null) {
+    try {
+      const r = await fetch("https://api.github.com/repos/Kirish-Vijay/effort/releases/tags/steps-app");
+      if (!r.ok) return;
+      latest = appBuild((await r.json()).name);
+      store.set("appLatest", { at: Date.now(), build: latest });
+    } catch { return; }
+  }
+  const show = latest > mine && Date.now() - (store.get("appUpdateLater") || 0) > 86400000;
+  if (show === !!S.appUpdate) return;
+  S.appUpdate = show;
+  if (S.view === "main" && $("#sheet").hidden) render();
+}
+const updateBanner = () => !S.appUpdate ? "" : `<section class="panel update">
+    <div class="row"><span class="ic-badge">${ic("upgrade")}</span><div class="grow"><b class="disp">New version of the app</b><span class="small muted" style="display:block">Install it over this one. Your account and progress stay.</span></div></div>
+    <div class="btn-row" style="margin-top:12px"><a class="btn gold sm" href="${STEPS_APK}">${ic("upgrade")} Update</a><button class="btn sm" data-act="app-update-later">Later</button></div>
+  </section>`;
 const natOr = (fn, ...args) => nat(fn, ...args) || toast("Update the Effort app to use this: Me → Steps → Set up sync");
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
 const G = Game, I = EffortItems;
@@ -415,7 +440,7 @@ function ledgerPanel() {
     <div class="feedlist">${rows.map((r) => `<div class="it"><span class="grow">${esc(label(r))}</span><span class="amt ${r.amount >= 0 ? "plus" : "minus"}">${signedEfforts(r.amount)}</span></div>`).join("")}</div></section>`;
 }
 function tabToday() {
-  return `${taxHero()}${weekPanel()}${ledgerPanel()}
+  return `${updateBanner()}${taxHero()}${weekPanel()}${ledgerPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How a day works</h2></div>
       <div class="how">
@@ -591,7 +616,7 @@ async function shopAction(action, body, done) {
 // ---------- Me ----------
 function tabMe() {
   const m = me(), sq = squad(), cls = myClass();
-  return `
+  return `${updateBanner()}
     <section class="panel">
       <div class="row" style="align-items:flex-start;gap:14px">
         <div class="bigface has-fallback"><span class="fb">${Walker.svg(ANS[m.id], { mood: "fresh" })}</span>${portraitImg("walker", m.id, { w: 220, h: 260 })}</div>
@@ -1600,6 +1625,7 @@ document.addEventListener("click", async (e) => {
   switch (d.act) {
     case "close-sheet": closeSheet(); break;
     case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
+    case "app-update-later": store.set("appUpdateLater", Date.now()); S.appUpdate = false; render(); break;
     case "native-steps": natOr("connectSteps"); break;
     case "native-scroll": natOr("connectScroll"); break;
     case "native-reminders-on": natOr("reminders", true); break;
@@ -1660,7 +1686,7 @@ document.addEventListener("visibilitychange", () => {
     if (document.hidden) { v.ch.untrack(); v.host = false; }
     else { v.joinedAt = now(); v.ch.track({ at: v.joinedAt }); }
   }
-  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); }
+  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); checkAppUpdate(); }
 });
 
 // ---------- updates ----------
@@ -1696,7 +1722,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
     }
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
     S.view = "main"; render();
-    refreshPush(); keepPushAlive();
+    refreshPush(); keepPushAlive(); checkAppUpdate();
     if (inviteCode && squad()?.code !== inviteCode.toUpperCase()) {
       try {
         const inv = await lookupInvite(inviteCode);

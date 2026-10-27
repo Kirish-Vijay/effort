@@ -104,11 +104,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: effort-steps
+      # The game compares the version in this title with the installed app's and offers the update.
       - name: Publish the download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete steps-app --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create steps-app effort-steps.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
-            --title "Effort Steps for Android" \
-            --notes "Connects your phone's steps to Effort. Install it, open Effort, go to Me → Steps and tap Connect steps."
+            --title "Effort for Android 1.${{ github.run_number }}" \
+            --notes "The Effort game for Android, with one-tap steps, scroll tracking and the 6:45pm ping. Install it over the old one: your account and progress stay."
