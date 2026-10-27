@@ -624,7 +624,7 @@ function setupBody(kind) {
       </ol>`;
     else if (p === "android") body = `<p class="small" style="margin-top:0">Two taps, about a minute.</p>
       <a class="btn gold block" href="${STEPS_APK}">${ic("phone")} 1. Get the Effort Steps app</a>
-      <p class="tiny faint" style="margin:6px 2px 12px">Free, about 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
+      <p class="tiny faint" style="margin:6px 2px 12px">Free, under 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
       <a class="btn green block" href="${stepsAppLink(t)}">${ic("steps")} 2. Connect steps</a>
       <p class="tiny faint" style="margin:6px 2px 0">Opens the app signed in as you. Tap <b>Connect steps</b> and <b>Allow</b>, and it syncs every 15 minutes from then on. Samsung Health? Also turn on <b>Settings → Health Connect</b> in Samsung Health.</p>`;
     else body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
