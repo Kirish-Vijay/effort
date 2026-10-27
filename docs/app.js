@@ -1,34 +1,25 @@
+// Effort: the live game. Everything that counts (wallet, fights, raids, gear) goes through the server;
+// the rules come from game.js, the same file the server runs, so the numbers on screen match the payout.
+// The Sunday raid is shared live: one squad member's phone runs the fight and streams it to the others
+// over Supabase Realtime; if that phone drops out, the next one picks it up from the last snapshot.
+(() => {
 "use strict";
-
 const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
+const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
+const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
 const APP_URL = location.origin + location.pathname.replace(/index\.html$/, "");
-const KM_PER_STEP = 0.000762;
-// Everyone is drawn as their walker. Players without quiz answers get a stable look derived from their id.
-const charOf = (p) => (p && p.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x"));
-const headCache = new Map();
-function avatar(p, cls = "") {
-  const key = `${p.id}|${p.equipped || ""}|${JSON.stringify(p.character || {})}`;
-  if (!headCache.has(key)) headCache.set(key, Walker.svg(charOf(p), { crop: "head", gear: p.equipped, label: p.name }));
-  return `<span class="avatar ${cls}">${headCache.get(key)}</span>`;
-}
-const colorOf = (p) => Walker.traits(charOf(p)).pal.body;
-const JOURNEYS = [
-  ["London to Paris", 460],
-  ["Land's End to John o' Groats", 1407],
-  ["London to Rome", 1870],
-  ["Coast to coast USA", 4500],
-  ["Around the world", 40075],
-];
-const { iso, addDays, parseDay, weekStart, daysBetween, seasonOf, RULES } = Effort;
-
-const $ = (sel, el = document) => el.querySelector(sel);
-const app = $("#app");
+const G = Game, I = EffortItems;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Math.round(n).toLocaleString("en-GB");
-const signed = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + fmt(Math.abs(n));
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const km = (steps) => (steps * KM_PER_STEP).toFixed(steps * KM_PER_STEP < 100 ? 1 : 0);
-const today = () => iso(new Date());
-const dayLabel = (s, opts = { weekday: "short", day: "numeric", month: "short" }) => parseDay(s).toLocaleDateString("en-GB", opts);
+const mmss = (s) => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+// "4d 22h", "2h 14m", "3:12"
+function countdown(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s >= 86400) return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return mmss(s);
+}
 function ago(ts) {
   if (!ts) return "never";
   const mins = Math.round((Date.now() - Date.parse(ts)) / 60000);
@@ -37,1464 +28,1490 @@ function ago(ts) {
   const h = Math.round(mins / 60);
   return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
+const PER_E = () => G.RULES.effortsPerEndeavour;
 
-// ---------- storage (wrapped: private mode / blocked storage must not break the app) ----------
+// ---------- art helpers ----------
+const ic = (n) => { const s = window.Icons?.ui?.(n); return s ? s.replace("<svg", '<svg class="ic" aria-hidden="true"') : '<span class="ic" aria-hidden="true">•</span>'; };
+const coin = (sz = 20) => window.Icons?.coin?.(sz) || `<i class="cdot coin" style="width:${sz}px;height:${sz}px"></i>`;
+const gem = (sz = 20) => window.Icons?.gem?.(sz) || `<i class="cdot gem" style="width:${sz}px;height:${sz}px"></i>`;
+const itemArt = (item) => window.Icons?.item?.(item, 64) || `<span>${item.e}</span>`;
+const STAT_LOOK = { power: ["power", "#ff6a3d"], guard: ["guard", "#3a9cf0"], speed: ["speed", "#4fd67f"], brains: ["brains", "#a86bff"], luck: ["luck", "#ffc83d"] };
+const ROW_ICON = { front: "shieldWall", mid: "bigSwing", back: "patchUp" };
+const priceTag = (efforts) => `<span class="price">${gem(18)}${fmt(efforts / PER_E())}</span>`;
+const effortTag = (n) => `${coin(18)}${fmt(n)}`;
+const signedEfforts = (n) => `${n >= 0 ? "+" : "−"}${coin(16)}${fmt(Math.abs(n))}`;
+const PERKS = {
+  critChance: (v) => `+${Math.round(v * 100)}% critical hit chance`,
+  critDmg: (v) => `Critical hits deal +${v}× damage`,
+  combo: (v) => `Combos build ${Math.round(v * 100)}% faster`,
+  taxStart: (v) => `Start every Taxman fight on a ${v}-hit combo`,
+  steal: (v) => `Steal up to ${Math.round(v * 100)}% more from the Taxman`,
+  shield: (v) => `Shield Wall lasts ${v}s longer`,
+  heal: (v) => `Patch Up heals ${Math.round(v * 100)}% more`,
+  swing: (v) => `Big Swing lasts ${v} more hits`,
+  thorns: (v) => `Hits you take deal ${Math.round(v * 10)}× their damage back to the boss`,
+  lifesteal: (v) => `Every hit heals you about ${Math.max(1, Math.round(v * 18))} HP`,
+  cdr: (v) => `Abilities recharge ${Math.round(v * 100)}% faster`,
+  trivia: (v) => `+${v}s on trivia questions`,
+  secondWind: () => "Survive one killing blow each raid",
+  feast: (v) => `×${v} damage while the boss is feasting`,
+  dodge: (v) => `${Math.round(v * 100)}% chance to dodge a hit`,
+  loot: (v) => `+${Math.round(v * 100)}% raid rewards`,
+};
+const perkText = (p) => (p ? PERKS[p[0]]?.(p[1]) || "" : "");
+const statLabel = (k) => G.STATS.find((s) => s.id === k)?.label || k;
+
+// ---------- storage (private mode must not break the app) ----------
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem("ef_" + k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem("ef_" + k, JSON.stringify(v)); } catch { /* ignore */ } },
   del(k) { try { localStorage.removeItem("ef_" + k); } catch { /* ignore */ } },
 };
-
 function detectPlatform() {
   const ua = navigator.userAgent;
   if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "ios";
   if (/Android/.test(ua)) return "android";
   return "other";
 }
-const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
-
 async function call(action, body, query = "") {
-  const res = await fetch(`${API}/${action}${query}`, body
-    ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-    : {});
-  const data = await res.json().catch(() => ({ ok: false, error: "Bad response" }));
+  const res = await fetch(`${API}/${action}${query}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const data = await res.json().catch(() => ({ ok: false, error: "Couldn't reach the server" }));
   if (!res.ok || data.ok === false) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg; t.hidden = false;
+  t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.hidden = true), 2800);
+}
+async function copy(text, label = "Copied") {
+  try { await navigator.clipboard.writeText(text); toast(label); }
+  catch { prompt("Copy this", text); }
+}
+async function share(text, url) {
+  if (navigator.share) { try { await navigator.share({ text, url }); return; } catch (e) { if (e.name === "AbortError") return; } }
+  copy(url ? `${text}\n${url}` : text, "Copied: paste it in the group chat");
 }
 
 // ---------- state ----------
 const S = {
-  view: "loading",            // loading | welcome | onboard | main
-  step: 0,                    // onboarding step
-  tab: store.get("tab") || "home",
-  token: store.get("token"),
-  me: null,
-  groups: [],
-  mine: null,                 // engine over just my own data
-  boardKey: store.get("board") || null, // "g:CODE" or "public"
-  boards: {},                 // key -> { data, E }
-  mode: store.get("mode") || "week",
-  adminKeys: store.get("adminKeys") || {},
-  invite: null,               // { code, name, members } when arriving via ?g=
-  draft: { platform: detectPlatform() },
-  answers: store.get("draftAnswers") || {}, // quiz answers in progress
-  qi: 0,
-  retake: false,
-  logDay: null,
+  view: "boot", tab: store.get("tab") || "today", token: store.get("token"), D: null, skew: 0,
+  answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null, retake: false,
+  setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false,
 };
-let installPrompt = null;
-window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; if (S.view === "main") render(); });
-
-function toast(msg) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (t.hidden = true), 2800);
-}
-
-async function copy(textToCopy, label = "Copied") {
-  try { await navigator.clipboard.writeText(textToCopy); toast(label); }
-  catch {
-    const ta = document.createElement("textarea");
-    ta.value = textToCopy; document.body.append(ta); ta.select();
-    try { document.execCommand("copy"); toast(label); } catch { toast("Couldn't copy, long-press to select"); }
-    ta.remove();
-  }
-}
-
-async function share(textToShare, url) {
-  if (navigator.share) {
-    try { await navigator.share({ text: textToShare, url }); return; } catch (e) { if (e.name === "AbortError") return; }
-  }
-  copy(url ? `${textToShare}\n${url}` : textToShare, "Copied, paste it in the group chat");
-}
+const V = { tax: null, raid: null, result: null };
+const now = () => Date.now() + S.skew;
 
 // ---------- data ----------
-function buildBoard(key, data) {
-  const players = data.players.map((p) => ({ ...p }));
-  const E = Effort.build({ players, steps: data.steps, scroll: data.scroll, hunts: data.hunts || [], today: today(), league: key === "public" });
-  S.boards[key] = { data, E };
+async function load() {
+  const D = await call("game", { token: S.token });
+  S.skew = D.now - Date.now();
+  S.D = D;
+  ANS[D.me.id] = answersOf(D.me);
+  for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
+  return D;
 }
-
-async function loadMe() {
-  const r = await call("me", { token: S.token });
-  S.me = r.player;
-  S.groups = r.groups;
-  S.mine = Effort.build({ players: [r.player], steps: r.steps, scroll: r.scroll, hunts: r.hunts || [], today: today() });
-  const keys = [...S.groups.map((g) => "g:" + g.code), ...(S.me.is_public ? ["public"] : [])];
-  if (!keys.includes(S.boardKey)) S.boardKey = keys[0] || null;
-  store.set("board", S.boardKey);
-}
-
-async function loadBoard(key) {
-  if (!key) return;
-  const data = key === "public" ? await call("board", null, "?league=public") : await call("board", null, `?code=${encodeURIComponent(key.slice(2))}`);
-  buildBoard(key, data);
-}
-
 async function refresh(silent) {
-  try {
-    await loadMe();
-    await loadBoard(S.boardKey);
-    // Background refreshes must never pull someone out of the hunt, its results or the quiz.
-    if (["hunt", "huntEnd", "quiz", "reveal", "onboard"].includes(S.view)) return;
-    S.view = "main";
-    if ($("#sheet").hidden) render();
-  } catch (e) {
-    if (/Unknown token/.test(e.message)) return signOut("That account no longer exists on this phone");
+  try { await load(); if (S.view === "main" && $("#sheet").hidden) render(); }
+  catch (e) {
+    if (/Unknown token/.test(e.message)) return signOut("That account doesn't exist any more");
     if (!silent) toast(e.message);
   }
 }
-
-function saveToken(player) {
-  S.token = player.token;
-  store.set("token", S.token);
-  // Keep the restore link in the address bar so "Add to Home Screen" opens straight into this account
-  // (iOS home-screen apps don't share storage with Safari).
-  history.replaceState(null, "", `${APP_URL}?me=${player.token}`);
+function saveToken(token) {
+  S.token = token; store.set("token", token);
+  // Keeps the restore link in the address bar, so "Add to Home Screen" opens straight into this account
+  // (iPhone home-screen apps don't share storage with Safari).
+  history.replaceState(null, "", `${APP_URL}?me=${token}`);
 }
-
 function signOut(msg) {
-  ["token", "board"].forEach(store.del);
-  Object.assign(S, { token: null, me: null, groups: [], mine: null, boards: {}, boardKey: null, view: "welcome", step: 0 });
+  store.del("token");
+  Object.assign(S, { token: null, D: null, view: "welcome" });
   history.replaceState(null, "", APP_URL);
-  closeSheet();
-  render();
+  closeSheet(); render();
   if (msg) toast(msg);
 }
 
-const cur = () => S.boards[S.boardKey];
-const boardName = (key) => (key === "public" ? "Everyone" : S.groups.find((g) => "g:" + g.code === key)?.name || "Group");
-
-// ---------- icons ----------
-const ICON = {
-  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
-  board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21V11M16 21V7M12 21V3M4 21v-6M20 21v-9"/></svg>',
-  log: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>',
-  me: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
-  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>',
-  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13M7 8l5-5 5 5"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>',
-  chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
-};
-
-// ---------- rendering ----------
-function render() {
-  const views = { loading: viewLoading, welcome: viewWelcome, quiz: viewQuiz, reveal: viewReveal, onboard: viewOnboard, main: viewMain, hunt: viewHunt, huntEnd: viewHuntEnd };
-  app.innerHTML = (views[S.view] || viewWelcome)();
+// ---------- derived ----------
+const ANS = {}; // player id -> walker answers (for portraits and the 3D team)
+const answersOf = (p) => (p?.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x"));
+const me = () => S.D.me;
+const myStats = () => G.stats(me().character || {});
+const myClass = () => G.classOf(myStats());
+const level = () => G.levelOf(S.D.xp);
+const squad = () => S.D.squad;
+const squadAvgToday = () => { const m = squad()?.members || []; return m.length > 1 ? m.reduce((s, x) => s + x.todaySteps, 0) / m.length : 0; };
+const taxSetup = () => G.taxmanSetup({ steps: S.D.today.steps, scrollMin: S.D.today.scroll ?? S.D.today.noScrollMin, stats: myStats(), equipped: me().gear, inv: S.D.inv, level: level(), squadAvg: squadAvgToday() });
+const weekRows = () => G.weekTable((squad()?.members || []).map((m) => ({ id: m.id, name: m.name, you: m.id === me().id, weekSteps: m.weekSteps, fresh: m.fresh })));
+const ledgerFor = (kind, ref) => S.D.ledger.find((r) => r.kind === kind && r.ref === ref);
+function taxState() {
+  const w = S.D.windows.tax, f = S.D.fight, t = now();
+  if (f?.finished_at) return "done";
+  if (f && t < Date.parse(f.ends_at)) return "live";
+  if (f) return "done";
+  if (w.open && t < w.closes) return "open";
+  if (t < w.opens) return "soon";
+  return "missed";
+}
+function raidState() {
+  const w = S.D.windows.raid;
+  if (!squad()) return "nosquad";
+  if (S.D.raid?.status === "done") return "done";
+  if (w.open && now() < w.closes) return "open";
+  return "soon";
 }
 
-const viewLoading = () => `<div class="empty" style="padding-top:30vh"><span class="e">🥾</span>Lacing up…</div>`;
-
-function rulesCards() {
-  return `<div class="feature-list">
-    <div><span class="e">🧪</span><span><b>Answer 12 questions, get your walker</b><br><span class="muted small">Your answers build a character nobody else has.</span></span></div>
-    <div><span class="e">🥾</span><span><b>Steps are fuel</b><br><span class="muted small">Every step moves your walker along an endless trail, past landmarks with gear to find.</span></span></div>
-    <div><span class="e">🌫️</span><span><b>Scrolling brings the fog</b><br><span class="muted small">Go over your scroll budget and your walker slows down and goes grey.</span></span></div>
-    <div><span class="e">📱</span><span><b>Beat The Scroll together</b><br><span class="muted small">A weekly boss your group fights with steps. Doomscrolling heals it.</span></span></div>
-  </div>`;
-}
-
-// ----- Character quiz -----
-const QUESTIONS = Walker.QUESTIONS;
-function quizPreview(mood = "ok") {
-  return Walker.svg(S.answers, { mood, label: "Your walker so far" });
-}
-
-function viewQuiz() {
-  const i = S.qi, q = QUESTIONS[i], a = S.answers;
-  const back = `<button class="icon-btn" data-act="quiz-back" aria-label="Back">‹</button>`;
-  const head = `<div class="quiz-top">${back}<div class="bar"><i style="width:${(100 * i) / QUESTIONS.length}%"></i></div><span class="small muted num">${i + 1}/${QUESTIONS.length}</span></div>`;
-  if (q.type === "intro") {
-    return `${head}<h1 class="quiz-q">What do people call you?</h1>
-      <form class="card" data-form="quiz-intro">
-        <label class="field"><span>Your name</span><input name="name" required maxlength="24" placeholder="What your friends call you" value="${esc(a.name || "")}" autocomplete="given-name"></label>
-        <label class="field"><span>Your phone</span></label>
-        <div class="toggle" style="margin-bottom:16px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<button type="button" data-platform="${v}" aria-pressed="${v === S.draft.platform}">${l}</button>`).join("")}</div>
-        <button class="btn block">Build my walker</button>
-      </form>
-      <p class="note" style="display:block;text-align:center">12 questions. Lie and your walker will know.</p>`;
+// ---------- portraits ----------
+const portraitImg = (kind, id, { w = 256, h = 256, frame = "full", cls = "" } = {}) =>
+  `<img class="pimg ${cls}" data-portrait="${kind}:${id}" data-w="${w}" data-h="${h}" data-frame="${frame}" alt="" width="${w}" height="${h}">`;
+function hydratePortraits() {
+  if (!window.Arena3D?.portrait || !Arena3D.supported()) return;
+  for (const img of document.querySelectorAll("img[data-portrait]:not([data-done])")) {
+    img.dataset.done = "1";
+    const [kind, id] = img.dataset.portrait.split(":");
+    Arena3D.portrait(kind, id, kind === "walker" ? ANS[id] || S.answers : null, { w: +img.dataset.w, h: +img.dataset.h, frame: img.dataset.frame })
+      .then((url) => { if (url) { img.src = url; img.classList.add("in"); img.closest(".has-fallback")?.classList.add("loaded"); } });
   }
-  let body;
-  if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>`;
-  else if (q.type === "hue") body = `<input type="range" class="hue-slider" min="0" max="359" value="${a.hue ?? 30}" data-hue aria-label="Colour"><button class="btn block" data-act="quiz-next">This one</button>`;
-  else if (q.type === "number") body = `<form data-form="quiz-value"><input name="v" type="number" inputmode="numeric" min="1" max="99" required class="big-input" value="${esc(a.number ?? "")}" placeholder="7" aria-label="Lucky number"><button class="btn block" style="margin-top:12px">Next</button></form>`;
-  else body = `<form data-form="quiz-value"><input name="v" maxlength="30" required class="big-input" style="font-size:26px!important" value="${esc(a.word ?? "")}" placeholder="${esc(q.placeholder)}" autocomplete="off" aria-label="${esc(q.q)}"><button class="btn block" style="margin-top:12px">Make me</button></form>`;
-  return `${head}<div class="quiz-preview" id="quiz-preview">${quizPreview()}</div>
-    <h1 class="quiz-q">${esc(q.q)}</h1>${body}`;
 }
+window.addEventListener("arena3d-ready", hydratePortraits);
+const head2d = (answers) => Walker.svg(answers, { crop: "head", mood: "fresh" });
+const face = (id, size = 52) => `<div class="face has-fallback" style="width:${size}px;height:${size}px"><span class="fb">${head2d(ANS[id])}</span>${portraitImg("walker", id, { w: size * 2, h: size * 2, frame: "head" })}</div>`;
 
-function viewReveal() {
-  const a = S.answers;
-  const odds = Walker.COMBOS;
-  return `<section class="reveal">
-    <p class="note" style="font-size:26px">ta-da!</p>
-    <div class="walker-big">${Walker.svg(a, { mood: "fresh", label: `${a.name}'s walker` })}</div>
-    <h1 class="ob-title" style="margin-top:18px">This is you, ${esc(a.name || "walker")}.</h1>
-    <p class="muted">Built from your answers. Change one and you look different.</p>
-    <p class="odds">1 of ${odds.toLocaleString("en-GB")} possible walkers, before your word even counts</p>
-    <div class="btn-row"><button class="btn ghost" data-act="quiz-restart">Change answers</button><button class="btn" data-act="quiz-done">${S.retake ? "Save my new look" : "That's me, let's walk"}</button></div>
-  </section>`;
+// ---------- shell ----------
+function render() {
+  const views = { boot: viewBoot, welcome: viewWelcome, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, tax: renderTax, raid: renderRaid, result: renderResult };
+  (views[S.view] || viewBoot)();
+  hydratePortraits();
 }
-
-function viewWelcome() {
-  const inv = S.invite;
-  return `<section class="welcome">
-    <div class="logo">${Walker.svg(Walker.fallbackAnswers("welcome-" + new Date().getDate()), { mood: "fresh", label: "A walker" })}</div>
-    <h1>Effort</h1>
-    <p class="lead">Walk more. Scroll less. Grow a little walker with your friends.</p>
-    ${inv ? `<div class="callout" style="text-align:left;margin-bottom:16px">You're invited to <b>${esc(inv.name)}</b> (${inv.members} ${inv.members === 1 ? "player" : "players"}).</div>` : ""}
-    ${rulesCards()}
-    <button class="btn block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Get started"}</button>
-    ${inv ? "" : `<form data-form="code" class="row" style="margin-top:12px"><input name="code" placeholder="Invite code" autocomplete="off" maxlength="6" class="grow code-input"><button class="btn ghost">Join</button></form>`}
-    <p class="small muted" style="margin-top:18px">Had it on another phone? Open your restore link, or ask your group admin for it.</p>
-  </section>`;
-}
-
-// Onboarding after the quiz: 1 steps → 2 scrolling → done
-function viewOnboard() {
-  const dots = `<div class="dots">${[0, 1, 2].map((i) => `<i class="${i <= S.step ? "on" : ""}"></i>`).join("")}</div>`;
-  const which = S.step === 1 ? "steps" : "scroll";
-  return `${dots}<h1 class="ob-title">${which === "steps" ? "Connect your steps" : "Track your scrolling"}</h1>
-    <p class="muted" style="margin-top:-4px">${which === "steps" ? "Set it up once and your steps sync on their own. About 3 minutes." : "Optional, but it's how you earn bonus points for staying under your scroll budget. Without it we assume 30 min a day."}</p>
-    ${setupBody(which, S.me.platform)}
-    <div class="btn-row" style="margin-top:8px"><button class="btn ghost" data-act="ob-next">${S.step === 2 ? "Skip" : "Do it later"}</button><button class="btn" data-act="ob-next">${S.step === 2 ? "Finish" : "Done, next"}</button></div>`;
-}
+const viewBoot = () => { $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><p class="muted">Lacing up…</p></div>`; };
 
 function viewMain() {
-  const tabs = { home: tabHome, board: tabBoard, log: tabLog, me: tabMe };
-  return `${(tabs[S.tab] || tabHome)()}
-  <nav class="nav"><div class="inner">
-    ${[["home", "Home"], ["board", "Board"], ["log", "Log"], ["me", "Me"]].map(([k, l]) =>
-      `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${ICON[k]}${l}</button>`).join("")}
-  </div></nav>`;
+  const D = S.D, p = G.levelProgress(D.xp), cls = myClass();
+  const tabs = { today: tabToday, raid: tabRaid, shop: tabShop, me: tabMe };
+  if (!tabs[S.tab]) S.tab = "today";
+  $("#app").innerHTML = `
+    <header class="header">
+      <button class="avatar" data-tab="me" aria-label="Your profile">${face(me().id)}<span class="lvl" title="Level">${p.lvl}</span></button>
+      <div class="who"><b>${esc(me().name)}</b><div class="cls">${esc(cls.name)} · <span class="faint">${fmt(p.into)}/${fmt(p.need)} XP</span></div><div class="xp"><i style="width:${p.pct * 100}%"></i></div></div>
+      ${walletHtml()}
+    </header>
+    <div class="stack">${tabs[S.tab]()}</div>
+    <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
+      `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${ic(i)}${l}${dockDot(k)}</button>`).join("")}</div></nav>`;
+}
+function walletHtml() {
+  const w = S.D.wallet;
+  if (w < 0) return `<div class="wallet"><span class="cur debt" title="You're in debt"><span class="cico">${coin()}</span>−${fmt(-w)}</span></div>`;
+  return `<div class="wallet"><span class="cur" title="Endeavours (100 Efforts each)"><span class="cico">${gem()}</span>${fmt(Math.floor(w / PER_E()))}</span><span class="cur" title="Efforts"><span class="cico">${coin()}</span>${w % PER_E()}</span></div>`;
+}
+// A dot on the dock when something's waiting: the Taxman is open, or the raid is live.
+function dockDot(tab) {
+  if (tab === "today" && ["open", "live"].includes(taxState())) return '<i class="ping"></i>';
+  if (tab === "raid" && raidState() === "open") return '<i class="ping"></i>';
+  return "";
 }
 
-// ----- Home -----
-function todayCard(E, id) {
-  const t = today();
-  const r = E.day(id, t);
-  const par = E.par(id, t);
-  const pct = r.active ? Math.max(0, Math.round((100 * r.total) / par.value)) : 0;
-  const budgetLeft = r.budget - (r.scrollSrc === "assumed" ? RULES.assumedScrollMin : r.scrollMin);
-  const scrollLabel = r.scrollSrc === "assumed" ? `~${RULES.assumedScrollMin} min assumed` : r.scrollSrc === "none" ? "not tracked" : `${fmt(r.scrollMin)} min`;
-  const tr = E.trail(id);
-  const mood = tr.fog > 0.45 ? "foggy" : pct >= 100 ? "fresh" : "ok";
-  const say = mood === "foggy" ? pick(["my brain is soup", "can't see the path…", "one more video… no!"])
-    : mood === "fresh" ? pick(["let's gooo", "legs feel great", "onwards!"])
-    : r.steps < 2000 ? pick(["walk me?", "is it walk o'clock?", "boots are on…"]) : pick(["nice pace", "keep going", "smell that air"]);
-  return `<section class="card stage">
-    ${Walker.scene(tr.biome, Walker.hash(id))}
-    <div class="tag-today"><span>Today</span><b class="num">${signed(r.total)}</b><span>${par.placement ? "setting your par" : `${pct}% of par`}</span></div>
-    <div class="tag-region">📍 ${esc(tr.region)}</div>
-    <div class="bubble">${esc(say)}</div>
-    <div class="walker-wrap">${Walker.svg(charOf(S.me), { mood, fog: tr.fog, gear: S.me.equipped, label: `${S.me.name}'s walker` })}</div>
-    <button class="trail-bar" data-act="open-trail" style="display:block;width:calc(100% - 24px);text-align:left;cursor:pointer;color:var(--ink)">
-      <div class="row spread small"><b>Next: ${esc(tr.next.name)}</b><span class="num muted">${fmt(RULES.landmarkEvery - tr.into)} fuel to go ${ICON.chev}</span></div>
-      <div class="bar" style="margin-top:6px"><i style="width:${(100 * tr.into) / RULES.landmarkEvery}%"></i></div>
-    </button>
-  </section>
-  <section class="card split">
-    <div><div class="small muted">🚶 Steps</div><b class="num">${fmt(r.steps)}</b><span class="pts good">${signed(r.stepPts)}</span></div>
-    <div><div class="small muted">📵 Scrolling</div><b class="num">${scrollLabel}</b><span class="pts ${r.scrollPts < 0 ? "bad" : "good"}">${r.scrollPts ? signed(r.scrollPts) : "±0"}</span></div>
-    <div class="budget"><div class="row spread small"><span>Scroll budget</span><span class="num">${budgetLeft >= 0 ? `${fmt(budgetLeft)} of ${r.budget} min left` : `${fmt(-budgetLeft)} min over`}</span></div>
-      <div class="bar"><i style="width:${r.budget ? Math.min(100, (100 * Math.max(0, budgetLeft)) / RULES.budgetCap) : 0}%;--c:var(--good)"></i></div>
-      <div class="small muted" style="margin-top:4px">Every 1,000 steps earns 5 min (up to ${RULES.budgetCap}).</div></div>
-    <div class="fog-meter"><div class="row spread small"><span>🌫️ Fog</span><span>${tr.fog < 0.05 ? "Clear skies" : tr.fog < 0.45 ? "A bit hazy" : "Thick fog"}${tr.fog >= 0.05 ? ` · walker ${Math.round(RULES.fogSlow * tr.fog * 100)}% slower` : ""}</span></div>
-      <div class="bar"><i style="width:${Math.round(tr.fog * 100)}%"></i></div>
-      <div class="small muted" style="margin-top:4px">Builds up from the last 7 days of scrolling over budget. Clears as you stay under it.</div></div>
-  </section>`;
-}
-
-const pick = (arr) => arr[Math.floor(Date.now() / 36e5) % arr.length]; // changes hourly, stable between renders
-
-// ----- The Hunt (nightly tap game) -----
-function myLoadout() {
-  const t = today();
-  return Hunt.loadout(S.mine.day(S.me.id, t), S.mine.fogOn(S.me.id, t));
-}
-const huntOpen = () => new Date().getHours() >= Hunt.OPEN_HOUR;
-
-function loadoutRows(L) {
-  return `<div class="loadout">
-    <div><b class="num">${L.power}</b><span>tap power</span></div>
-    <div><b class="num">${L.hp}</b><span>health</span></div>
-    <div><b class="num">${L.minutes}m</b><span>max time</span></div>
-    <div><b class="num">${L.stomps}</b><span>stomps</span></div>
-  </div>
-  ${L.debuff >= 0.05 ? `<p class="small bad" style="margin:8px 0 0"><b>Scroll debuff ${Math.round(L.debuff * 100)}%:</b> ${Math.round((L.spawn - 1) * 100)}% more enemies, ${Math.round((L.tough - 1) * 100)}% tougher, fog on screen.</p>`
-    : `<p class="small good" style="margin:8px 0 0"><b>No debuff.</b> Clean screen, and 🌿 heals spawn.</p>`}`;
-}
-
-function huntCard() {
-  const L = myLoadout();
-  const done = S.mine.huntOn(S.me.id, today());
-  if (done) {
-    return `<section class="card hunt-card">
-      <div class="row spread"><h2 style="margin:0">Tonight's hunt</h2><span class="pill ${done.s ? "ok" : ""}">${done.s ? "Done" : "Abandoned"}</span></div>
-      <p style="margin:8px 0 0">${done.s ? `<b class="num">${fmt(done.score)}</b> pts · ${done.kills} kills · wave ${done.wave} · ${done.surv ? "survived" : "died"}. Dealt <b>${done.dmg}</b> to the boss.` : "You left mid-run. It counts as zero."} Next hunt tomorrow at ${Hunt.OPEN_HOUR}:00.</p>
+// ---------- This week: the table everything hangs off ----------
+function weekPanel() {
+  if (!squad()) return noSquadPanel();
+  const T = weekRows(), top = Math.max(1, ...T.rows.map((r) => r.weekSteps));
+  return `<section class="panel" id="week-panel">
+      <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">This week</h2><span class="side chip">Avg ${fmt(T.avg)}</span></div>
+      <div class="wtable">${T.rows.map((r, i) => `<div class="wrow ${r.you ? "me" : ""} ${r.title || ""}">
+          <span class="wn">${r.title === "top" ? ic("crown") : i + 1}</span>
+          <span class="grow"><b>${esc(r.you ? "You" : r.name)}</b>${r.title === "top" ? '<span class="chip gold">Top walker</span>' : r.title === "last" ? '<span class="chip red">Dead weight</span>' : r.fresh ? '<span class="chip">New</span>' : ""}
+            <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i></span>
+          <span class="ws"><b class="num">${fmt(r.weekSteps)}</b><small class="${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} power</small></span>
+        </div>`).join("")}</div>
+      <p class="tiny faint" style="margin:10px 0 0">Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
     </section>`;
-  }
-  const open = huntOpen();
-  return `<section class="card hunt-card ${open ? "live" : ""}">
-    <div class="row spread"><h2 style="margin:0">Tonight's hunt</h2><span class="pill ${open ? "warn" : ""}">${open ? "Open now" : `Opens ${Hunt.OPEN_HOUR}:00`}</span></div>
-    <p class="small muted" style="margin:6px 0 10px">${open ? "One run. Tap to kill. Your stats come from today." : "Walk more before then. Every step makes tonight easier."}</p>
-    ${loadoutRows(L)}
-    ${open ? `<button class="btn block" style="margin-top:12px" data-act="hunt-start">Start the hunt</button>` : ""}
-  </section>`;
+}
+function noSquadPanel() {
+  return `<section class="panel">
+      <div class="ptitle"><span class="ic-badge blue">${ic("squad")}</span><h2 class="ol-sm">No squad yet</h2></div>
+      <p class="small muted" style="margin:0 0 12px">The game is about out-walking your mates. Make a squad and send the link to the group chat, or join theirs with a code.</p>
+      <div class="btn-row"><button class="btn green" data-act="squad-sheet">${ic("squad")} Make or join</button></div>
+    </section>`;
 }
 
-function viewHunt() {
-  return `<div id="hunt-root" class="hunt-root"></div>`;
+// ---------- Today ----------
+function syncChip() {
+  const m = me(), fresh = m.steps_synced_at && Date.now() - Date.parse(m.steps_synced_at) < 3 * 3600000;
+  if (!m.steps_synced_at) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps aren't syncing · set up</button>`;
+  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : ""}`;
 }
-
-function viewHuntEnd() {
-  const r = S.huntResult;
-  const head = r.survived ? "You lasted the night." : r.quit ? `Gave up on wave ${r.wave}. Bold.` : `Doomscrolled to death on wave ${r.wave}.`;
-  return `<section class="reveal" style="padding-top:4vh">
-    <div class="walker-big">${Walker.svg(charOf(S.me), { mood: r.survived ? "fresh" : "foggy", fog: r.survived ? 0 : 0.6, gear: S.me.equipped })}</div>
-    <h1 class="ob-title" style="margin-top:16px">${head}</h1>
-    <section class="card" style="text-align:left"><div class="stats">
-      <div class="stat"><b class="num">${fmt(r.score)}</b><span>points</span></div>
-      <div class="stat"><b class="num">${r.kills}</b><span>kills</span></div>
-      <div class="stat"><b class="num">${r.dmg ?? Math.floor(r.score / 20)}</b><span>boss damage</span></div>
-    </div>${r.error ? `<p class="small bad" style="margin:10px 0 0">Not saved: ${esc(r.error)}</p>` : ""}</section>
-    <div class="btn-row"><button class="btn ghost" data-act="hunt-share">Share</button><button class="btn" data-act="hunt-done">Done</button></div>
-  </section>`;
-}
-
-async function startHunt() {
-  const L = myLoadout();
-  // Register the run first, so quitting or reloading mid-hunt can't buy a retry.
-  try { await call("hunt", { token: S.token, start: true }); }
-  catch (err) { toast(err.message); return; }
-  S.view = "hunt"; render(); scrollTo(0, 0);
-  Hunt.start($("#hunt-root"), {
-    loadout: L,
-    walkerSvg: Walker.svg(charOf(S.me), { mood: L.debuff > 0.45 ? "foggy" : "fresh", fog: L.debuff * 0.6, gear: S.me.equipped }),
-    onEnd: async (res) => {
-      S.huntResult = { ...res };
-      try {
-        const r = await call("hunt", { token: S.token, ...res });
-        S.huntResult.dmg = r.hunt.boss_dmg;
-        S.huntResult.score = r.hunt.score;
-      } catch (err) { S.huntResult.error = err.message; }
-      S.view = "huntEnd"; render(); scrollTo(0, 0);
-      refresh(true);
-    },
-  });
-}
-
-function huntBoardCard(E) {
-  const t = today();
-  let d = t;
-  let rows = E.ids.map((id) => ({ id, h: E.huntOn(id, d) })).filter((r) => r.h);
-  if (!rows.length) { d = addDays(t, -1); rows = E.ids.map((id) => ({ id, h: E.huntOn(id, d) })).filter((r) => r.h); }
-  if (!rows.length) return "";
-  rows.sort((a, b) => b.h.score - a.h.score);
-  return `<section class="card"><h2>${d === t ? "Tonight's" : "Last night's"} hunt</h2>
-    ${rows.slice(0, 5).map((r, i) => { const p = E.byId.get(r.id); return `<div class="row mini"><span class="rank r${i + 1}">${i + 1}</span>${avatar(p, "sm")}<span class="grow">${esc(p.name)} <span class="small muted">wave ${r.h.wave}${r.h.surv ? "" : " 💀"}</span></span><b class="num">${fmt(r.h.score)}</b></div>`; }).join("")}
-  </section>`;
-}
-
-function bossCard(B) {
-  if (!B || S.boardKey === "public" || B.E.ids.length < 2) return "";
-  const b = B.E.boss(weekStart(today()));
-  const won = !!b.defeatedOn;
-  const hitter = b.hitter && B.E.byId.get(b.hitter[0]);
-  const healer = b.healer && B.E.byId.get(b.healer[0]);
-  return `<section class="card boss-card ${won ? "won" : ""}">
-    <div class="boss-row">
-      <div>${Walker.boss(b.pct, won)}</div>
-      <div>
-        <div class="small muted">This week's boss</div>
-        <h2 style="margin:2px 0 8px">${esc(b.name)}</h2>
-        ${won ? `<p class="small" style="margin:0"><b>Beaten on ${dayLabel(b.defeatedOn, { weekday: "long" })}!</b> Your group has slain ${B.E.bossWins() + 1} so far.</p>`
-          : `<div class="hp"><div class="bar"><i style="width:${Math.round(b.pct * 100)}%"></i></div><div class="row spread small" style="margin-top:4px"><span class="num"><b>${fmt(b.left)}</b> / ${fmt(b.hp)} HP</span><span class="muted">ends Sunday</span></div></div>`}
-      </div>
+function dayTiles() {
+  const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll;
+  return `<div class="tiles">
+      <div class="tile gold"><div class="k">${ic("coin")} Earned today</div><div class="v">${effortTag(T.efforts)}<small>${fmt(S.D.today.steps)} steps</small></div></div>
+      <div class="tile red"><div class="k">${ic("warning")} At stake</div><div class="v">${Math.round(T.taxRate * 100)}%<small>${stake} Efforts</small></div></div>
+      <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(T.hp)}</div></div>
+      <div class="tile cyan"><div class="k">${ic("phone")} Scrolling</div><div class="v">${sc ?? "–"}<small>/ ${G.scrollBudget(S.D.today.steps)} min budget</small></div></div>
     </div>
-    <p class="small muted" style="margin:10px 0 0">Everyone's steps hit it. Scrolling over budget heals it 2 HP a minute.${hitter ? ` Top hitter: <b>${esc(hitter.name)}</b>.` : ""}${healer ? ` Healing it most: <b>${esc(healer.name)}</b> 👀` : ""}</p>
-  </section>`;
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">
+      ${T.pace > 0 ? `<span class="chip green">${ic("steps")} Ahead of the squad · −${Math.round(G.RULES.paceTax * 100)}% tax</span>` : T.pace < 0 ? `<span class="chip red">${ic("steps")} Behind the squad · +${Math.round(G.RULES.paceTax * 100)}% tax</span>` : squad()?.members.length > 1 ? `<span class="chip">${ic("steps")} Level with the squad</span>` : ""}
+      ${S.D.today.debt ? `<span class="chip red">${ic("bolt")} Paralysed: −${fmt(S.D.today.debt)} steps today</span>` : ""}
+      ${syncChip()}
+    </div>`;
 }
-
-function weekCard(E, id) {
-  const w = E.week(id, weekStart(today()));
-  const st = E.streak(id);
-  const need = RULES.parDaysForStreakWeek;
-  const labels = ["M", "T", "W", "T", "F", "S", "S"];
-  return `<section class="card">
-    <div class="row spread"><h2 style="margin:0">This week</h2><span class="pill ${st.weeks ? "ok" : ""}">${st.weeks ? `🔥 ${st.weeks}-week streak` : "No streak yet"}${st.freezes ? ` · ❄️${st.freezes}` : ""}</span></div>
-    <div class="weekdots">${w.days.map((d, i) => `<div class="${d ? (d.atPar ? "wd-hit" : d.active ? "wd-miss" : "wd-off") : "wd-future"}"><i>${d?.atPar ? "✓" : ""}</i><span>${labels[i]}</span></div>`).join("")}</div>
-    <p class="small muted" style="margin:0">${st.thisWeekDone ? "✅ Streak week locked in. Keep going for a bigger score." : `Beat your par on <b>${need - w.atPar} more day${need - w.atPar === 1 ? "" : "s"}</b> this week to keep your streak.`} Score so far: <b class="num">${fmt(w.form)}</b>.</p>
-  </section>`;
-}
-
-function levelCard(E, id) {
-  const x = E.xp(id);
-  return `<section class="card" data-tab="me" style="cursor:pointer">
-    <div class="row spread"><div><div class="small muted">Level ${x.level}</div><b style="font-size:18px">${esc(x.title)}</b></div><span class="lvl">${x.level}</span></div>
-    <div class="bar" style="height:10px;margin-top:10px"><i style="width:${(100 * x.into) / x.need}%"></i></div>
-    <div class="row spread small muted" style="margin-top:4px"><span class="num">${fmt(x.into)} / ${fmt(x.need)} XP</span><span>${x.nextTitle ? `${esc(x.nextTitle.title)} at Lv ${x.nextTitle.level}` : "Max title"}</span></div>
-    ${x.rookieLeft ? `<div class="callout" style="margin-bottom:0">🌱 <b>Rookie boost:</b> 2× XP for ${x.rookieLeft} more day${x.rookieLeft === 1 ? "" : "s"}.</div>` : x.rested ? `<div class="callout" style="margin-bottom:0">😴 <b>Well rested:</b> your next 3 active days earn 2× XP.</div>` : ""}
-  </section>`;
-}
-
-function rivalCard(B) {
-  if (!B || !S.me) return "";
-  const ws = weekStart(today());
-  const rid = B.E.rivals(ws).get(S.me.id);
-  if (!rid) return "";
-  const them = B.E.byId.get(rid);
-  const mine = B.E.week(S.me.id, ws).form, theirs = B.E.week(rid, ws).form;
-  const lead = mine - theirs;
-  return `<section class="card rival" data-profile="${rid}">
-    <div class="small muted">⚔️ Your rival this week</div>
-    <div class="row" style="margin-top:8px">
-      ${avatar(S.me)}<b class="num grow">${fmt(mine)}</b>
-      <span class="vs">vs</span>
-      <b class="num grow" style="text-align:right">${fmt(theirs)}</b>${avatar(them)}
-    </div>
-    <p class="small" style="margin:8px 0 0">${lead > 0 ? `You're <b>${fmt(lead)}</b> ahead of ${esc(them.name)}.` : lead < 0 ? `${esc(them.name)} is <b>${fmt(-lead)}</b> ahead. Go for a walk.` : `Dead level with ${esc(them.name)}.`}</p>
-  </section>`;
-}
-
-function miniBoard(B) {
-  if (!B) return `<section class="card"><h2>Play with friends</h2><p class="small muted">Create a group or join one with an invite code.</p><div class="btn-row"><button class="btn" data-act="create-group">Create a group</button><button class="btn ghost" data-act="join-code">Join with code</button></div></section>`;
-  const ws = weekStart(today());
-  const rows = B.E.ids.map((id) => ({ id, v: B.E.week(id, ws).form })).sort((a, b) => b.v - a.v);
-  const myRank = rows.findIndex((r) => r.id === S.me.id);
-  const show = rows.slice(0, 3);
-  if (myRank > 2) show.push(rows[myRank]);
-  return `<section class="card" data-tab="board" style="cursor:pointer">
-    <div class="row spread"><h2 style="margin:0">${esc(boardName(S.boardKey))}</h2><span class="small muted">${myRank >= 0 ? `You're #${myRank + 1} of ${rows.length}` : ""} ${ICON.chev}</span></div>
-    ${show.map((r) => { const p = B.E.byId.get(r.id); const i = rows.indexOf(r); return `<div class="row mini"><span class="rank r${i + 1}">${i + 1}</span>${avatar(p, "sm")}<span class="grow ${r.id === S.me.id ? "b" : ""}">${esc(p.name)}</span><b class="num">${fmt(r.v)}</b></div>`; }).join("")}
-  </section>`;
-}
-
-function nags() {
-  const me = S.me;
-  const out = [];
-  const stale = (ts) => !ts || Date.now() - Date.parse(ts) > 36 * 3600_000;
-  if (stale(me.steps_synced_at) || me.steps_source === "manual") out.push(["🚶", me.steps_synced_at ? "Steps haven't synced lately" : "Connect your steps", "Set it up once, then it's automatic.", "setup-steps"]);
-  if (!me.scroll_synced_at) out.push(["📵", "Track your scrolling", "Earn bonus points for staying under budget.", "setup-scroll"]);
-  let html = out.map(([e, t, s, act]) => `<div class="card row" style="gap:12px"><span style="font-size:26px">${e}</span><div class="grow small"><b>${t}</b><br><span class="muted">${s}</span></div><button class="btn sm" data-act="${act}">Set up</button></div>`).join("");
-  if (!isStandalone() && !store.get("hideInstall")) {
-    if (detectPlatform() === "ios") html += `<div class="card install-banner"><span class="e">📌</span><div class="grow small"><b>Add Effort to your Home Screen</b><br><span class="muted">In Safari tap <b>Share</b> then <b>Add to Home Screen</b>.</span></div><button class="icon-btn" data-act="hide-install" aria-label="Dismiss">✕</button></div>`;
-    else if (installPrompt) html += `<div class="card install-banner"><span class="e">📌</span><div class="grow small"><b>Install Effort</b><br><span class="muted">One tap from your home screen.</span></div><button class="btn sm" data-act="install">Install</button></div>`;
-  }
-  return html;
-}
-
-function tabHome() {
-  const E = S.mine, id = S.me.id;
-  const B = cur();
-  const greet = new Date().getHours() < 12 ? "Morning" : new Date().getHours() < 18 ? "Afternoon" : "Evening";
-  return `<div class="top"><div><h1>${greet}, ${esc(S.me.name)}</h1><div class="sub">${dayLabel(today(), { weekday: "long", day: "numeric", month: "long" })} · ${seasonOf(today()).name}</div></div>
-    <button class="icon-btn" data-act="refresh" aria-label="Refresh">${ICON.refresh}</button></div>
-  ${todayCard(E, id)}
-  ${nags()}
-  ${recapCard()}
-  ${huntCard()}
-  ${bossCard(B)}
-  ${weekCard(E, id)}
-  ${rivalCard(B)}
-  ${miniBoard(B)}
-  ${levelCard(E, id)}
-  <button class="btn ghost block" data-act="how">How scoring works</button>`;
-}
-
-// ----- Board -----
-function tabBoard() {
-  const keys = [...S.groups.map((g) => "g:" + g.code), ...(S.me.is_public ? ["public"] : [])];
-  const chips = `<div class="chips">${keys.map((k) => `<button data-board="${k}" aria-pressed="${k === S.boardKey}">${k === "public" ? "🌍 Everyone" : esc(boardName(k))}</button>`).join("")}<button data-act="group-menu" aria-label="Add or join a group">＋</button></div>`;
-  const B = cur();
-  if (!B) {
-    return `<div class="top"><div><h1>Board</h1></div></div>${chips}
-      <div class="empty"><span class="e">👥</span>You're not on a board yet.<br><br><div class="btn-row"><button class="btn" data-act="create-group">Create a group</button><button class="btn ghost" data-act="join-code">Join with code</button></div>
-      ${S.me.is_public ? "" : '<p class="small">Or switch on the public league in Me → Settings.</p>'}</div>`;
-  }
-  const E = B.E, g = B.data.group;
-  const t = today(), ws = weekStart(t), season = seasonOf(t);
-  const isPublic = S.boardKey === "public";
-  let ids = E.ids;
-  let tierNote = "";
-  if (isPublic) {
-    const myTier = E.tier(S.me.id);
-    ids = ids.filter((id) => E.tier(id).i === myTier.i);
-    tierNote = `<div class="callout">${myTier.icon} <b>${myTier.name} league</b> · ${ids.length} player${ids.length === 1 ? "" : "s"}. Score ${RULES.leagueUp}+ this week to move up, under ${RULES.leagueDown} drops you down. Typed-in steps count half here.</div>`;
-  }
-  const legend = E.legend();
-  const score = (id) => (S.mode === "week" ? E.week(id, ws).form : S.mode === "season" ? E.seasonScore(id, season) : E.xp(id).xp);
-  const rows = ids.map((id) => ({ id, v: score(id) })).sort((a, b) => b.v - a.v || E.byId.get(a.id).name.localeCompare(E.byId.get(b.id).name));
-  const max = Math.max(1, ...rows.map((r) => r.v));
-  const sub = { week: "Score = each day's % of your own par, added up", season: `${season.name} · ends ${dayLabel(season.end, { day: "numeric", month: "short" })}`, all: "Lifetime XP. Never resets." }[S.mode];
-  const list = rows.length ? `<ol class="lb">${rows.slice(0, 100).map((r, i) => {
-    const p = E.byId.get(r.id);
-    const st = E.streak(r.id), lv = E.xp(r.id), par = E.par(r.id, t);
-    const w = E.week(r.id, ws);
-    return `<li class="${r.id === S.me.id ? "me" : ""}" data-profile="${r.id}" style="--c:${colorOf(p)}">
-      <span class="rank r${i + 1}">${i < 3 && r.v > 0 ? ["🥇", "🥈", "🥉"][i] : i + 1}</span>
-      ${avatar(p)}
-      <span class="who"><span class="name">${esc(p.name)} ${legend?.id === r.id ? "👑" : ""}</span>
-        <span class="tags"><span class="lvl-chip">Lv ${lv.level}</span>${st.weeks ? `<span>🔥${st.weeks}w</span>` : ""}${par.placement ? "<span>📏 placing</span>" : ""}${S.mode === "week" ? `<span>${w.atPar}/7 at par</span>` : ""}${p.team ? `<span>${esc(p.team)}</span>` : ""}</span>
-        <span class="bar"><i style="width:${(Math.max(0, r.v) / max) * 100}%"></i></span></span>
-      <span class="score num">${fmt(r.v)}<small>${S.mode === "all" ? "XP" : "pts"}</small></span>
-    </li>`;
-  }).join("")}</ol>` : `<div class="empty"><span class="e">👋</span>No one here yet.</div>`;
-
-  return `<div class="top"><div><h1>${isPublic ? "Everyone" : esc(g.name)}</h1><div class="sub">${E.ids.length} player${E.ids.length === 1 ? "" : "s"}${legend ? ` · 👑 ${esc(E.byId.get(legend.id).name)} is Local Legend` : ""}</div></div>
-    <div class="row"><button class="icon-btn" data-act="share-standings" aria-label="Share standings">${ICON.share}</button>${isPublic ? "" : `<button class="icon-btn" data-act="group-settings" aria-label="Group settings">⚙️</button>`}</div></div>
-  ${chips}
-  ${tierNote}
-  <section class="card">
-    <div class="seg three" role="group" aria-label="Period">${[["week", "Week"], ["season", "Season"], ["all", "All-time"]].map(([k, l]) => `<button data-mode="${k}" aria-pressed="${S.mode === k}">${l}</button>`).join("")}</div>
-    <p class="small muted" style="margin:-4px 0 6px">${sub}</p>
-    ${list}
-  </section>
-  ${isPublic ? "" : forfeitCard(E, g) + teamsCard(E, g, ws) + journeyCard(E, g)}
-  ${isPublic ? "" : huntBoardCard(E)}
-  ${seasonCard(E)}`;
-}
-
-// Lowest weekly score first. Placement players and anyone who joined mid-week sit the forfeit out.
-function forfeitStandings(E, ws) {
-  return E.ids.filter((id) => E.eligible(id, ws) && E.byId.get(id).joined_at.slice(0, 10) <= ws)
-    .map((id) => ({ id, v: E.week(id, ws).form })).sort((a, b) => a.v - b.v);
-}
-
-const WHEEL_SUGGESTIONS = ["Buys the first round", "Delete TikTok for 48 hours", "Cold shower tomorrow", "50 burpees on video",
-  "Cooks dinner for the winner", "Wears something ridiculous for a day", "Plans the next group walk", "Posts an old embarrassing photo"];
-
-// The wheel opens for last week any time, and for this week from Sunday 6pm.
-function wheelOpen(ws) {
-  const thisWs = weekStart(today());
-  if (ws < thisWs) return true;
-  const now = new Date();
-  return ws === thisWs && now.getDay() === 0 && now.getHours() >= 18;
-}
-
-const spinFor = (B, ws) => (B.data.spins || []).find((s) => s.week_start === ws);
-
-function forfeitCard(E, g) {
-  const B = cur();
-  const t = today(), ws = weekStart(t);
-  const rows = forfeitStandings(E, ws);
-  const slices = g.forfeits.length ? g.forfeits : [];
-  const daysLeft = 6 - ((parseDay(t).getDay() + 6) % 7);
-  const lastWs = addDays(ws, -7);
-  const last = forfeitStandings(E, lastWs);
-  const bottom = rows[0] && E.byId.get(rows[0].id);
-  const lastSpin = spinFor(B, lastWs), nowSpin = spinFor(B, ws);
-  const spinLine = (spin, label) => {
-    const who = spin.loser_id && E.byId.get(spin.loser_id);
-    return `<div class="callout result" data-wheel="${spin.week_start}" style="cursor:pointer">🎡 ${label}: <b>${esc(who?.name || "Last place")}</b>'s forfeit is <b>${esc(spin.forfeit)}</b>. <span class="small muted">Tap to replay</span></div>`;
-  };
-  let wheelArea = "";
-  if (nowSpin) wheelArea = spinLine(nowSpin, "This week");
-  else if (rows.length >= 2 && wheelOpen(ws)) wheelArea = `<button class="btn block" data-wheel="${ws}">🎡 Spin the wheel for ${esc(bottom.name)}</button>`;
-  if (lastSpin) wheelArea += spinLine(lastSpin, "Last week");
-  else if (last.length >= 2) wheelArea += `<button class="btn block ${nowSpin || wheelOpen(ws) ? "ghost" : ""}" data-wheel="${lastWs}" style="margin-top:8px">🎡 Spin last week's wheel for ${esc(E.byId.get(last[0].id).name)}</button>`;
-  return `<section class="card forfeit">
-    <div class="row spread"><h2 style="margin:0">😬 Forfeit watch</h2><span class="pill">${daysLeft ? `${daysLeft} day${daysLeft > 1 ? "s" : ""} left` : "Wheel at 6pm"}</span></div>
-    <p class="muted small" style="margin:6px 0 10px">Lowest score on Sunday night spins the wheel. ${slices.length ? `${slices.length} forfeit${slices.length === 1 ? "" : "s"} on it.` : `Right now it can only land on: <b style="color:var(--text)">${esc(g.forfeit || "Buys the first round")}</b>.`}</p>
-    ${rows.length < 2 ? `<p class="small muted">Kicks in once two people have finished their placement week.</p>`
-      : `<div class="row" style="margin-bottom:12px">${avatar(bottom)}<div class="grow"><div class="loser">${esc(bottom.name)}</div><div class="small muted num">${fmt(rows[0].v)} pts · ${fmt(rows[1].v - rows[0].v)} behind ${esc(E.byId.get(rows[1].id).name)}</div></div></div>`}
-    ${wheelArea}
-    <button class="btn sm ghost" data-act="edit-wheel" style="margin-top:10px">${slices.length < 2 ? "Add forfeits to the wheel" : "See or add forfeits"}</button>
-  </section>`;
-}
-
-function teamsCard(E, g, ws) {
-  if (!g.teams.length) return "";
-  const rows = g.teams.map((t) => {
-    const ms = E.ids.filter((id) => E.byId.get(id).team === t);
-    const total = ms.reduce((a, id) => a + E.week(id, ws).form, 0);
-    return { t, n: ms.length, avg: ms.length ? total / ms.length : 0 };
-  }).sort((a, b) => b.avg - a.avg);
-  return `<section class="card"><h2>⚔️ Team battle</h2>
-    <table class="teams-table"><thead><tr><th>Team</th><th>Players</th><th>Avg score</th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr><td><b>${i === 0 && r.avg > 0 ? "👑 " : ""}${esc(r.t)}</b></td><td>${r.n}</td><td class="num"><b>${fmt(r.avg)}</b></td></tr>`).join("")}
-    </tbody></table><p class="small muted" style="margin:8px 0 0">This week's average per player, so team sizes don't matter.</p></section>`;
-}
-
-function journeyCard(E, g) {
-  const season = seasonOf(today());
-  let steps = 0;
-  for (const id of E.ids) for (let d = season.start; d <= today(); d = addDays(d, 1)) steps += E.day(id, d).steps;
-  const done = steps * KM_PER_STEP;
-  const goal = Number(g.challenge_km) || 460;
-  const laps = Math.floor(done / goal);
-  const pct = ((done % goal) / goal) * 100;
-  return `<section class="card journey"><div class="row spread"><h2 style="margin:0">🗺️ ${esc(g.challenge_name)}</h2>${laps ? `<span class="pill ok">✓ ×${laps}</span>` : ""}</div>
-    <div class="track"><i style="width:${pct}%"></i><span class="walker" style="left:${Math.max(3, Math.min(97, pct))}%">🚶</span></div>
-    <div class="row spread small"><span class="num"><b>${fmt(done % goal)}</b> of ${fmt(goal)} km</span><span class="muted num">${fmt(goal - (done % goal))} km to go</span></div>
-    <p class="small muted" style="margin:8px 0 0">Team effort: everyone's steps this season count. New route each season.</p></section>`;
-}
-
-function seasonCard(E) {
-  const s = seasonOf(today());
-  const left = daysBetween(today(), s.end);
-  const res = E.seasonResults(s).slice(0, 3);
-  return `<section class="card"><div class="row spread"><h2 style="margin:0">🏆 ${s.name}</h2><span class="pill">${left} day${left === 1 ? "" : "s"} left</span></div>
-    <p class="small muted" style="margin:6px 0 8px">Top 3 when the season ends win a trophy that stays on their profile forever.</p>
-    ${res.length ? res.map((r, i) => { const p = E.byId.get(r.id); return `<div class="row mini"><span>${["🥇", "🥈", "🥉"][i]}</span>${avatar(p, "sm")}<span class="grow">${esc(p.name)}</span><b class="num">${fmt(r.score)}</b></div>`; }).join("") : '<p class="small muted" style="margin:0">No scores yet this season.</p>'}
-  </section>`;
-}
-
-// ----- Log -----
-function tabLog() {
-  const t = today();
-  const opts = Array.from({ length: 7 }, (_, i) => addDays(t, -i));
-  const sel = S.logDay || t;
-  const r = S.mine.day(S.me.id, sel);
-  const optHtml = opts.map((d, i) => `<option value="${d}" ${d === sel ? "selected" : ""}>${i === 0 ? "Today" : i === 1 ? "Yesterday" : dayLabel(d)}</option>`).join("");
-  const autoScroll = S.me.scroll_source === "auto";
-  return `<div class="top"><div><h1>Log</h1><div class="sub">Fix or fill in a day</div></div></div>
-  <section class="card"><label class="field" style="margin:0"><span>Day</span><select data-act="log-day">${optHtml}</select></label></section>
-  <form class="card" data-form="log-steps">
-    <h2>🚶 Steps</h2>
-    <input name="steps" class="big-input num" type="number" inputmode="numeric" min="0" max="200000" placeholder="0" value="${r.steps || ""}" required aria-label="Steps">
-    <button class="btn block" style="margin-top:10px">Save steps</button>
-    <p class="small muted" style="margin:8px 0 0">Find it in Apple Health, Google Fit or Samsung Health. ${S.me.is_public ? "Typed-in steps count half in the public league." : ""}</p>
-  </form>
-  <form class="card" data-form="log-scroll">
-    <h2>📵 Scrolling</h2>
-    <input name="minutes" class="big-input num" type="number" inputmode="numeric" min="0" max="1440" placeholder="0" value="${r.scrollSrc === "reported" ? r.scrollMin : ""}" required aria-label="Minutes of short-video scrolling">
-    <p class="small muted" style="margin:8px 0 0">Minutes on TikTok, Reels and Shorts. On iPhone: Settings → Screen Time → See All App & Website Activity. On Android: Settings → Digital Wellbeing.${autoScroll ? ` Auto-tracking says <b>${fmt(r.scrollMin)} min</b>; anything you type here replaces it.` : ""}</p>
-    <button class="btn block" style="margin-top:10px">Save minutes</button>
-  </form>`;
-}
-
-// ----- Me -----
-function profileBody(E, id) {
-  const p = E.byId.get(id);
-  const x = E.xp(id), st = E.streak(id), par = E.par(id, today());
-  const trophies = E.trophies(id);
-  const badges = E.badges(id);
-  let total = 0, best = 0, active = 0;
-  for (let d = Effort.iso(new Date(p.created_at)); d <= today(); d = addDays(d, 1)) {
-    const r = E.day(id, d);
-    total += r.steps; best = Math.max(best, r.steps); if (r.active) active++;
-  }
-  const tr = E.trail(id);
-  return `<div class="profile-hero"><div class="walker-box">${Walker.svg(charOf(p), { gear: p.equipped, fog: tr.fog, mood: tr.fog > 0.45 ? "foggy" : "ok", label: `${p.name}'s walker` })}</div><div><h2>${esc(p.name)}</h2><div class="small muted">Level ${x.level} · ${esc(x.title)}${p.team ? " · " + esc(p.team) : ""}</div><div class="small" style="margin-top:6px">📍 ${esc(tr.region)} · <b class="num">${fmt(tr.reached)}</b> landmarks</div></div></div>
-  <section class="card"><h2>Last 14 days</h2>${chart(E, id)}<p class="small muted" style="margin:4px 0 0">Daily effort. Dashed line is par; solid bars beat it.</p></section>
-  <section class="card"><div class="stats">
-    <div class="stat"><b class="num">${par.placement ? "—" : fmt(par.value)}</b><span>par</span></div>
-    <div class="stat"><b class="num">${st.weeks}</b><span>week streak</span></div>
-    <div class="stat"><b class="num">${st.best}</b><span>best streak</span></div>
-    <div class="stat"><b class="num">${fmt(best)}</b><span>best day</span></div>
-    <div class="stat"><b class="num">${fmt(total)}</b><span>steps</span></div>
-    <div class="stat"><b class="num">${km(total)}</b><span>km</span></div>
-  </div></section>
-  ${trophies.length ? `<section class="card"><h2>Trophies</h2><div class="badges">${trophies.map((t) => `<div class="badge"><span class="e">${["🥇", "🥈", "🥉"][t.place - 1]}</span>Season ${t.season}<small>${["Champion", "2nd place", "3rd place"][t.place - 1]}</small></div>`).join("")}</div></section>` : ""}
-  <section class="card"><h2>Badges <span class="muted small" style="font-weight:500">${badges.filter((b) => b.ok).length}/${badges.length}</span></h2>
-    <div class="badges">${badges.map((b) => `<div class="badge ${b.ok ? "" : "locked"}"><span class="e">${b.e}</span>${b.n}<small>${b.d}</small></div>`).join("")}</div></section>`;
-}
-
-function chart(E, id, days = 14) {
-  const list = Array.from({ length: days }, (_, i) => addDays(today(), i - days + 1));
-  const vals = list.map((d) => E.day(id, d).total);
-  const par = E.par(id, today()).value;
-  const p = E.byId.get(id);
-  const max = Math.max(par * 1.3, ...vals, 1), min = Math.min(0, ...vals);
-  const W = 320, H = 150, pad = 18, bw = (W - 8) / days;
-  const y = (v) => 8 + (max - v) / (max - min) * (H - pad - 8);
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Last ${days} days">
-    <line class="goal" x1="0" x2="${W}" y1="${y(par)}" y2="${y(par)}"/>
-    <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>
-    ${vals.map((v, i) => `<rect x="${4 + i * bw + 2}" y="${Math.min(y(v), y(0))}" width="${bw - 4}" height="${Math.abs(y(0) - y(v))}" rx="4" fill="${v < 0 ? "var(--bad)" : colorOf(p)}" opacity="${v >= par ? 1 : 0.45}"><title>${dayLabel(list[i])}: ${signed(v)}</title></rect>`).join("")}
-    ${list.map((d, i) => (i % 2 === (days - 1) % 2 ? `<text x="${4 + i * bw + bw / 2}" y="${H - 4}" text-anchor="middle">${parseDay(d).toLocaleDateString("en-GB", { weekday: "narrow" })}</text>` : "")).join("")}
-  </svg>`;
-}
-
-function tabMe() {
-  const B = cur();
-  const E = B && B.E.byId.has(S.me.id) ? B.E : S.mine;
-  const row = (act, e, label, sub) => `<button class="list-row" data-act="${act}"><span class="e">${e}</span><span class="grow"><b>${label}</b>${sub ? `<br><span class="small muted">${sub}</span>` : ""}</span>${ICON.chev}</button>`;
-  return `<div class="top"><div><h1>You</h1></div><button class="btn sm ghost" data-act="edit-profile">Edit</button></div>
-  ${profileBody(E, S.me.id)}
-  <section class="card list">
-    ${row("setup-steps", "🚶", "Step syncing", S.me.steps_synced_at ? `Last ${ago(S.me.steps_synced_at)} via ${esc(S.me.steps_source)}` : "Not connected")}
-    ${row("setup-scroll", "📵", "Scroll tracking", S.me.scroll_synced_at ? `Last ${ago(S.me.scroll_synced_at)} (${S.me.scroll_source === "auto" ? "automatic" : "typed in"})` : "Not set up, 30 min/day assumed")}
-    ${row("group-menu", "👥", "Groups", S.groups.length ? S.groups.map((g) => esc(g.name)).join(", ") : "Create or join one")}
-    <label class="list-row"><span class="e">🌍</span><span class="grow"><b>Public league</b><br><span class="small muted">Compete with everyone on Effort, in leagues matched to your level</span></span><input type="checkbox" class="switch" data-act="toggle-public" ${S.me.is_public ? "checked" : ""}></label>
-    ${row("open-trail", "🥾", "Your trail", "Landmarks, regions and fuel")}
-    ${row("open-gear", "🎒", "Gear", S.me.equipped ? `Wearing: ${esc(Walker.GEAR[S.me.equipped]?.name || "")}` : "Found on the trail")}
-    ${row("retake", "🧪", "Retake the quiz", "Get a new look")}
-    ${row("open-recap", "📊", "Weekly recap", "A shareable card of your week")}
-    ${row("how", "❓", "How scoring works")}
-    ${row("restore", "🔑", "Copy restore link", "Keep it safe: it logs you in on a new phone")}
-    ${row("sign-out", "🚪", "Sign out on this phone")}
-  </section>
-  <p class="small muted" style="text-align:center">Effort · your data is only shared with your groups${S.me.is_public ? " and the public league" : ""}</p>`;
-}
-
-// ---------- setup guides ----------
-function setupBody(kind, platform) {
-  const p = S.setupPlatform || platform || detectPlatform();
-  const t = S.token;
-  const toggle = `<div class="toggle" style="margin-bottom:12px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Type it in"]].map(([v, l]) => `<button type="button" data-setup="${v}" data-kind="${kind}" aria-pressed="${v === p}">${l}</button>`).join("")}</div>`;
-  const box = (url) => `<div class="copybox"><code>${esc(url)}</code><button class="btn sm" data-copy="${esc(url)}">Copy</button></div>`;
-  const g = cur()?.data?.group;
-  let body;
-  if (kind === "steps") {
-    if (p === "ios") body = `
-      ${g?.shortcut_url ? `<div class="callout"><b>Quick way:</b> copy your link, then <a href="${esc(g.shortcut_url)}" target="_blank" rel="noopener">add the group's Shortcut</a> and paste it when asked. Then do steps 6–8.</div>` : ""}
-      <ol class="steps-list">
-        <li>Open <b>Shortcuts</b>, tap <b>+</b>, name it <b>Effort Steps</b>.</li>
-        <li>Add <b>Find Health Samples</b>: Type <b>Steps</b>, filter <b>Start Date is today</b>, <b>Group By: Day</b>.</li>
-        <li>Add <b>Calculate Statistics</b> → <b>Sum</b>.</li>
-        <li>Add <b>Get Contents of URL</b> and paste:${box(`${API}/log?t=${t}&steps=`)}then tap the end and insert the <b>Statistics</b> variable.</li>
-        <li>Tap ▶︎ to test. You should see "✅ … steps logged".</li>
-        <li><b>Automation</b> tab → <b>+</b> → <b>Time of Day</b>.</li>
-        <li>Pick <b>23:45</b>, <b>Daily</b>, <b>Run Immediately</b>.</li>
-        <li>Choose <b>Effort Steps</b>. Add 13:00 and 18:00 too for a live board.</li>
-      </ol>`;
-    else if (p === "android") body = `
-      <ol class="steps-list">
-        <li>Make sure Samsung Health, Google Fit or Fitbit syncs to <b>Health Connect</b>.</li>
-        <li>Install <a href="https://play.google.com/store/apps/details?id=com.hcwebhook.app" target="_blank" rel="noopener"><b>HC Webhook</b></a> (free).</li>
-        <li>Grant <b>Steps</b>, turn on Steps only, set resolution to <b>Daily</b>.</li>
-        <li>Under <b>Webhooks</b>, add:${box(`${API}/hc?t=${t}`)}</li>
-        <li>Sync every <b>60 min</b>, then tap <b>Sync now</b>.</li>
-      </ol>
-      <p class="small muted">If your phone kills background apps, set HC Webhook's battery to <b>Unrestricted</b>.</p>`;
-    else body = `<p>Use the <b>Log</b> tab to type your steps in each day. You can fix the last 7 days.</p>`;
+function taxHero() {
+  const st = taxState(), w = S.D.windows.tax, T = taxSetup(), f = S.D.fight, paid = ledgerFor("tax", S.D.today.day);
+  let chip, line, btn;
+  if (st === "open" || st === "live") {
+    const end = st === "live" ? Date.parse(f.ends_at) : w.closes;
+    chip = `<span class="chip green pulse">${ic("sword")} Open now · <span data-count="${end}">${countdown(end - now())}</span></span>`;
+    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Knock him out to keep it all, then rob him.`;
+    btn = `<button class="btn gold xl block" style="margin-top:14px" data-act="tax">${ic("sword")} ${st === "live" ? "Back to the fight" : "Fight"}</button>`;
+  } else if (st === "done") {
+    const k = Number(f.knocked);
+    chip = `<span class="chip">${ic("check")} Done for today</span>`;
+    line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.`;
+    btn = `<div class="rline total" style="margin-top:12px"><span>Banked tonight</span><span class="rv">${paid ? signedEfforts(paid.amount) : "–"}</span></div>
+      <p class="tiny faint" style="margin:6px 0 0">Steps after 7pm still count: they pay out after midnight on the same terms. Next fight <span data-count="${w.next}">${countdown(w.next - now())}</span>.</p>`;
+  } else if (st === "soon") {
+    chip = `<span class="chip gold">${ic("clock")} Tonight · 7pm</span>`;
+    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Five minutes to knock him out.`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>`;
   } else {
-    if (p === "ios") body = `
-      <p class="small">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>
-      <ol class="steps-list">
-        <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>App</b>.</li>
-        <li><b>Choose</b> TikTok, Instagram and YouTube (whichever you scroll on). Tick <b>Is Opened</b> only.</li>
-        <li>Pick <b>Run Immediately</b> and turn <b>Notify When Run</b> off → <b>Next</b>.</li>
-        <li><b>New Blank Automation</b> → <b>Get Contents of URL</b>, paste:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
-        <li>Make a second one the same way, but tick <b>Is Closed</b> and use:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
-      </ol>
-      <p class="small muted">iPhones can't tell Reels from the rest of Instagram, so only add apps you mostly use for short videos.</p>`;
-    else if (p === "android") body = `
-      <p class="small">Free with <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener"><b>MacroDroid</b></a> (uses 2 of its 5 free macros).</p>
-      <ol class="steps-list">
-        <li>New macro → Trigger <b>Applications → Application Launched/Closed</b> → <b>Launched</b> → pick TikTok, Instagram, YouTube.</li>
-        <li>Action <b>Web Interactions → HTTP Request</b>, GET:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
-        <li>Make a second macro with <b>Application Closed</b> and:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
-        <li>Allow the permissions it asks for and turn off battery optimisation for MacroDroid.</li>
-      </ol>
-      <p class="small muted"><b>Tasker users:</b> send the day's exact minutes to ${esc(`${API}/scroll?t=${t}&minutes=`)}&lt;minutes&gt; once a night instead.</p>`;
-    else body = `<p>Each evening, check Screen Time (iPhone) or Digital Wellbeing (Android) and type your TikTok/Reels/Shorts minutes into the <b>Log</b> tab.</p>`;
+    chip = `<span class="chip red">${ic("warning")} Missed tonight</span>`;
+    line = `No fight, so he takes the full ${Math.round(T.taxRate * 100)}% when today settles after midnight.`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span></button>`;
   }
-  return `${toggle}<section class="card">${body}</section>`;
+  return `<section class="panel hero">
+      <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #3f8a5e 0%, #1c4030 45%, #0f2219 100%)"></div>
+        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}<h3 class="ol">The Taxman</h3><p>${line}</p></div>
+        <div class="portrait">${portraitImg("boss", "taxman", { w: 300, h: 320 })}</div></div>
+      <div class="body"><div id="day-tiles">${dayTiles()}</div>${btn}</div>
+    </section>`;
+}
+function ledgerPanel() {
+  const rows = S.D.ledger.slice(0, 12);
+  if (!rows.length) return "";
+  const label = (r) => r.kind === "day" ? `${new Date(r.ref + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}: ${r.note}` : r.note;
+  return `<section class="panel flat"><div class="ptitle"><h2 class="ol-sm">Wallet</h2><span class="side small faint">${fmt(S.D.wallet)} Efforts</span></div>
+    <div class="feedlist">${rows.map((r) => `<div class="it"><span class="grow">${esc(label(r))}</span><span class="amt ${r.amount >= 0 ? "plus" : "minus"}">${signedEfforts(r.amount)}</span></div>`).join("")}</div></section>`;
+}
+function tabToday() {
+  return `${taxHero()}${weekPanel()}${ledgerPanel()}
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How a day works</h2></div>
+      <div class="how">
+        <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort, up to ${G.RULES.dailyEffortCap} a day. ${PER_E()} Efforts make 1 Endeavour, which is what gear costs.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>7pm: five minutes to fight</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it; knock him out to keep everything, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra. Miss it and he takes the lot.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>When he Audits you only the moving target takes damage. Golden receipts knock 3% off his health.</span></div></div>
+      </div>
+    </section>`;
+}
+
+// ---------- Raid ----------
+function statRows(st) {
+  const { g } = G.loadout(st, me().gear, S.D.inv);
+  const max = Math.max(20, ...Object.values(g));
+  return G.STATS.map((s) => {
+    const [icon, col] = STAT_LOOK[s.id];
+    return `<div class="stat" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
+      <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span></div>`;
+  }).join("");
+}
+// What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
+function raidPreview() {
+  const sq = squad(), T = weekRows();
+  const members = sq.members.map((m) => {
+    const row = T.rows.find((r) => r.id === m.id);
+    return { id: m.id, name: m.name, stats: G.stats(m.character || {}), equipped: m.id === me().id ? me().gear : m.gear, inv: m.id === me().id ? S.D.inv : {}, weekSteps: m.weekSteps, stride: row.stride, title: row.title };
+  });
+  return G.raidCreate(members, { seed: 1, tier: sq.tier });
+}
+const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
+function raidHero() {
+  const st = raidState(), w = S.D.windows.raid;
+  const P = raidPreview(), boss = P.boss, mine = P.members.find((m) => m.id === me().id);
+  let chip, btn;
+  if (st === "open") {
+    chip = `<span class="chip green pulse">${ic("raid")} Live now · <span data-count="${w.closes}">${countdown(w.closes - now())}</span></span>`;
+    btn = `<button class="btn green xl block" style="margin-top:14px" data-act="raid">${ic("raid")} Join the raid</button>`;
+  } else if (st === "done") {
+    const r = S.D.raid.result;
+    chip = `<span class="chip">${ic("check")} This week's raid is done</span>`;
+    btn = `<button class="btn blue block" style="margin-top:14px" data-act="raid-result">${ic("chest")} ${r.how === "won" ? "Won" : r.how === "wiped" ? "Wiped" : "Out of time"} · see results</button>`;
+  } else {
+    chip = `<span class="chip red">${ic("raid")} Sunday · 7pm</span>`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>`;
+  }
+  return `<section class="panel hero">
+      <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #5a4bb0 0%, #24306e 45%, #121a44 100%)"></div>
+        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}.</p></div>
+        <div class="portrait">${portraitImg("boss", boss.id, { w: 300, h: 320 })}</div></div>
+      <div class="body">
+        <div class="tiles">
+          <div class="tile red"><div class="k">${ic("heart")} Health</div><div class="v num">${fmt(boss.max)}</div></div>
+          <div class="tile"><div class="k">${ic("upgrade")} Boss level</div><div class="v">${P.lvl.toFixed(2)}<small>from gear</small></div></div>
+          <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(P))}<small>squad</small></div></div>
+          <div class="tile ${mine.stride > 1 ? "green" : mine.stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${mine.stride.toFixed(2)}<small>from steps</small></div></div>
+        </div>${btn}
+        <p class="tiny faint" style="margin:10px 0 0">Everyone fights the same boss at the same time, 15 minutes. If the full squad turns up it has ${fmt(boss.max)} health; it's smaller if fewer come.</p>
+      </div>
+    </section>`;
+}
+function tabRaid() {
+  if (!squad()) return `${noSquadPanel()}${howRaids()}`;
+  const st = myStats(), cls = myClass(), sug = G.suggestedPosition(st), pos = me().pos || sug, tier = squad().tier;
+  const lap = Math.floor((tier - 1) / G.BOSSES.length) + 1;
+  return `${raidHero()}${weekPanel()}
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${lap}</span></div>
+      <div class="ladder">${G.BOSSES.map((b, i) => {
+        const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
+        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
+      }).join("")}</div>
+      <p class="small muted" style="margin:10px 0 0">Beat a boss and next Sunday brings the next one. After the last, the ladder loops, twice as tough and twice as rich.</p>
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2><span class="side chip gold">Best: ${G.posOf(sug).label}</span></div>
+      <p class="small muted" style="margin:-4px 0 8px">${esc(cls.blurb)}</p>
+      ${statRows(st)}
+      <span class="field-label">Where you start on Sunday</span>
+      <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
+      <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. You can move rows during the fight.</p>
+    </section>
+    ${S.D.lastRaid && S.D.raid?.status !== "done" ? lastRaidPanel(S.D.lastRaid) : ""}
+    ${howRaids()}`;
+}
+function lastRaidPanel(L) {
+  const r = L.result, mine = r.shares?.find((s) => s.id === me().id);
+  return `<section class="panel flat"><div class="ptitle"><h2 class="ol-sm">Last raid: ${esc(r.boss)}</h2><span class="side chip ${r.how === "won" ? "green" : "red"}">${r.how === "won" ? "Won" : r.how === "wiped" ? "Wiped" : "Out of time"}</span></div>
+    <p class="small muted" style="margin:0">${Math.round(r.frac * 100)}% dealt${mine ? ` · you took home ${fmt(mine.total)} Efforts` : " · you weren't there"}.</p></section>`;
+}
+function howRaids() {
+  return `<section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
+      <div class="how">
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad average set how hard you hit. Half the loot is split by steps, half by what you did in the fight. The lowest walker gets hunted by the boss and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, ${p.ability}`).join(". ")}. Moving takes a few seconds.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early: single hits, stomps on the front two rows, screams on everyone, and a feast that heals it unless you burst it.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear raises the stakes</b><span>Better squad gear makes the boss stronger, but the reward grows faster.</span></div></div>
+      </div>
+    </section>`;
+}
+
+// ---------- Shop ----------
+function itemCard(item, { deal = false } = {}) {
+  const inv = S.D.inv, t = G.tierOf(item.tier), own = item.id in inv, on = me().gear[item.slot] === item.id, locked = !own && t.lvl > level();
+  const st = G.itemStats(item, inv[item.id] || 0), price = G.priceOf(item, deal);
+  return `<button class="item ${item.tier} ${locked ? "locked" : ""}" style="--rc:${t.color}" data-item="${item.id}" data-deal="${deal ? 1 : ""}" aria-label="${esc(item.name)}">
+    <div class="art-wrap"><span class="rarity">${t.label}</span><div class="art">${itemArt(item)}</div>
+      ${own && inv[item.id] ? `<span class="upb">+${inv[item.id]}</span>` : ""}${on ? `<span class="eq">${ic("check")}</span>` : ""}${deal && !own ? `<span class="deal">−${Math.round((1 - price / G.priceOf(item, false)) * 100)}%</span>` : ""}
+      ${locked ? `<span class="lockover">${ic("lock")}</span>` : ""}</div>
+    <div class="meta"><h4>${esc(item.name)}</h4>
+      <div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div></div>
+    ${item.perk ? `<div class="perk">${esc(perkText(item.perk))}</div>` : "<div></div>"}
+    <div class="foot">${locked ? `<span class="buy">Level ${t.lvl}</span>` : own ? `<span class="buy owned">${on ? "Equipped" : "Owned"}</span>` : `<span class="buy ${S.D.wallet < price ? "poor" : ""}">${gem(18)}${fmt(price / PER_E())}</span>`}</div>
+  </button>`;
+}
+const dealsToday = () => G.dealsFor(S.D.today.day, myClass().id, level());
+function tabShop() {
+  const cls = myClass(), lvl = level(), inv = S.D.inv;
+  const tierRank = (i) => I.TIERS.findIndex((t) => t.id === i.tier);
+  const sort = (a, b) => tierRank(a) - tierRank(b) || G.SLOTS.indexOf(a.slot) - G.SLOTS.indexOf(b.slot);
+  const lists = {
+    class: I.ITEMS.filter((i) => i.cls === cls.id).sort(sort),
+    all: I.ITEMS.filter((i) => !i.cls).sort(sort),
+    deals: dealsToday().map(G.itemById).filter(Boolean),
+    bag: I.ITEMS.filter((i) => i.id in inv).sort(sort),
+  };
+  const tab = lists[S.shopTab] ? S.shopTab : "class";
+  const next = I.TIERS.find((t) => t.lvl > lvl);
+  const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
+  return `
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("guard")}</span><h2 class="ol-sm">Loadout</h2>${next ? `<span class="side chip">${ic("lock")} ${next.label} at Lv ${next.lvl}</span>` : ""}</div>
+      <div class="loadout">${G.SLOTS.map((s) => {
+        const it = G.itemById(me().gear[s]);
+        return it ? `<button class="slot full" style="--rc:${G.tierOf(it.tier).color}" data-item="${it.id}" aria-label="${esc(it.name)}"><div class="art">${itemArt(it)}</div><span class="slab">${esc(it.name)}</span></button>`
+          : `<div class="slot"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[s])}<span>${slotName[s]}</span></div></div>`;
+      }).join("")}</div>
+    </section>
+    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Everyone", 0], ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
+      `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
+    ${tab === "deals" ? `<p class="small muted" style="margin:0">Three picks for your class each day, about ${Math.round(G.RULES.dealDiscount * 100)}% off. New ones at midnight.</p>` : ""}
+    <div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i, { deal: tab === "deals" })).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`;
+}
+function itemSheet(id, deal) {
+  const item = G.itemById(id); if (!item) return;
+  const inv = S.D.inv, t = G.tierOf(item.tier), up = inv[id] || 0, own = id in inv, on = me().gear[item.slot] === id, wallet = S.D.wallet;
+  const locked = !own && t.lvl > level(), price = G.priceOf(item, deal), cls = item.cls ? I.CLASSES.find((c) => c.id === item.cls) : null;
+  const st = G.itemStats(item, up), next = G.itemStats(item, up + 1), cost = G.upgradeCost(item, up), maxed = up >= G.RULES.upgradeMax;
+  openSheet(`<div class="row spread" style="margin-bottom:10px"><span class="chip" style="background:color-mix(in srgb, ${t.color} 30%, transparent);border-color:${t.color};color:#fff">${t.label}${cls ? ` · ${esc(cls.name)}` : " · Any class"} · ${esc(item.slot)}</span><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>
+    <div class="bigart"><div class="art">${itemArt(item)}</div>${up ? `<span class="upb">+${up}</span>` : ""}</div>
+    <h2 class="ol-sm">${esc(item.name)}</h2>
+    <p class="flavour">${esc(item.text)}</p>
+    <div class="tiles">${Object.entries(st).map(([k, v]) => `<div class="tile"><div class="k" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])} ${statLabel(k)}</div><div class="v">+${v}${own && !maxed ? `<small>→ +${next[k]}</small>` : ""}</div></div>`).join("")}</div>
+    ${item.perk ? `<div class="perkbox">${ic("star")}<span>${esc(perkText(item.perk))}</span></div>` : ""}
+    <div class="btn-row" style="margin-top:12px">
+      ${locked ? `<button class="btn block" disabled>${ic("lock")} Unlocks at level ${t.lvl}</button>`
+        : !own ? `<button class="btn green xl block" data-buy="${id}" data-deal="${deal ? 1 : ""}" ${wallet < price ? "disabled" : ""}>Buy ${priceTag(price)}</button>`
+        : `${on ? `<button class="btn" data-unequip="${item.slot}">Take off</button>` : `<button class="btn blue" data-equip="${id}">Equip</button>`}
+           ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
+    </div>
+    ${!own && !locked && wallet < price ? `<p class="small muted" style="text-align:center;margin:10px 0 0">You need ${fmt(Math.ceil((price - wallet) / PER_E()))} more Endeavour${price - wallet > PER_E() ? "s" : ""}. Walk.</p>` : ""}`, { rc: t.color });
+}
+async function shopAction(action, body, done) {
+  if (S.busy) return;
+  S.busy = true;
+  try { await call(action, { token: S.token, ...body }); await load(); render(); done?.(); }
+  catch (e) { toast(e.message); }
+  finally { S.busy = false; }
+}
+
+// ---------- Me ----------
+function tabMe() {
+  const m = me(), sq = squad(), cls = myClass();
+  return `
+    <section class="panel">
+      <div class="row" style="align-items:flex-start;gap:14px">
+        <div class="bigface has-fallback"><span class="fb">${Walker.svg(ANS[m.id], { mood: "fresh" })}</span>${portraitImg("walker", m.id, { w: 220, h: 260 })}</div>
+        <div class="grow"><h2 class="ol-sm disp" style="margin:4px 0 2px;font-size:24px">${esc(m.name)}</h2><div class="small muted">${esc(cls.name)} · Level ${level()}</div>
+          <p class="tiny faint" style="margin:8px 0 10px">${esc(cls.blurb)}</p>
+          <button class="btn xs" data-act="retake">${ic("edit")} Change my look</button></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
+      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android" || /health/.test(m.steps_source || "") ? "Health Connect" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
+      <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge blue">${ic("phone")}</span><h2 class="ol-sm">Scrolling</h2><span class="side chip">${S.D.today.scroll ?? "–"} min today</span></div>
+      <p class="small muted" style="margin:0 0 10px">Short-video scrolling over your budget (${G.RULES.scrollMinPer1kSteps} min per 1,000 steps) adds to the Taxman's cut. No data means we assume ${S.D.today.noScrollMin} min.</p>
+      <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} Track it</button><button class="btn sm" data-act="log-scroll">${ic("edit")} Type it in</button></div>
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("calendar")}</span><h2 class="ol-sm">Reminders</h2></div>
+      <p class="small muted" style="margin:0 0 10px">The Taxman is only around 7pm to 7:05pm, and the raid is Sunday 7pm to 7:15pm. Put them in your calendar so you don't miss them.</p>
+      ${reminderButtons()}
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge blue">${ic("squad")}</span><h2 class="ol-sm">${sq ? esc(sq.name) : "Squad"}</h2>${sq ? `<span class="side chip">${sq.code}</span>` : ""}</div>
+      ${sq ? `<div class="mates">${sq.members.map((x) => `<div class="mate">${face(x.id, 40)}<div class="grow"><b>${esc(x.id === m.id ? "You" : x.name)}</b><small>Lv ${x.level} · ${x.synced ? `synced ${ago(x.synced)}` : "steps not syncing"}</small></div><span class="num small">${fmt(x.todaySteps)}<small class="faint"> today</small></span></div>`).join("")}</div>
+        <div class="btn-row" style="margin-top:12px"><button class="btn sm green" data-act="invite">${ic("share")} Invite</button><button class="btn sm" data-act="squad-sheet">Switch</button></div>
+        <button class="btn xs red" style="margin-top:10px" data-act="leave">Leave squad</button>`
+        : `<p class="small muted" style="margin:0 0 10px">You're not in a squad.</p><button class="btn green block" data-act="squad-sheet">${ic("squad")} Make or join a squad</button>`}
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("link")}</span><h2 class="ol-sm">This phone</h2></div>
+      <label class="row spread" style="margin-bottom:12px"><span><b>Sound</b></span><input class="switch" type="checkbox" data-toggle="sound" ${FX.muted ? "" : "checked"} aria-label="Sound"></label>
+      <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Switch off on older phones</span></span><input class="switch" type="checkbox" data-toggle="3d" ${store.get("no3d") ? "" : "checked"} aria-label="3D battles"></label>
+      <p class="small muted" style="margin:0 0 8px">Your restore link logs you in on another phone. Keep it private: it's your account.</p>
+      <div class="btn-row"><button class="btn sm" data-act="copy-restore">${ic("copy")} Copy restore link</button><a class="btn sm" href="lab.html">${ic("sliders")} The Lab</a></div>
+      <button class="btn xs red" style="margin-top:10px" data-act="signout">${ic("door")} Sign out on this phone</button>
+    </section>`;
+}
+// Calendar reminders: an .ics file (iPhone, Outlook, most Android calendars) or Google Calendar links.
+function reminderButtons() {
+  const w = S.D.windows, gstamp = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(t).replace(/\D/g, "").replace(/^(\d{8})/, "$1T");
+  const gcal = (text, start, mins, rule) => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(text)}&dates=${gstamp(start)}/${gstamp(start + mins * 60000)}&ctz=Europe/London&recur=${encodeURIComponent("RRULE:" + rule)}&details=${encodeURIComponent(APP_URL)}`;
+  const taxAt = w.tax.test ? w.tax.next : w.tax.opens > now() ? w.tax.opens : w.tax.next;
+  return `<a class="btn sm gold block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
+    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman", taxAt, 5, "FREQ=DAILY")}">Google: 7pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid", w.raid.test ? w.raid.closes : w.raid.opens, 15, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
 }
 
 // ---------- sheets ----------
-function openSheet(html) {
+function openSheet(html, { rc } = {}) {
   const sh = $("#sheet");
-  sh.classList.toggle("still", !sh.hidden); // swapping content in an open sheet shouldn't replay the slide-in
-  sh.innerHTML = `<div class="panel" role="dialog" aria-modal="true"><div class="grab"></div>${html}</div>`;
+  sh.innerHTML = `<div class="panel" role="dialog" aria-modal="true" ${rc ? `style="--rc:${rc}"` : ""}><div class="grab"></div>${html}</div>`;
   sh.hidden = false;
-  document.body.style.overflow = "hidden";
+  hydratePortraits();
 }
-function closeSheet() {
-  const sh = $("#sheet");
-  sh.hidden = true; sh.innerHTML = "";
-  document.body.style.overflow = "";
-}
-const sheetHead = (title) => `<div class="row spread" style="margin-bottom:10px"><h2 style="margin:0;font-size:22px">${title}</h2><button class="icon-btn" data-act="close-sheet" aria-label="Close">✕</button></div>`;
+function closeSheet() { const sh = $("#sheet"); sh.hidden = true; sh.innerHTML = ""; }
+const sheetHead = (title) => `<div class="row spread" style="margin-bottom:12px"><h2 class="ol-sm disp" style="margin:0;font-size:22px">${title}</h2><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>`;
 
+function setupBody(kind) {
+  const p = S.setupPlatform || me()?.platform || S.platform, t = S.token;
+  const toggle = `<div class="seg" style="margin-bottom:12px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Type it in"]].map(([v, l]) => `<button type="button" data-setup="${v}" data-kind="${kind}" aria-pressed="${v === p}">${l}</button>`).join("")}</div>`;
+  const box = (url) => `<div class="copybox"><code>${esc(url)}</code><button class="btn xs" data-copy="${esc(url)}">${ic("copy")} Copy</button></div>`;
+  let body;
+  if (kind === "steps") {
+    if (p === "ios") body = `<ol class="steps-list">
+        <li>Open <b>Shortcuts</b>, tap <b>+</b>, and name it <b>Effort Steps</b> (exactly that, so the app's Sync button can run it).</li>
+        <li>Add <b>Find Health Samples</b>: Type <b>Steps</b>, filter <b>Start Date is today</b>, <b>Group By: Day</b>.</li>
+        <li>Add <b>Calculate Statistics</b> → <b>Sum</b>.</li>
+        <li>Add <b>Get Contents of URL</b> and paste:${box(`${API}/log?t=${t}&steps=`)}then tap the end of it and insert the <b>Statistics</b> variable.</li>
+        <li>Tap ▶︎ to test. You should see "✅ … steps logged".</li>
+        <li>In the <b>Automation</b> tab: <b>+</b> → <b>Time of Day</b> → <b>18:50</b>, <b>Daily</b>, <b>Run Immediately</b> → <b>Effort Steps</b>. That's your steps in before the Taxman.</li>
+        <li>Make two more for <b>13:00</b> and <b>23:50</b>, so the squad table stays live and the whole day counts.</li>
+      </ol>`;
+    else if (p === "android") body = `<ol class="steps-list">
+        <li>Make sure Samsung Health, Google Fit or Fitbit syncs to <b>Health Connect</b>.</li>
+        <li>Install <a href="https://play.google.com/store/apps/details?id=com.hcwebhook.app" target="_blank" rel="noopener"><b>HC Webhook</b></a> (free).</li>
+        <li>Grant <b>Steps</b>, turn on Steps only, and set resolution to <b>Daily</b>.</li>
+        <li>Under <b>Webhooks</b>, add:${box(`${API}/hc?t=${t}`)}</li>
+        <li>Sync every <b>30 min</b>, then tap <b>Sync now</b>.</li>
+      </ol>
+      <p class="small muted">If your phone kills background apps, set HC Webhook's battery use to <b>Unrestricted</b>.</p>`;
+    else body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
+  } else {
+    if (p === "ios") body = `<p class="small">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>
+      <ol class="steps-list">
+        <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>App</b>.</li>
+        <li>Choose the apps you scroll on. Tick <b>Is Opened</b> only. <b>Run Immediately</b>, <b>Notify When Run</b> off.</li>
+        <li><b>New Blank Automation</b> → <b>Get Contents of URL</b>, paste:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
+        <li>Make a second one the same way, ticking <b>Is Closed</b> and using:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
+      </ol>`;
+    else if (p === "android") body = `<p class="small">Free with <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener"><b>MacroDroid</b></a>.</p>
+      <ol class="steps-list">
+        <li>New macro → Trigger <b>Applications → Application Launched/Closed</b> → <b>Launched</b> → pick TikTok, Instagram, YouTube.</li>
+        <li>Action <b>Web Interactions → HTTP Request</b>, GET:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
+        <li>A second macro with <b>Application Closed</b> and:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
+        <li>Allow the permissions it asks for and turn off battery optimisation for MacroDroid.</li>
+      </ol>`;
+    else body = `<p class="small">Each evening, check Screen Time (iPhone) or Digital Wellbeing (Android) and type your short-video minutes into <b>Me → Scrolling → Type it in</b>.</p>`;
+  }
+  return `${toggle}<div class="guide">${body}</div>`;
+}
 function setupSheet(kind) {
-  openSheet(`${sheetHead(kind === "steps" ? "Connect your steps" : "Track your scrolling")}${setupBody(kind, S.me.platform)}
-    <div class="btn-row"><button class="btn" data-act="check-sync" data-kind="${kind}">Check connection</button></div>
-    <p id="sync-status" class="small muted" style="text-align:center"></p>`);
+  openSheet(`${sheetHead(kind === "steps" ? "Sync your steps" : "Track your scrolling")}${setupBody(kind)}
+    <button class="btn green block" style="margin-top:12px" data-act="check-sync" data-kind="${kind}">${ic("refresh")} Check it worked</button>
+    <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0 0"></p>`);
+}
+function logSheet(kind) {
+  const days = [0, 1, 2, 3, 4, 5, 6].map((i) => { const d = new Date(Date.parse(S.D.today.day + "T12:00:00Z") - i * 86400000).toISOString().slice(0, 10); return [d, i === 0 ? "Today" : i === 1 ? "Yesterday" : new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long" })]; });
+  openSheet(`${sheetHead(kind === "steps" ? "Type in your steps" : "Type in your scrolling")}
+    <form data-form="log-${kind}">
+      <span class="field-label">Day</span>
+      <select name="date" class="select">${days.map(([d, l]) => `<option value="${d}">${l}</option>`).join("")}</select>
+      <span class="field-label">${kind === "steps" ? "Steps" : "Minutes of TikTok, Reels and Shorts"}</span>
+      <input type="number" name="n" inputmode="numeric" min="0" max="${kind === "steps" ? 200000 : 1440}" required placeholder="${kind === "steps" ? "8421" : "45"}">
+      <button class="btn green block" style="margin-top:14px">Save</button>
+    </form>
+    ${kind === "steps" ? `<p class="tiny faint" style="margin:10px 0 0">The number from your phone's Health or Fit app. A synced total for the same day replaces it.</p>` : ""}`);
+}
+function squadSheet() {
+  const sq = squad();
+  openSheet(`${sheetHead(sq ? "Switch squad" : "Your squad")}
+    ${sq ? `<p class="small muted" style="margin:-4px 0 12px">You can only be in one squad. Joining or making another leaves ${esc(sq.name)}.</p>` : ""}
+    <form data-form="squad-create"><span class="field-label">Make a squad</span><div class="row"><input type="text" name="name" maxlength="40" required placeholder="The Lads, Uni Flat, Office 4…" class="grow"><button class="btn green sm">Make</button></div></form>
+    <div class="divider"></div>
+    <form data-form="squad-join"><span class="field-label">Join with a code</span><div class="row"><input type="text" name="code" maxlength="6" required placeholder="ABC123" class="grow code" autocomplete="off" autocapitalize="characters"><button class="btn blue sm">Join</button></div></form>`);
+}
+function inviteSheet() {
+  const sq = squad(), link = `${APP_URL}?g=${sq.code}`;
+  openSheet(`${sheetHead("Invite your mates")}
+    <p class="small muted" style="margin:-4px 0 12px">Send this to the group chat. They make their walker and land straight in ${esc(sq.name)}.</p>
+    <div class="codebig ol">${sq.code}</div>
+    <div class="copybox"><code>${esc(link)}</code><button class="btn xs" data-copy="${esc(link)}">${ic("copy")} Copy</button></div>
+    <button class="btn green block" style="margin-top:12px" data-act="share-invite">${ic("share")} Share the link</button>`);
 }
 
-function howSheet() {
-  const R = RULES;
-  openSheet(`${sheetHead("How it works")}
-  <section class="card"><h2>🥾 Your walker and the trail</h2>
-    <p class="small">Every point of effort is <b>fuel</b>. Fuel walks your walker along an endless trail: a landmark every ${R.landmarkEvery} fuel (roughly 10,000 steps), a new region every ${R.landmarksPerRegion} landmarks, and gear to find and wear along the way.</p>
-    <p class="small" style="margin:0"><b>Fog:</b> scrolling over your budget in the last 7 days builds fog. Your walker goes grey and slows down, up to ${Math.round(R.fogSlow * 100)}% slower. Stay under budget and it clears.</p></section>
-  <section class="card"><h2>🌙 The Hunt</h2><p class="small" style="margin:0">One run a night from ${Hunt.OPEN_HOUR}:00. Tap to kill. Steps set your tap power, health, time (1 min per 1,000 steps, max 15) and stomps. Scrolling over budget means more enemies, tougher enemies, weaker taps and fog. Kills damage the group boss, double on Sundays. Quit or close the app mid-run and it counts as zero.</p></section>
-  <section class="card"><h2>📱 The Scroll (group boss)</h2><p class="small" style="margin:0">A new boss every Monday with ${R.bossHpPer} HP per player. Everyone's step points hit it; every minute anyone scrolls over budget heals it by ${R.bossHealPerMin}. Beat it by Sunday night.</p></section>
-  <section class="card"><h2>🚶 Effort (every day)</h2>
-    <p class="small"><b>+1 point per 100 steps</b> (half rate after ${fmt(R.fullRateUntil)}, max ${fmt(R.stepCap)} steps).</p>
-    <p class="small"><b>Scroll budget:</b> every 1,000 steps earns ${R.budgetPer1000} free minutes of TikTok/Reels/Shorts (up to ${R.budgetCap}). Each minute <b>over</b> budget costs 1 point. Each minute you <b>don't</b> use is worth +0.5 (if you track scrolling).</p>
-    <p class="small muted" style="margin:0">No scroll tracking? We assume ${R.assumedScrollMin} min a day.</p></section>
-  <section class="card"><h2>🎯 Par and score (every week)</h2>
-    <p class="small">Your <b>par</b> is your average day (your last ${R.parWindow} active days, ignoring your best and worst). Each day you score <b>your effort as a % of par</b> (max ${R.formCap}). Add up the week = your <b>score</b>.</p>
-    <p class="small">That's why a beginner can beat a marathoner: you're racing your own normal. Your first few days set your par (placement), and you can't get the forfeit while placing.</p>
-    <p class="small muted" style="margin:0">Par can't drop more than 15% below its recent high, so tanking a week doesn't help.</p></section>
-  <section class="card"><h2>🔥 Streaks</h2><p class="small" style="margin:0">Beat your par on <b>${R.parDaysForStreakWeek} of 7 days</b> to keep your weekly streak. Every 4 streak weeks earns a ❄️ freeze that saves one missed week.</p></section>
-  <section class="card"><h2>⭐ Levels (forever)</h2><p class="small" style="margin:0">Positive effort becomes XP. You never lose XP. New players get <b>2× XP for 14 days</b>, and anyone coming back after 5+ days off gets 2× for 3 days.</p></section>
-  <section class="card"><h2>🏆 Seasons</h2><p class="small" style="margin:0">Every ${R.seasonWeeks} weeks. Top 3 win a permanent trophy, then everyone starts the next season level. Plus: 👑 <b>Local Legend</b> goes to whoever beat par on the most days in the last 30.</p></section>
-  <section class="card"><h2>🌍 Public league</h2><p class="small" style="margin:0">Bronze → Silver → Gold → Platinum → Diamond. Score ${R.leagueUp}+ in a week to go up, under ${R.leagueDown} to drop. You only see players in your league.</p></section>`);
-}
-
-function profileSheet(id) {
-  const B = cur();
-  if (!B) return;
-  openSheet(`<div class="row spread" style="margin-bottom:4px"><span></span><button class="icon-btn" data-act="close-sheet" aria-label="Close">✕</button></div>${profileBody(B.E, id)}`);
-}
-
-function editProfileSheet() {
-  const m = S.me;
-  const g = cur()?.data?.group;
-  const myTeam = S.groups.find((x) => "g:" + x.code === S.boardKey)?.team;
-  openSheet(`${sheetHead("Edit profile")}
-  <form class="card" data-form="profile">
-    <label class="field"><span>Name</span><input name="name" maxlength="24" value="${esc(m.name)}" required></label>
-    ${g && g.teams.length ? `<label class="field"><span>Team in ${esc(g.name)}</span><select name="team"><option value="">No team</option>${g.teams.map((t) => `<option ${t === myTeam ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>` : ""}
-    <label class="field"><span>Phone</span><select name="platform">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<option value="${v}" ${v === m.platform ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-    <button class="btn block">Save</button>
-  </form>
-  <button class="btn ghost block" data-act="retake">Retake the quiz (new look)</button>`);
-}
-
-// ----- Trail & gear -----
-function trailSheet() {
-  const tr = S.mine.trail(S.me.id);
-  const G = Walker.GEAR;
-  openSheet(`${sheetHead("Your trail")}
-    <section class="card stage" style="min-height:150px">${Walker.scene(tr.biome, Walker.hash(S.me.id))}
-      <div class="tag-region" style="left:12px;right:auto;max-width:70%">📍 ${esc(tr.region)}</div>
-      <div class="trail-bar" style="position:absolute;left:0;right:0;bottom:0;margin:12px">
-        <div class="row spread small"><b>Next: ${esc(tr.next.name)}</b><span class="num muted">${fmt(RULES.landmarkEvery - tr.into)} fuel</span></div>
-        <div class="bar" style="margin-top:6px"><i style="width:${(100 * tr.into) / RULES.landmarkEvery}%"></i></div>
-        ${tr.next.item ? `<div class="small" style="margin-top:6px">🎁 Something's waiting there…</div>` : ""}
-      </div></section>
-    <section class="card"><div class="stats">
-      <div class="stat"><b class="num">${fmt(tr.dist)}</b><span>fuel burned</span></div>
-      <div class="stat"><b class="num">${fmt(tr.reached)}</b><span>landmarks</span></div>
-      <div class="stat"><b class="num">${tr.items.length}/${Object.keys(G).length}</b><span>gear found</span></div>
-    </div></section>
-    <section class="card"><h2>Recent landmarks</h2>
-      ${tr.recent.length ? `<ul class="landmarks">${tr.recent.map((m) => `<li><span class="pin">${m.i}</span><span class="grow"><b>${esc(m.name)}</b><br><span class="small muted">${esc(m.region)}</span></span>${m.item ? `<span class="pill warn">🎁 ${esc(G[m.item].name)}</span>` : ""}</li>`).join("")}</ul>`
-        : `<p class="small muted" style="margin:0">Nothing yet. Every ${RULES.landmarkEvery} fuel (about 10,000 steps) gets you to the next landmark.</p>`}
+// ---------- onboarding ----------
+function viewWelcome() {
+  const inv = S.invite;
+  $("#app").innerHTML = `<section class="welcome">
+    <div class="wl-hero"><div class="wl-bosses">${portraitImg("boss", "taxman", { w: 260, h: 280, cls: "b1" })}${portraitImg("boss", "autoplay", { w: 220, h: 240, cls: "b2" })}</div>
+      <div class="logo ol">EFFORT</div><p class="tag">Out-walk your mates. Fight the Taxman at 7. Raid together on Sunday.</p></div>
+    ${inv ? `<div class="panel invite"><span class="chip gold">${ic("squad")} You're invited</span><h3 class="ol-sm disp">${esc(inv.name)}</h3><p class="small muted">${inv.members} ${inv.members === 1 ? "player" : "players"} already walking.</p></div>` : ""}
+    <section class="panel">
+      <div class="how">
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Your steps are money</b><span>Every 100 steps is an Effort. Walk more than the squad and you hit harder, earn more and get taxed less.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>7pm: the Taxman</b><span>Five minutes, every day. Tap him into the ground or he takes his cut.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Fifteen minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
+      </div>
     </section>
-    <button class="btn block" data-act="open-gear">Wear your gear</button>
-    <p class="small muted" style="text-align:center">Every 1 point of effort is 1 fuel. Fog from scrolling slows you down by up to ${Math.round(RULES.fogSlow * 100)}%.</p>`);
+    <button class="btn gold xl block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Make my walker"}</button>
+    ${inv ? "" : `<form data-form="code" class="row" style="margin-top:12px"><input type="text" name="code" placeholder="Got a squad code?" autocomplete="off" maxlength="6" class="grow code"><button class="btn blue sm">Join</button></form>`}
+    <p class="small faint" style="text-align:center;margin-top:16px">Played on another phone? Open your restore link from the Me tab there.</p>
+  </section>`;
 }
-
-function gearSheet() {
-  const tr = S.mine.trail(S.me.id);
-  const owned = new Set(tr.items);
-  const G = Walker.GEAR;
-  const ch = charOf(S.me);
-  const rare = ["", "Common", "Uncommon", "Rare", "Legendary"];
-  const tiles = Object.entries(G).sort((a, b) => a[1].rarity - b[1].rarity).map(([id, g]) => owned.has(id)
-    ? `<button data-equip="${id}" aria-pressed="${S.me.equipped === id}">${Walker.svg(ch, { gear: id, crop: g.slot === "pet" ? "full" : "head", label: g.name })}${esc(g.name)}<br><span class="muted" style="font-weight:600">${rare[g.rarity]}</span></button>`
-    : `<div class="locked" title="Not found yet">?</div>`).join("");
-  openSheet(`${sheetHead("Gear")}
-    <p class="muted" style="margin-top:-4px">Found on your trail. Tap to wear one${S.me.equipped ? ", tap again to take it off" : ""}.</p>
-    <div class="gear-grid">${tiles}</div>
-    <p class="small muted" style="text-align:center;margin-top:14px">${owned.size} of ${Object.keys(G).length} found. Rarer gear turns up further along the trail.</p>`);
-}
-
-function groupMenuSheet() {
-  openSheet(`${sheetHead("Groups")}
-  ${S.groups.length ? `<section class="card list">${S.groups.map((g) => `<div class="list-row"><span class="e">👥</span><span class="grow"><b>${esc(g.name)}</b><br><span class="small muted">Code ${esc(g.code)}</span></span><button class="btn sm ghost" data-invite="${esc(g.code)}" data-name="${esc(g.name)}">Invite</button></div>`).join("")}</section>` : ""}
-  <form class="card" data-form="join-code"><h2>Join with a code</h2><div class="row"><input name="code" placeholder="Invite code" autocomplete="off" maxlength="6" class="grow code-input"><button class="btn">Join</button></div></form>
-  <form class="card" data-form="create"><h2>Create a group</h2>
-    <label class="field"><span>Group name</span><input name="name" required maxlength="40" placeholder="The Walking Dead"></label>
-    <label class="field"><span>Forfeit for the week's lowest score (optional)</span><input name="forfeit" maxlength="120" placeholder="Buys the first round"></label>
-    <button class="btn block">Create and invite</button></form>`);
-}
-
-function inviteSheet(code, name) {
-  const link = `${APP_URL}?g=${code}`;
-  openSheet(`${sheetHead(`Invite to ${esc(name)}`)}
-    <section class="card" style="text-align:center">
-      <p class="small muted">Send the link, or let them scan this.</p>
-      <div id="qr" class="qr"></div>
-      <div class="copybox"><code>${esc(link)}</code><button class="btn sm" data-copy="${esc(link)}">Copy</button></div>
-      <button class="btn block" data-share-invite="${esc(code)}" data-name="${esc(name)}">${ICON.share} Share invite</button>
-      <p class="small muted" style="margin:10px 0 0">Code <b style="letter-spacing:.12em">${esc(code)}</b></p>
-    </section>`);
-  const el = $("#qr");
-  if (el && window.QRCode) new window.QRCode(el, { text: link, width: 168, height: 168, correctLevel: window.QRCode.CorrectLevel.M });
-  else if (el) el.hidden = true;
-}
-
-function groupSettingsSheet(members) {
-  const g = cur().data.group;
-  const code = S.boardKey.slice(2);
-  const key = S.adminKeys[code];
-  const leave = `<button class="btn danger block" data-act="leave-group">Leave ${esc(g.name)}</button>`;
-  const invite = `<button class="btn block" data-invite="${esc(code)}" data-name="${esc(g.name)}" style="margin-bottom:12px">${ICON.share} Invite people</button>`;
-  if (!key) {
-    openSheet(`${sheetHead(esc(g.name))}${invite}
-      <section class="card"><p class="small"><b>Forfeit:</b> ${esc(g.forfeit || "none")}<br><b>Journey:</b> ${esc(g.challenge_name)} (${fmt(g.challenge_km)} km)<br><b>Teams:</b> ${g.teams.length ? g.teams.map(esc).join(", ") : "off"}</p>
-      <button class="btn sm ghost" data-act="admin-login">I'm the admin</button></section>${leave}`);
+const QUESTIONS = Walker.QUESTIONS;
+function viewQuiz() {
+  const i = S.qi, q = QUESTIONS[i], a = S.answers;
+  const head = `<div class="quiz-top"><button class="iconbtn" data-act="quiz-back" aria-label="Back">${ic("chevronLeft")}</button><div class="xp grow" style="margin:0;height:10px"><i style="width:${(100 * i) / QUESTIONS.length}%"></i></div><span class="small muted num">${i + 1}/${QUESTIONS.length}</span></div>`;
+  let body;
+  if (q.type === "intro") {
+    $("#app").innerHTML = `<section class="quiz">${head}<h1 class="quiz-q ol">What do people call you?</h1>
+      <form class="panel" data-form="quiz-intro">
+        <span class="field-label">Your name</span><input type="text" name="name" required maxlength="24" placeholder="What your mates call you" value="${esc(a.name || "")}" autocomplete="given-name">
+        <span class="field-label">Your phone</span>
+        <div class="seg">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<button type="button" data-platform="${v}" aria-pressed="${v === S.platform}">${l}</button>`).join("")}</div>
+        <button class="btn gold block" style="margin-top:16px">Build my walker ${ic("arrowRight")}</button>
+      </form>
+      <p class="small faint" style="text-align:center">12 questions. Your answers make your walker, your stats and your class.</p></section>`;
     return;
   }
-  const journeyOpts = JOURNEYS.map(([n, k]) => `<option value="${k}" data-name="${esc(n)}" ${Number(g.challenge_km) === k && g.challenge_name === n ? "selected" : ""}>${esc(n)} (${fmt(k)} km)</option>`).join("");
-  openSheet(`${sheetHead(esc(g.name))}${invite}
-  <form class="card" data-form="admin">
-    <h2>Admin settings</h2>
-    <label class="field"><span>Group name</span><input name="name" maxlength="40" value="${esc(g.name)}"></label>
-    <label class="field"><span>Weekly forfeit for the lowest score</span><input name="forfeit" maxlength="120" value="${esc(g.forfeit)}"></label>
-    <label class="field"><span>Group journey (resets each season)</span><select name="journey"><option value="">Custom…</option>${journeyOpts}</select></label>
-    <div class="row"><label class="field grow"><span>Journey name</span><input name="challenge_name" maxlength="60" value="${esc(g.challenge_name)}"></label><label class="field" style="width:110px"><span>km</span><input name="challenge_km" type="number" inputmode="numeric" min="1" value="${g.challenge_km}"></label></div>
-    <label class="field"><span>Teams (comma separated, blank for none)</span><input name="teams" maxlength="200" value="${esc(g.teams.join(", "))}" placeholder="Hares, Tortoises"></label>
-    <label class="field"><span>Forfeit wheel (one per line, up to 12)</span><textarea name="forfeits" rows="5" maxlength="800" placeholder="Buys the first round">${esc(g.forfeits.join("\n"))}</textarea></label>
-    <label class="field"><span>Shared iPhone steps Shortcut (optional)</span><input name="shortcut_url" type="url" value="${esc(g.shortcut_url || "")}" placeholder="https://www.icloud.com/shortcuts/…"></label>
-    <button class="btn block">Save settings</button>
-  </form>
-  <section class="card"><h2>Players</h2>
-    <p class="small muted">Copy someone's restore link if they lost their phone. Removing someone takes them out of this group only.</p>
-    ${members.map((m) => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line)">${avatar(m, "sm")}<div class="grow"><b>${esc(m.name)}</b><div class="small muted">${m.steps_synced_at ? "synced " + ago(m.steps_synced_at) : "never synced"}</div></div>
-      <button class="btn sm ghost" data-copy="${esc(APP_URL + "?me=" + m.token)}" data-label="Restore link copied">Link</button>
-      <button class="btn sm danger" data-remove="${m.id}" data-name="${esc(m.name)}">✕</button></div>`).join("")}
-  </section>
-  <p class="small muted" style="text-align:center">Admin key: <b>${esc(key)}</b> (keep it safe)</p>${leave}`);
+  if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>`;
+  else if (q.type === "hue") body = `<input type="range" class="hue-slider" min="0" max="359" value="${a.hue ?? 30}" data-hue aria-label="Colour"><button class="btn gold block" style="margin-top:14px" data-act="quiz-next">This one</button>`;
+  else if (q.type === "number") body = `<form data-form="quiz-value"><input name="v" type="number" inputmode="numeric" min="1" max="99" required class="big-input" value="${esc(a.number ?? "")}" placeholder="7" aria-label="Number"><button class="btn gold block" style="margin-top:12px">Next</button></form>`;
+  else body = `<form data-form="quiz-value"><input name="v" type="text" maxlength="30" required class="big-input" value="${esc(a.word ?? "")}" placeholder="${esc(q.placeholder)}" autocomplete="off" aria-label="${esc(q.q)}"><button class="btn gold block" style="margin-top:12px">Make me</button></form>`;
+  $("#app").innerHTML = `<section class="quiz">${head}<div class="quiz-preview" id="quiz-preview">${Walker.svg(a, { mood: "ok", label: "Your walker so far" })}</div>
+    <h1 class="quiz-q ol">${esc(q.q)}</h1>${body}</section>`;
+}
+function viewReveal() {
+  const a = S.answers, st = G.stats(a), cls = G.classOf(st);
+  ANS.draft = a;
+  $("#app").innerHTML = `<section class="reveal">
+    <div class="caps" style="color:var(--gold)">Your walker</div>
+    <div class="walker-big has-fallback"><span class="fb">${Walker.svg(a, { mood: "fresh", label: `${a.name}'s walker` })}</span>${portraitImg("walker", "draft" + G.hash(JSON.stringify(a)), { w: 300, h: 340 })}</div>
+    <h1 class="ol disp" style="margin:8px 0 2px;font-size:32px">${esc(a.name || "You")}</h1>
+    <div class="chip gold" style="margin:4px auto 10px">${esc(cls.name)}</div>
+    <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
+    <section class="panel" style="text-align:left">${G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / 10) * 100}%"></i></div><span class="sv">${st[s.id]}</span></div>`; }).join("")}
+      <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go.</p></section>
+    <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">${S.retake ? "Save my new look" : "That's me"}</button></div>
+  </section>`;
+  // The draft portrait needs the draft answers.
+  ANS["draft" + G.hash(JSON.stringify(a))] = a;
+}
+function viewSquad() {
+  $("#app").innerHTML = `<section class="onboard">
+    <div class="dots"><i class="on"></i><i></i><i></i></div>
+    <h1 class="ol disp ob-title">Your squad</h1>
+    <p class="muted">The whole game is you lot against each other, and together on Sunday. Make a squad and send the link, or join one.</p>
+    <form class="panel" data-form="squad-create"><span class="field-label">Make a squad</span><input type="text" name="name" maxlength="40" required placeholder="The Lads, Uni Flat, Office 4…"><button class="btn green block" style="margin-top:12px">${ic("squad")} Make it</button></form>
+    <form class="panel" data-form="squad-join"><span class="field-label">Or join one</span><div class="row"><input type="text" name="code" maxlength="6" required placeholder="ABC123" class="grow code" autocomplete="off" autocapitalize="characters"><button class="btn blue sm">Join</button></div></form>
+    <button class="btn block" data-act="skip-squad">Do it later</button>
+  </section>`;
+}
+function viewSetup() {
+  const step = S.setupStep;
+  $("#app").innerHTML = `<section class="onboard">
+    <div class="dots"><i class="on"></i><i class="on"></i><i class="${step === "remind" ? "on" : ""}"></i></div>
+    ${step === "steps" ? `<h1 class="ol disp ob-title">Sync your steps</h1>
+      <p class="muted">Set it up once and your steps flow in on their own. About three minutes.</p>
+      ${setupBody("steps")}
+      <button class="btn green block" style="margin-top:14px" data-act="check-sync" data-kind="steps">${ic("refresh")} Check it worked</button>
+      <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>
+      <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
+    : `<h1 class="ol disp ob-title">Don't miss 7pm</h1>
+      <p class="muted">The Taxman is only around for five minutes a day, and the raid for fifteen on Sunday. Put them in your calendar.</p>
+      ${reminderButtons()}
+      <p class="small faint" style="margin:14px 0">Tip: add Effort to your home screen (Share → Add to Home Screen on iPhone, ⋮ → Add to Home screen on Android) so it opens like an app.</p>
+      <button class="btn gold xl block" data-act="setup-done">Let's go ${ic("arrowRight")}</button>`}
+  </section>`;
 }
 
-function standingsText() {
-  const B = cur();
-  const E = B.E, ws = weekStart(today());
-  const rows = E.ids.map((id) => ({ id, v: E.week(id, ws).form })).sort((a, b) => b.v - a.v).slice(0, 10);
-  const medal = ["🥇", "🥈", "🥉"];
-  const me = E.week(S.me.id, ws);
-  return `⚡ Effort · ${boardName(S.boardKey)} · this week\n` +
-    rows.map((r, i) => { const p = E.byId.get(r.id); return `${medal[i] || `${i + 1}.`} ${p.name} ${fmt(r.v)}${E.streak(r.id).weeks >= 2 ? ` 🔥${E.streak(r.id).weeks}` : ""}`; }).join("\n") +
-    `\n\nMe: ${km(me.steps)} km walked${me.scrollMin ? `, ${fmt(me.scrollMin)} min scrolled` : ""}.`;
-}
-
-// ---------- forfeit wheel ----------
-const WHEEL_COLORS = ["#f2611d", "#2f7d4f", "#f5c542", "#74b6e0", "#d9483b", "#8c6bb1", "#e98fb0", "#5a8a3a"];
-
-function wheelSvg(slices) {
-  const n = slices.length, R = 150, C = 160;
-  const pt = (a) => [C + R * Math.sin(a), C - R * Math.cos(a)];
-  const segs = slices.map((s, i) => {
-    const a0 = (i / n) * 2 * Math.PI, a1 = ((i + 1) / n) * 2 * Math.PI, mid = (a0 + a1) / 2;
-    const [x0, y0] = pt(a0), [x1, y1] = pt(a1);
-    const path = n === 1 ? `<circle cx="${C}" cy="${C}" r="${R}" fill="${WHEEL_COLORS[0]}"/>`
-      : `<path d="M${C},${C} L${x0},${y0} A${R},${R} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1},${y1} Z" fill="${WHEEL_COLORS[i % WHEEL_COLORS.length]}"/>`;
-    const label = s.length > 22 ? s.slice(0, 21) + "…" : s;
-    const deg = (mid * 180) / Math.PI - 90;
-    return `${path}<text transform="rotate(${deg} ${C} ${C})" x="${C + R - 12}" y="${C}" text-anchor="end" dominant-baseline="middle" font-size="${n > 8 ? 10 : 11.5}" font-weight="700" fill="#fff">${esc(label)}</text>`;
-  }).join("");
-  return `<svg viewBox="0 0 320 320" class="wheel-svg" role="img" aria-label="Forfeit wheel with ${n} forfeits">${segs}<circle cx="${C}" cy="${C}" r="22" fill="var(--card)" stroke="var(--line)" stroke-width="3"/></svg>`;
-}
-
-function wheelSheet(ws) {
-  const B = cur();
-  const E = B.E, g = B.data.group;
-  const spin = spinFor(B, ws);
-  const loser = spin?.loser_id ? E.byId.get(spin.loser_id) : E.byId.get(forfeitStandings(E, ws)[0]?.id);
-  const slices = spin ? spin.slices : g.forfeits.length ? g.forfeits : [g.forfeit || "Buys the first round"];
-  const weekLabel = ws === weekStart(today()) ? "this week" : `week of ${dayLabel(ws, { day: "numeric", month: "short" })}`;
-  openSheet(`${sheetHead("Forfeit wheel")}
-    <p class="muted" style="margin-top:-4px">${loser ? `<b style="color:var(--ink)">${esc(loser.name)}</b> came last ${weekLabel}.` : ""} One spin per week, and it's final.</p>
-    <div class="wheel-wrap"><div class="wheel-pointer" aria-hidden="true"></div><div class="wheel" id="wheel">${wheelSvg(slices)}</div></div>
-    <p id="wheel-result" class="wheel-result" aria-live="polite"></p>
-    <div class="btn-row">${spin ? `<button class="btn" data-act="replay-spin" data-ws="${ws}">Replay the spin</button>` : `<button class="btn" data-act="spin" data-ws="${ws}" data-loser="${loser?.id || ""}">Spin it</button>`}</div>`);
-  if (spin) showWheelResult(spin, loser, true);
-}
-
-function animateWheel(slice, n, instant) {
-  const el = $("#wheel");
-  if (!el) return Promise.resolve();
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const target = 360 * (instant || reduce ? 0 : 6) + (360 - ((slice + 0.5) / n) * 360) + (Math.random() - 0.5) * (300 / n) / 2;
-  el.style.transition = "none";
-  el.style.transform = "rotate(0deg)";
-  void el.offsetWidth;
-  el.style.transition = instant ? "none" : `transform ${reduce ? 0.6 : 5}s cubic-bezier(.12,.72,.08,1)`;
-  el.style.transform = `rotate(${target}deg)`;
-  return new Promise((r) => setTimeout(r, instant ? 0 : reduce ? 650 : 5100));
-}
-
-function showWheelResult(spin, loser, quiet) {
-  const out = $("#wheel-result");
-  if (!out) return;
-  animateWheel(spin.slice, spin.slices.length, quiet).then(() => {
-    out.innerHTML = `<span class="big-emoji">😬</span><b>${esc(loser?.name || "Last place")}</b>'s forfeit:<br><span class="forfeit-text">${esc(spin.forfeit)}</span>`;
-    out.classList.add("show");
-    if (!quiet) {
-      const share = document.createElement("button");
-      share.className = "btn ghost block";
-      share.style.marginTop = "10px";
-      share.textContent = "Share the result";
-      share.onclick = () => share(`🎡 Effort forfeit wheel: ${loser?.name || "Last place"}'s forfeit is "${spin.forfeit}". Better luck next week 😬`);
-      out.after(share);
-    }
-  });
-}
-
-function editWheelSheet() {
-  const B = cur();
-  const g = B.data.group;
-  const code = S.boardKey.slice(2);
-  const isAdmin = !!S.adminKeys[code];
-  const unused = WHEEL_SUGGESTIONS.filter((s) => !g.forfeits.some((f) => f.toLowerCase() === s.toLowerCase()));
-  openSheet(`${sheetHead("Forfeits on the wheel")}
-    <section class="card">
-      ${g.forfeits.length ? `<div class="wheel-list">${g.forfeits.map((f, i) => `<span class="wheel-chip" style="--c:${WHEEL_COLORS[i % WHEEL_COLORS.length]}">${esc(f)}</span>`).join("")}</div>` : `<p class="small muted">Nothing on the wheel yet. Add at least two so there's something to spin for.</p>`}
-      <form data-form="add-forfeit" class="row" style="margin-top:12px"><input name="text" maxlength="60" placeholder="Add a forfeit" class="grow" aria-label="New forfeit"><button class="btn">Add</button></form>
-      ${unused.length ? `<p class="small muted" style="margin:12px 0 6px">Ideas (tap to add):</p><div class="wheel-list">${unused.map((s) => `<button class="wheel-chip idea" data-suggest="${esc(s)}">＋ ${esc(s)}</button>`).join("")}</div>` : ""}
-    </section>
-    <p class="small muted">Anyone in the group can add forfeits, up to 12. ${isAdmin ? "You can remove them in group settings (⚙️)." : "The admin can remove them."}</p>`);
-}
-
-async function addForfeit(item) {
-  if (!item || !item.trim()) { toast("Write a forfeit first"); return; }
-  try {
-    const r = await call("add_forfeit", { token: S.token, code: S.boardKey.slice(2), text: item.trim() });
-    cur().data.group = { ...cur().data.group, ...r.group };
-    editWheelSheet();
-    toast("Added to the wheel");
-  } catch (err) { toast(err.message); }
-}
-
-// ---------- weekly recap ----------
-function recapData(E, id, ws) {
-  const t = today();
-  const p = E.byId.get(id);
-  let steps = 0, best = { steps: 0, d: null }, tracked = 0, scrollMin = 0, kept = 0, over = 0;
-  for (let i = 0; i < 7; i++) {
-    const d = addDays(ws, i);
-    if (d > t) break;
-    const r = E.day(id, d);
-    steps += r.steps;
-    if (r.steps > best.steps) best = { steps: r.steps, d };
-    if (r.scrollSrc === "auto" || r.scrollSrc === "reported") {
-      tracked++; scrollMin += r.scrollMin;
-      kept += Math.max(0, r.budget - r.scrollMin); over += Math.max(0, r.scrollMin - r.budget);
-    }
-  }
-  const w = E.week(id, ws);
-  const ranked = E.ids.map((x) => ({ id: x, v: E.week(x, ws).form })).sort((a, b) => b.v - a.v);
-  const rivalId = E.rivals(ws).get(id);
-  return {
-    p, ws, steps, km: steps * KM_PER_STEP, best, tracked, scrollMin, kept, over,
-    form: w.form, atPar: w.atPar, rank: ranked.findIndex((r) => r.id === id) + 1, of: ranked.length,
-    winner: ranked[0] && ranked[0].v > 0 ? E.byId.get(ranked[0].id) : null,
-    rival: rivalId ? { p: E.byId.get(rivalId), mine: w.form, theirs: E.week(rivalId, ws).form } : null,
-    streak: E.streak(id).weeks, level: E.xp(id),
-  };
-}
-
-const hm = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, "0")}m` : `${Math.round(m)}m`);
-
-function recapHeadline(r) {
-  const walked = `Walked ${r.km.toFixed(r.km < 10 ? 1 : 0)} km`;
-  if (!r.tracked) return `${walked} this week.`;
-  if (r.kept >= r.over) return `${walked} and left ${hm(r.kept - r.over)} of scroll budget unused.`;
-  return `${walked} but scrolled ${hm(r.over - r.kept)} over budget.`;
-}
-
-async function drawRecap(r, groupName, spin) {
-  try { await Promise.all([document.fonts.load("800 120px 'Bricolage Grotesque'"), document.fonts.load("700 40px Figtree"), document.fonts.load("700 48px Caveat")]); } catch { /* fall back to system font */ }
-  const W = 1080, H = 1350;
-  const PAPER = "#eceee4", CARD = "#fbfbf6", INK = "#1f2a24", ORANGE = "#f2611d", SUN = "#f5c542", SKY = "#cfe6f2", MUTED = "#5b6a5f";
-  const c = document.createElement("canvas");
-  c.width = W; c.height = H;
-  const x = c.getContext("2d");
-  const font = (w, s, fam = "'Bricolage Grotesque'") => `${w} ${s}px ${fam}, "Segoe UI", system-ui, sans-serif`;
-  const rr = (X, Y, w, h, rad) => { x.beginPath(); if (x.roundRect) x.roundRect(X, Y, w, h, rad); else x.rect(X, Y, w, h); };
-  const sticker = (X, Y, w, h, rad, fill) => { x.fillStyle = INK; rr(X + 8, Y + 10, w, h, rad); x.fill(); x.fillStyle = fill; rr(X, Y, w, h, rad); x.fill(); x.lineWidth = 5; x.strokeStyle = INK; x.stroke(); };
-  x.fillStyle = PAPER; x.fillRect(0, 0, W, H);
-  // topo lines, like the app background
-  x.strokeStyle = "rgba(31,42,36,.07)"; x.lineWidth = 3;
-  for (let i = 0; i < 9; i++) { x.beginPath(); x.moveTo(-40, 140 + i * 150); x.bezierCurveTo(260, 60 + i * 150, 620, 230 + i * 150, 1120, 120 + i * 150); x.stroke(); }
-
-  x.textBaseline = "alphabetic";
-  x.fillStyle = ORANGE; x.font = font(800, 46); x.fillText("effort", 80, 112);
-  x.fillStyle = MUTED; x.textAlign = "right"; x.font = font(700, 32, "Figtree");
-  x.fillText(`${dayLabel(r.ws, { day: "numeric", month: "short" })} – ${dayLabel(addDays(r.ws, 6), { day: "numeric", month: "short" })}`, W - 80, 110);
-  x.textAlign = "left";
-
-  // the walker, in its own sticker
-  sticker(640, 150, 360, 410, 40, SKY);
-  try {
-    const svgStr = Walker.svg(charOf(r.p), { mood: "fresh", gear: r.p.equipped, standalone: true }).replace("<svg ", '<svg width="360" height="414" ');
-    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml" })); });
-    x.drawImage(img, 652, 156, 336, 386);
-  } catch { /* card still works without the drawing */ }
-
-  x.fillStyle = INK; x.font = font(800, 72); x.fillText(r.p.name, 80, 240);
-  x.fillStyle = MUTED; x.font = font(700, 32, "Figtree"); x.fillText(`Level ${r.level.level} · ${r.level.title}`, 82, 290);
-  x.fillStyle = INK; x.font = font(800, 210); x.fillText(fmt(r.form), 68, 490);
-  x.fillStyle = ORANGE; x.font = font(700, 54, "Caveat"); x.save(); x.translate(84, 548); x.rotate(-0.035); x.fillText("points this week!", 0, 0); x.restore();
-  if (r.of > 1) {
-    const pill = `#${r.rank} of ${r.of} in ${groupName}`;
-    x.font = font(700, 32, "Figtree");
-    const pw = Math.min(520, x.measureText(pill).width + 44);
-    sticker(80, 584, pw, 60, 30, SUN);
-    x.fillStyle = INK; x.fillText(pill, 102, 625, pw - 44);
-  }
-
-  const tiles = [
-    [`${r.km.toFixed(r.km < 10 ? 1 : 0)} km`, `${fmt(r.steps)} steps`],
-    [`${r.atPar}/7`, "days beating par"],
-    [r.tracked ? hm(r.scrollMin) : "—", r.tracked ? (r.kept >= r.over ? `${hm(r.kept - r.over)} under budget` : `${hm(r.over - r.kept)} over budget`) : "scrolling not tracked"],
-    [r.best.d ? fmt(r.best.steps) : "—", r.best.d ? `best day (${dayLabel(r.best.d, { weekday: "short" })})` : "best day"],
-  ];
-  tiles.forEach(([big, small], i) => {
-    const X = 80 + (i % 2) * 470, Y = 690 + Math.floor(i / 2) * 186;
-    sticker(X, Y, 440, 158, 30, CARD);
-    x.fillStyle = INK; x.font = font(800, 58); x.fillText(big, X + 30, Y + 80);
-    x.fillStyle = MUTED; x.font = font(700, 28, "Figtree"); x.fillText(small, X + 30, Y + 126);
-  });
-
-  x.fillStyle = INK; x.font = font(800, 38);
-  const y = wrapText(x, recapHeadline(r), 80, 1112, W - 160, 48);
-  const extras = [];
-  if (r.streak) extras.push(`🔥 ${r.streak}-week streak`);
-  if (r.rival) extras.push(`⚔️ ${r.rival.mine > r.rival.theirs ? "beat" : r.rival.mine < r.rival.theirs ? "lost to" : "tied"} ${r.rival.p.name} ${fmt(r.rival.mine)}–${fmt(r.rival.theirs)}`);
-  if (spin) extras.push(`🎡 ${spin.loser}'s forfeit: ${spin.forfeit}`);
-  else if (r.winner && r.of > 1) extras.push(`🏆 ${r.winner.name} won the week`);
-  x.fillStyle = MUTED; x.font = font(700, 30, "Figtree");
-  wrapText(x, extras.join("   ·   "), 80, y + 56, W - 160, 42);
-  x.fillStyle = MUTED; x.font = font(700, 26, "Figtree"); x.fillText(APP_URL.replace(/^https?:\/\//, "").replace(/\/$/, ""), 80, H - 40);
-  x.globalAlpha = 1;
-  return c;
-}
-
-function wrapText(x, str, X, Y, maxW, lh) {
-  const words = str.split(" ");
-  let line = "";
-  for (const w of words) {
-    const test = line ? line + " " + w : w;
-    if (x.measureText(test).width > maxW && line) { x.fillText(line, X, Y); Y += lh; line = w; } else line = test;
-  }
-  if (line) x.fillText(line, X, Y);
-  return Y; // baseline of the last line drawn
-}
-
-async function recapSheet(which = "auto") {
-  const t = today(), thisWs = weekStart(t);
-  const dow = parseDay(t).getDay();
-  const ws = which === "last" || (which === "auto" && (dow === 1 || dow === 2)) ? addDays(thisWs, -7) : thisWs;
-  const B = cur();
-  const E = B && B.E.byId.has(S.me.id) ? B.E : S.mine;
-  const r = recapData(E, S.me.id, ws);
-  const spinRow = B?.data?.spins && spinFor(B, ws);
-  const spin = spinRow && { loser: E.byId.get(spinRow.loser_id)?.name || "Last place", forfeit: spinRow.forfeit };
-  const groupName = boardName(S.boardKey);
-  openSheet(`${sheetHead("Your week")}
-    <div class="seg two" role="group" aria-label="Week"><button data-recap="this" aria-pressed="${ws === thisWs}">This week</button><button data-recap="last" aria-pressed="${ws !== thisWs}">Last week</button></div>
-    <div class="recap-frame"><div class="empty"><span class="e">🖼️</span>Drawing your card…</div></div>
-    <p class="small muted" style="text-align:center">${esc(recapHeadline(r))}</p>
-    <div class="btn-row"><button class="btn" data-act="share-recap">${ICON.share} Share image</button><button class="btn ghost" data-act="share-recap-text">Share as text</button></div>`);
-  const canvas = await drawRecap(r, groupName, spin);
-  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
-  S.recap = { blob, text: `⚡ My Effort week: ${fmt(r.form)} pts${r.of > 1 ? `, #${r.rank} of ${r.of} in ${groupName}` : ""}. ${recapHeadline(r)}${r.streak ? ` 🔥 ${r.streak}-week streak.` : ""}` };
-  const frame = $(".recap-frame");
-  if (frame) {
-    const img = new Image();
-    img.src = URL.createObjectURL(blob);
-    img.alt = `Recap card: ${S.recap.text}`;
-    frame.innerHTML = "";
-    frame.append(img);
-  }
-}
-
-async function shareRecapImage() {
-  if (!S.recap?.blob) return;
-  const file = new File([S.recap.blob], "effort-week.png", { type: "image/png" });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], text: S.recap.text }); return; } catch (e) { if (e.name === "AbortError") return; }
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(S.recap.blob);
-  a.download = "effort-week.png";
-  document.body.append(a); a.click(); a.remove();
-  toast("Image saved. Share it from your photos or downloads.");
-}
-
-function recapCard() {
-  const dow = new Date().getDay();
-  if (![0, 1, 2].includes(dow)) return "";
-  return `<section class="card recap-teaser row" data-act="open-recap" style="cursor:pointer;gap:12px"><span style="font-size:30px">📊</span><div class="grow"><b>${dow === 0 ? "Your week so far" : "Last week in review"}</b><br><span class="small muted">A shareable card for the group chat</span></div>${ICON.chev}</section>`;
-}
-
-// ---------- flows ----------
-// The quiz is done: create the player (or save a retaken look) with their answers.
+// The quiz is done: make the player (joining the invite's squad if there is one), or save a new look.
 async function finishQuiz() {
   const { name, ...character } = S.answers;
   if (S.retake) {
     await call("update_me", { token: S.token, character });
-    S.retake = false;
-    store.del("draftAnswers");
-    S.view = "main"; S.tab = "me";
-    await refresh();
-    toast("New look saved");
+    S.retake = false; store.del("draftAnswers");
+    await load(); S.view = "main"; S.tab = "me"; render(); toast("New look saved");
     return;
   }
-  const body = { name, character, platform: S.draft.platform, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  const body = { name, character, platform: S.platform, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const r = S.invite ? await call("join", { ...body, code: S.invite.code }) : await call("signup", body);
-  saveToken(r.player);
-  S.me = r.player;
+  saveToken(r.player.token);
   store.del("draftAnswers");
-  if (S.invite) { S.boardKey = "g:" + S.invite.code; store.set("board", S.boardKey); }
-  S.invite = null;
-  S.view = "onboard"; S.step = 1;
+  await load();
+  S.view = S.invite ? "setup" : "squad"; S.setupStep = "steps"; S.invite = null;
   render(); scrollTo(0, 0);
 }
-
 function quizAdvance() {
   store.set("draftAnswers", S.answers);
   if (S.qi < QUESTIONS.length - 1) { S.qi++; render(); scrollTo(0, 0); }
   else { S.view = "reveal"; render(); scrollTo(0, 0); }
 }
-
-async function joinGroup(code) {
-  const r = await call("join", { token: S.token, code });
-  S.boardKey = "g:" + r.code; store.set("board", S.boardKey);
-  await refresh(true);
-  closeSheet();
-  S.tab = "board"; store.set("tab", "board");
-  render();
-  toast(`You're in ${boardName(S.boardKey)}`);
-}
-
 async function lookupInvite(code) {
   const b = await call("board", null, `?code=${encodeURIComponent(code.trim().toUpperCase())}`);
   return { code: b.group.code, name: b.group.name, members: b.players.length };
 }
 
-// ---------- events ----------
-document.addEventListener("click", async (e) => {
-  const t = e.target.closest("button, [data-profile], [data-tab], [data-act], [data-wheel], a");
-  if (!t) { if (e.target.id === "sheet") { closeSheet(); render(); } return; }
-  const d = t.dataset;
-  if (d.copy) return copy(d.copy, d.label || "Copied");
-  if (d.tab && t.tagName !== "A") { closeSheet(); S.tab = d.tab; store.set("tab", S.tab); render(); scrollTo(0, 0); return; }
-  if (d.mode) { S.mode = d.mode; store.set("mode", S.mode); render(); return; }
-  if (d.wheel) return wheelSheet(d.wheel);
-  if (d.recap) return recapSheet(d.recap);
-  if (d.suggest) return addForfeit(d.suggest);
-  if (d.board) {
-    S.boardKey = d.board; store.set("board", S.boardKey);
-    if (!S.boards[d.board]) { render(); try { await loadBoard(d.board); } catch (err) { toast(err.message); } }
-    render(); return;
-  }
-  if (d.profile) return profileSheet(d.profile);
-  if (d.answer !== undefined && S.view === "quiz") {
-    S.answers[QUESTIONS[S.qi].id] = d.answer;
-    t.parentElement.querySelectorAll(".opt").forEach((b) => b.setAttribute("aria-pressed", b === t));
-    const pv = $("#quiz-preview"); if (pv) pv.innerHTML = quizPreview("fresh");
-    setTimeout(quizAdvance, 380);
-    return;
-  }
-  if (d.platform) { S.draft.platform = d.platform; S.answers.name = $("[name=name]")?.value ?? S.answers.name; render(); return; }
-  if (d.setup) { S.setupPlatform = d.setup; if (S.view === "onboard") render(); else setupSheet(d.kind); return; }
-  if (d.equip) {
-    const next = S.me.equipped === d.equip ? null : d.equip;
-    try { await call("update_me", { token: S.token, equipped: next }); S.me.equipped = next; headCache.clear(); await refresh(true); gearSheet(); toast(next ? `Wearing: ${Walker.GEAR[next].name}` : "Gear off"); }
-    catch (err) { toast(err.message); }
-    return;
-  }
-  if (d.invite) return inviteSheet(d.invite, d.name);
-  if (d.shareInvite) return share(`Join ${d.name} on Effort ⚡ Walk more, scroll less. Code ${d.shareInvite}`, `${APP_URL}?g=${d.shareInvite}`);
-  if (d.remove) {
-    if (!confirm(`Remove ${d.name} from this group?`)) return;
-    const code = S.boardKey.slice(2);
-    try {
-      await call("admin_remove", { code, admin_key: S.adminKeys[code], player_id: d.remove });
-      toast(`${d.name} removed`);
-      await loadBoard(S.boardKey);
-      const r = await call("admin_members", { code, admin_key: S.adminKeys[code] });
-      groupSettingsSheet(r.members);
-    } catch (err) { toast(err.message); }
-    return;
-  }
+// ---------- shared battle bits ----------
+function banner(text, small = "") {
+  const el = document.createElement("div");
+  el.className = "banner"; el.innerHTML = `<span>${esc(text)}</span>${small ? `<small>${esc(small)}</small>` : ""}`;
+  $("#arena")?.appendChild(el);
+  setTimeout(() => el.remove(), 1250);
+}
+const use3d = () => !store.get("no3d") && !V.no3d && window.Arena3D && Arena3D.supported();
+function make3d(opts) {
+  try { return Arena3D.create($("#stage"), opts); }
+  catch (err) { console.warn("3D arena unavailable, using 2D", err); V.no3d = true; return null; }
+}
+const arena = () => (V.tax && V.tax.A) || (V.raid && V.raid.A) || null;
+function toArena(pt) {
+  if (!pt) return [0, 0];
+  const st = $("#stage").getBoundingClientRect(), ar = $("#arena").getBoundingClientRect();
+  return [pt[0] + st.left - ar.left, pt[1] + st.top - ar.top];
+}
+function bossXY(frac = 0.55) {
+  const A = arena();
+  if (A) return toArena(A.screenOf("boss", frac));
+  const b = $("#boss"); return b ? FX.centre(b) : [0, 0];
+}
+function bossHurt(crit = false) {
+  const A = arena(); if (A) { A.bossHit(crit); return; }
+  const b = $("#boss"); if (!b) return;
+  b.classList.add("hurt");
+  clearTimeout(bossHurt.t); bossHurt.t = setTimeout(() => b.classList.remove("hurt"), 90);
+}
+function setBar(bar, frac, text) {
+  const w = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+  bar.querySelector(".fill").style.width = w;
+  const ghost = bar.querySelector(".ghost"); if (ghost) ghost.style.width = w;
+  bar.querySelector("span").textContent = text;
+}
+let comboShown = 0;
+function paintCombo(combo, mult) {
+  const el = $("#combo"); if (!el) return;
+  if (combo < 5) { el.innerHTML = ""; comboShown = 0; return; }
+  el.innerHTML = `<span class="ol">×${mult.toFixed(2)}</span><small>${combo} combo</small>`;
+  el.classList.toggle("hot", combo >= 25);
+  for (const m of [10, 25, 50]) if (comboShown < m && combo >= m) { FX.play("combo"); el.classList.add("bump"); setTimeout(() => el.classList.remove("bump"), 120); if (m >= 25) banner(m >= 50 ? "Max combo" : "On fire"); }
+  comboShown = combo;
+}
+function stagePoint(e) {
+  const st = $("#stage").getBoundingClientRect();
+  return { x: (e.clientX - st.left) / st.width, y: (e.clientY - st.top) / st.height };
+}
+function hint(text) {
+  const h = $("#hint"); if (!h) return;
+  if (text == null) { h.classList.add("gone"); return; }
+  h.classList.remove("gone"); h.innerHTML = text;
+}
 
-  switch (d.act) {
-    case "start":
-      S.view = "quiz"; S.qi = 0; render(); break;
-    case "quiz-back":
-      if (S.qi > 0) { S.qi--; render(); } else if (S.retake) { S.retake = false; S.view = "main"; render(); } else { S.view = "welcome"; render(); }
-      break;
-    case "quiz-next": quizAdvance(); break;
-    case "quiz-restart": S.view = "quiz"; S.qi = 1; render(); break;
-    case "quiz-done": t.disabled = true; try { await finishQuiz(); } catch (err) { toast(err.message); t.disabled = false; } break;
-    case "retake":
-      closeSheet();
-      S.retake = true; S.answers = { ...charOf(S.me), name: S.me.name }; S.qi = 1; S.view = "quiz"; render(); scrollTo(0, 0);
-      break;
-    case "open-trail": trailSheet(); break;
-    case "hunt-start": startHunt(); break;
-    case "hunt-done": S.view = "main"; S.tab = "home"; render(); scrollTo(0, 0); break;
-    case "hunt-share": { const r = S.huntResult; share(`🌙 Effort hunt: ${fmt(r.score)} pts, ${r.kills} kills, wave ${r.wave}. ${r.survived ? "Survived the night." : "Doomscrolled to death."}`); break; }
-    case "open-gear": gearSheet(); break;
-    case "ob-next":
-      if (S.step < 2) { S.step++; S.setupPlatform = null; render(); scrollTo(0, 0); }
-      else { S.view = "loading"; render(); await refresh(); }
-      break;
-    case "refresh": t.disabled = true; await refresh(); toast("Updated"); break;
-    case "setup-steps": S.setupPlatform = null; setupSheet("steps"); break;
-    case "setup-scroll": S.setupPlatform = null; setupSheet("scroll"); break;
-    case "close-sheet": closeSheet(); render(); break;
-    case "how": howSheet(); break;
-    case "hide-install": store.set("hideInstall", true); render(); break;
-    case "install": if (installPrompt) { installPrompt.prompt(); installPrompt = null; render(); } break;
-    case "share-standings": share(standingsText()); break;
-    case "edit-profile": editProfileSheet(); break;
-    case "group-menu": case "create-group": case "join-code": groupMenuSheet(); break;
-    case "edit-wheel": editWheelSheet(); break;
-    case "open-recap": recapSheet(); break;
-    case "share-recap": shareRecapImage(); break;
-    case "share-recap-text": if (S.recap) share(S.recap.text, APP_URL); break;
-    case "replay-spin": {
-      const B = cur(), spin = spinFor(B, d.ws);
-      if (spin) { $("#wheel-result").classList.remove("show"); $("#wheel-result").innerHTML = ""; showWheelResult(spin, B.E.byId.get(spin.loser_id), false); }
+// ---------- 7pm: the Taxman ----------
+async function startTax() {
+  FX.unlock();
+  if (S.busy) return;
+  S.busy = true;
+  let r;
+  try { r = await call("tax_start", { token: S.token }); }
+  catch (e) { toast(e.message); await refresh(true); return; }
+  finally { S.busy = false; }
+  S.skew = r.now - Date.now();
+  const T = G.taxmanSetup(r.inputs);
+  // The server locked in tonight's terms when the fight opened.
+  T.taxRate = Number(r.fight.rate); T.stealCap = Number(r.fight.steal_cap);
+  const left = (Date.parse(r.fight.ends_at) - now()) / 1000;
+  T.seconds = left;
+  V.tax = { B: G.taxmanStart(T), S: T, left, last: performance.now(), taps: 0, lvlBefore: level(), checkAt: 10 };
+  // Coming back to a fight in progress: carry on from what the server saved.
+  if (r.resumed) V.tax.B.dmg = T.hp * Number(r.fight.knocked);
+  S.view = "tax";
+  render();
+  V.tax.timer = setInterval(taxTick, 50);
+  FX.play("roar");
+  setTimeout(() => banner("Fight!", `${Math.round(T.taxRate * 100)}% of your Efforts on the line`), 150);
+}
+function renderTax() {
+  const T = V.tax.S, three = use3d();
+  $("#app").innerHTML = `<div class="arena tax" id="arena"><div class="shake-wrap" id="shake">
+    <div class="hud">
+      <div class="bossbar"><div class="por">${ic("receipt")}<span class="lv">${Math.round(T.taxRate * 100)}% TAX</span></div>
+        <div class="nm"><b class="ol-sm">The Taxman</b><small>Collector of the 7pm levy</small></div>
+        <div class="right"><span class="timer">${ic("clock")}<span id="t-clock">${mmss(V.tax.left)}</span></span><button class="hbtn" data-act="tax-stop" aria-label="End fight">${ic("close")}</button></div></div>
+      <div class="hp green" id="t-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
+      <div class="hp gold thin" id="t-steal"><i class="fill" style="width:0"></i><span></span></div>
+    </div>
+    <div class="arena-stage" id="stage">
+      <div class="dome" id="dome" hidden></div>
+      ${three ? "" : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}
+      <div class="weak" id="weak" hidden></div>
+      <div class="receipt" id="receipt" hidden>${ic("receipt")}</div>
+      <div class="combo" id="combo"></div>
+      <div class="taphint" id="hint">${ic("target")} Tap to attack</div>
+    </div>
+    <div class="foot"><div class="log" id="t-feed"></div></div>
+  </div></div>`;
+  FX.init($("#arena"));
+  if (three) { V.tax.A = make3d({ mode: "tax", boss: { id: "taxman" }, team: [{ id: me().id, you: true, answers: ANS[me().id], pos: "front" }] }); if (!V.tax.A) return renderTax(); }
+  paintTax();
+}
+function taxTick() {
+  const v = V.tax; if (!v) return;
+  const t = performance.now(), dt = Math.min(0.25, (t - v.last) / 1000);
+  v.last = t; v.left -= dt;
+  G.taxmanStep(v.B, dt);
+  for (const e of v.B.fx.splice(0)) {
+    if (e.type === "audit") { FX.play("audit"); banner("Audit!", "Only the weak spot takes damage"); $("#dome").hidden = false; }
+    if (e.type === "auditEnd") $("#dome").hidden = true;
+    if (e.type === "receipt") FX.play("receipt");
+    if (e.type === "ko") {
+      FX.play("ko"); banner("K.O.!", "Now rob him blind");
+      if (v.A) v.A.bossKO();
+      const [x, y] = bossXY(0.5); FX.coins(x, y, 26); FX.ring(x, y, { r1: 260, color: "rgba(255,210,80,.9)", width: 16 }); FX.shake($("#shake"), 14, 500);
+      saveTax(false).catch(() => {});
+    }
+  }
+  // Save progress every 10 seconds, so a dropped connection or a closed app doesn't lose the fight.
+  if (v.B.t >= v.checkAt) { v.checkAt += 10; saveTax(false).catch(() => {}); }
+  if (v.left <= 0) return finishTax();
+  paintTax();
+}
+// The final save happens after V.tax is cleared, so it can be handed the fight.
+function saveTax(final, v = V.tax) {
+  const r = G.taxmanResult(v.B);
+  return call("tax_finish", { token: S.token, knocked: r.knocked, steal_pct: r.stealPct, taps: v.B.taps, final });
+}
+function paintTax() {
+  const v = V.tax, B = v.B, T = v.S, r = G.taxmanResult(B);
+  const clock = $("#t-clock");
+  clock.textContent = mmss(v.left); clock.parentElement.classList.toggle("low", v.left <= 30);
+  setBar($("#t-hp"), 1 - B.dmg / T.hp, r.beaten ? "KNOCKED OUT · NO TAX" : `${fmt(Math.max(0, T.hp - B.dmg))} · TAX ${Math.round(T.taxRate * 100 * (1 - r.knocked))}%`);
+  setBar($("#t-steal"), r.stealPct / T.stealCap, r.beaten ? `STOLEN ${Math.round(r.stealPct * 100)}% · +${r.stolen} EFFORTS` : "KNOCK HIM OUT TO START STEALING");
+  const weak = $("#weak");
+  weak.hidden = !B.audit;
+  if (B.audit) { weak.style.left = `${B.audit.x * 100}%`; weak.style.top = `${B.audit.y * 100}%`; }
+  const rc = $("#receipt");
+  rc.hidden = !B.receipt;
+  if (B.receipt) { rc.style.left = `${B.receipt.x * 100}%`; rc.style.top = `${B.receipt.y * 100}%`; }
+  paintCombo(B.combo, 1 + B.combo / G.RULES.comboMax);
+  const feed = $("#t-feed");
+  if (!B.ko && B.dmg > 0 && B.t - B.lastTap > 0.8) feed.innerHTML = `<div class="warn">He's recounting his money. Keep tapping.</div>`;
+  else if (B.audit) feed.innerHTML = `<div class="warn">Audit: hit the moving target.</div>`;
+  else if (B.ko) feed.innerHTML = `<div class="good">Knocked out. Every hit now steals.</div>`;
+  else feed.innerHTML = "";
+}
+function taxTap(e) {
+  const v = V.tax; if (!v) return;
+  const p = stagePoint(e), hit = G.taxmanTap(v.B, p.x, p.y);
+  const [x, y] = FX.local(e.clientX, e.clientY);
+  if (++v.taps === 6) hint(null);
+  if (hit.kind === "receipt") { FX.play("coin"); FX.coins(x, y, 10); FX.number(x, y - 20, hit.bonus, { size: 26, grad: ["#fff3a0", "#f2b51d"] }); return; }
+  FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, kind: hit.kind, color: hit.kind === "weak" ? "#6fd4ff" : hit.kind === "blocked" ? "#9aa8ff" : "#ffd166" });
+  FX.play(hit.kind === "blocked" ? "blocked" : hit.kind === "weak" ? "weak" : hit.crit ? "crit" : "hit");
+  if (hit.crit || hit.kind === "weak") { FX.shake($("#shake"), 6, 180); FX.buzz(20); } else FX.buzz(6);
+  if (v.B.ko && (hit.crit || Math.random() < 0.25)) { FX.coins(x, y, hit.crit ? 6 : 2); FX.play("coin"); }
+  v.A?.heroAttack(me().id, { crit: hit.crit || hit.kind === "weak" });
+  if (hit.kind !== "blocked") bossHurt(hit.crit || hit.kind === "weak");
+}
+async function finishTax() {
+  const v = V.tax; if (!v || v.ending) return;
+  v.ending = true;
+  clearInterval(v.timer);
+  const r = G.taxmanResult(v.B);
+  r.taps = v.B.taps; r.crits = v.B.crits; r.weak = v.B.weak; r.receipts = v.B.receipts;
+  v.A?.dispose(); FX.destroy();
+  V.tax = null;
+  S.view = "result";
+  V.result = { kind: "tax", r, net: null, lvlBefore: v.lvlBefore };
+  render();
+  try { const res = await saveTax(true, v); V.result.net = res.net ?? r.net; } catch (e) { toast(`Couldn't save the fight: ${e.message}`); V.result.net = r.net; }
+  FX.play(r.beaten ? "win" : "lose");
+  countUp($("#count"), V.result.net);
+}
+
+// ---------- Sunday: the live squad raid ----------
+let SB = null;
+const realtime = () => SB || (SB = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 40 } } }));
+async function joinRaid() {
+  FX.unlock();
+  if (S.busy) return;
+  S.busy = true;
+  let r;
+  try { r = await call("raid_join", { token: S.token }); }
+  catch (e) { toast(e.message); await refresh(true); return; }
+  finally { S.busy = false; }
+  S.skew = r.now - Date.now();
+  if (r.raid.status === "done") { showRaidResult(r.raid.result, null); return; }
+  if (!window.supabase) { toast("Couldn't load the live connection. Check your signal and try again."); return; }
+  for (const m of r.roster) ANS[m.id] = m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id);
+  V.raid = {
+    raid: r.raid, roster: Object.fromEntries(r.roster.map((m) => [m.id, m])), my: r.me, R: null, host: false, A: null,
+    present: {}, joinedAt: now(), out: { taps: 0, ab: false, move: null, ans: null }, fxOut: [], snapAt: 0, snapFrom: null,
+    lastSent: 0, lastSave: now(), q: null, taps: 0, lvlBefore: level(), rosterKey: "",
+  };
+  S.view = "raid";
+  render();
+  connectRaid();
+  V.raid.timer = setInterval(raidTick, 50);
+}
+function connectRaid() {
+  const v = V.raid;
+  const ch = realtime().channel(`raid-${v.raid.id}`, { config: { broadcast: { self: false }, presence: { key: v.my } } });
+  v.ch = ch;
+  ch.on("broadcast", { event: "st" }, ({ payload }) => onSnapshot(payload))
+    .on("broadcast", { event: "in" }, ({ payload }) => onInput(payload))
+    .on("broadcast", { event: "end" }, ({ payload }) => onEnd(payload))
+    .on("presence", { event: "sync" }, () => { v.present = Object.fromEntries(Object.entries(ch.presenceState()).map(([k, arr]) => [k, Math.min(...arr.map((x) => x.at || 0))])); elect(); })
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") ch.track({ at: v.joinedAt });
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") toast("Live connection dropped. Reconnecting…");
+    });
+}
+// The host is whoever's been here longest and is still sending. Everyone works it out the same way.
+function elect() {
+  const v = V.raid; if (!v || v.ended) return;
+  const t = now();
+  const ids = Object.keys(v.present).filter((id) => !(id === v.snapFrom && id !== v.my && t - v.snapAt > 4000 && t - v.joinedAt > 4000))
+    .sort((a, b) => v.present[a] - v.present[b] || (a < b ? -1 : 1));
+  const host = ids[0];
+  if (host === v.my && !v.host) becomeHost();
+  else if (host && host !== v.my && v.host) { v.host = false; }
+  if (v.host) syncMembers();
+}
+function becomeHost() {
+  const v = V.raid;
+  v.host = true;
+  const started = Date.parse(v.raid.started_at), ends = Date.parse(v.raid.ends_at);
+  let R = v.R;
+  if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
+  if (!R) {
+    const here = Object.keys(v.present).filter((id) => v.roster[id]);
+    R = G.raidCreate((here.length ? here : [v.my]).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin });
+  }
+  R.dur = (ends - started) / 1000;
+  R.t = Math.max(R.t, (now() - started) / 1000);
+  v.R = R; v.hostLast = performance.now();
+  syncMembers();
+}
+// A squad member as a fighter, with the stride and title the server worked out for the whole squad.
+function fighter(id) {
+  const m = V.raid.roster[id];
+  return { id, name: m.name, stats: m.stats, equipped: m.equipped, inv: m.inv, pos: m.pos, weekSteps: m.weekSteps, stride: m.stride, title: m.title };
+}
+// Host: people who turn up join the fight; people who drop out stop being targets until they're back.
+function syncMembers() {
+  const v = V.raid, R = v.R; if (!R || R.over) return;
+  for (const id of Object.keys(v.present)) if (v.roster[id] && !R.members.some((m) => m.id === id)) G.raidAddMember(R, fighter(id));
+  for (const m of R.members) m.away = !(m.id in v.present);
+}
+function onInput(p) {
+  const v = V.raid; if (!v?.host || !v.R || !p || !v.roster[p.id]) return;
+  const R = v.R;
+  for (let i = 0; i < Math.min(40, p.taps | 0); i++) G.raidTap(R, p.id);
+  if (p.ab) G.raidAbility(R, p.id);
+  if (p.move) G.raidMove(R, p.id, p.move);
+  if (p.ans != null) G.raidAnswer(R, p.id, String(p.ans).slice(0, 40));
+}
+function onSnapshot(p) {
+  const v = V.raid; if (!v || v.ended || !p?.R) return;
+  if (v.host && p.host !== v.my) {
+    // Two hosts for a moment (we both joined at once): the one who's been here longer keeps it.
+    if ((v.present[p.host] ?? Infinity) <= (v.present[v.my] ?? Infinity)) v.host = false;
+    else return;
+  }
+  v.snapAt = now(); v.snapFrom = p.host;
+  const R = G.raidImport(p.R);
+  const grew = !v.R || R.members.length !== v.R.members.length;
+  v.R = R;
+  for (const e of p.fx || []) { if (e.type === "tap" && e.id === v.my) continue; raidFx(e); }
+  if (grew) render(); else paintRaid();
+}
+function onEnd(p) {
+  const v = V.raid; if (!v || v.ended) return;
+  if (p?.result) showRaidResult(p.result, v);
+}
+function raidTick() {
+  const v = V.raid; if (!v || v.ended) return;
+  const t = now();
+  if (v.host && v.R) {
+    const R = v.R, pn = performance.now();
+    let dt = (pn - v.hostLast) / 1000; v.hostLast = pn;
+    while (dt > 0 && !R.over) { G.raidStep(R, Math.min(0.25, dt)); dt -= 0.25; }
+    const fx = R.fx.splice(0);
+    for (const e of fx) raidFx(e);
+    v.fxOut.push(...fx.filter((e) => e.type !== "tap" || e.crit || e.swing || Math.random() < 0.5));
+    if (t - v.lastSent >= 150 || R.over) {
+      v.lastSent = t;
+      v.ch?.send({ type: "broadcast", event: "st", payload: { host: v.my, R: G.raidExport(R), fx: v.fxOut.splice(0, 40) } });
+      v.fxOut.length = 0;
+    }
+    if (t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) showRaidResult(r.result, v); }).catch(() => {}); }
+    if (R.over) return hostFinish();
+    if (rosterKey(R) !== v.rosterKey) return render();
+  } else {
+    // Not the host: send what you did since the last message.
+    const o = v.out;
+    if ((o.taps || o.ab || o.move || o.ans != null) && t - v.lastSent >= 120) {
+      v.lastSent = t;
+      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, ...o } });
+      v.out = { taps: 0, ab: false, move: null, ans: null };
+    }
+    // Nobody's hosting (everyone else dropped out): the host's last snapshot is the fight, take over.
+    if (v.R && t - v.snapAt > 4000 && t - v.joinedAt > 4000) elect();
+    // The fight's over and the host vanished before paying out: report it ourselves.
+    if (v.R && (v.R.over || t > Date.parse(v.raid.ends_at) + 8000) && t - v.snapAt > 5000 && !v.finishing) reportRaid(v.R);
+  }
+  if (v.R) paintRaid();
+}
+const rosterKey = (R) => R.members.map((m) => m.id).join(",");
+async function hostFinish() {
+  const v = V.raid; if (v.finishing) return;
+  v.finishing = true;
+  clearInterval(v.timer);
+  const R = v.R;
+  if (v.A && R.result.how === "won") { v.A.bossKO(); banner("K.O.!", `${R.boss.name} is down`); FX.play("ko"); }
+  const result = await reportRaid(R);
+  if (result) v.ch?.send({ type: "broadcast", event: "end", payload: { result } });
+  setTimeout(() => showRaidResult(result, v), R.result?.how === "won" ? 1600 : 200);
+}
+async function reportRaid(R) {
+  const v = V.raid; if (!v) return null;
+  v.finishing = true;
+  const res = R.result || { how: R.boss.hp <= 0 ? "won" : "timeout" };
+  try {
+    const r = await call("raid_finish", { token: S.token, raid_id: v.raid.id, how: res.how, frac: 1 - R.boss.hp / R.boss.max, paralysed: !!R.paralysed, deepDive: R.deepDive || 0,
+      members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
+    if (!v.host) showRaidResult(r.result, v);
+    return r.result;
+  } catch (e) { toast(e.message); v.finishing = false; return null; }
+}
+function leaveRaid() {
+  const v = V.raid; if (!v) return;
+  v.ended = true;
+  clearInterval(v.timer);
+  try { v.ch?.unsubscribe(); } catch { /* already gone */ }
+  v.A?.dispose(); FX.destroy();
+  V.raid = null;
+}
+function showRaidResult(result, v) {
+  const R = v?.R || null, lvlBefore = v?.lvlBefore ?? level();
+  if (V.raid) leaveRaid();
+  if (!result) { S.view = "main"; refresh(true).then(render); return; }
+  V.result = { kind: "raid", out: result, R, lvlBefore };
+  S.view = "result";
+  render();
+  FX.play(result.how === "won" ? "win" : "lose");
+}
+function renderRaid() {
+  const v = V.raid, R = v.R, three = use3d();
+  if (!R) {
+    $("#app").innerHTML = `<div class="arena raid" id="arena"><div class="lobby"><div class="spinner"></div><h2 class="ol disp">Finding your squad…</h2><p class="muted small">The fight starts as soon as you're connected.</p>
+      <button class="btn sm" data-act="raid-quit">Leave</button></div></div>`;
+    return;
+  }
+  v.rosterKey = rosterKey(R);
+  v.A?.dispose(); v.A = null; FX.destroy();
+  $("#app").innerHTML = `<div class="arena raid" id="arena"><div class="shake-wrap" id="shake">
+    <div class="hud">
+      <div class="bossbar"><div class="por">${ic("raid")}<span class="lv">LV ${R.lvl.toFixed(1)}</span></div>
+        <div class="nm"><b class="ol-sm">${esc(R.boss.name)}</b><small>Boss ${R.tier} · ${R.members.filter((m) => !m.away).length} fighting</small></div>
+        <div class="right"><span class="timer">${ic("clock")}<span id="r-clock"></span></span><button class="hbtn" data-act="raid-quit" aria-label="Leave the raid">${ic("close")}</button></div></div>
+      <div class="hp" id="r-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
+    </div>
+    <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
+    <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
+    ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f">${head2d(ANS[m.id])}</div>${esc(m.id === v.my ? "You" : m.name)}</div>`).join("")}</div>`}
+    <div class="foot"><div class="log" id="feed"></div>
+      <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
+        <div class="rows">${G.POSITIONS.map((p) => `<button data-move="${p.id}" aria-label="Move to ${p.label}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div></div>
+    </div>
+  </div><div id="trivia"></div><div id="veil"></div></div>`;
+  FX.init($("#arena"));
+  if (three) {
+    v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: m.pos })) });
+    if (!v.A) return renderRaid();
+    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.id === v.my ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.id === v.my ? "You" : m.name)}<span class="st"></span><i><s></s></i></div>`).join("");
+  }
+  v.abRow = null; v.q = null;
+  if (!v.toasted) {
+    v.toasted = true;
+    const mine = R.members.find((m) => m.id === v.my) || v.roster[v.my];
+    setTimeout(() => toast(mine.title === "top" ? `Top walker this week: you hit ×${mine.stride.toFixed(2)}` : mine.title === "last" ? `Dead weight this week: ×${mine.stride.toFixed(2)} power, and the boss knows it` : `Your steps give you ×${mine.stride.toFixed(2)} power`), 900);
+    FX.play("roar"); setTimeout(() => banner(R.boss.name, R.boss.title), 150);
+  }
+  paintRaid();
+}
+const mateEl = (id) => $(`#np-${id}`) || $(`#m-${id}`);
+const mateXY = (id) => { const A = arena(); if (A) return toArena(A.screenOf(id, 0.75)); return mateEl(id) ? FX.centre(mateEl(id)) : [0, 0]; };
+function raidFx(e) {
+  const v = V.raid; if (!v || !$("#arena")) return;
+  const R = v.R, A = v.A, my = v.my;
+  const [bx, by] = bossXY();
+  switch (e.type) {
+    case "tap": A?.heroAttack(e.id, { crit: e.crit, big: e.swing }); break;
+    case "move": A?.move(e.id, e.pos); break;
+    case "windup": if (A) A.bossWindup(e.attack, e.ids || []); FX.play("warn"); break;
+    case "attack": {
+      A?.bossAttack(e.attack, e.ids);
+      if (e.attack === "swipe") { FX.play("swipe"); for (const id of e.ids) { const [x, y] = mateXY(id); FX.claw(x, y); } FX.shake($("#shake"), 6, 220); }
+      if (e.attack === "stomp") { FX.play("stomp"); FX.shake($("#shake"), A ? 8 : 14, 500); }
+      if (e.attack === "scream") { FX.play("scream"); if (!A) FX.screamWaves(bx, by); FX.shake($("#shake"), 6, 600); }
+      if (e.attack === "feast") { FX.play("feast"); FX.chomp(bx, by + 30); banner(R.boss.attacks?.feast || "Feast", "Burst it down before it heals"); }
       break;
     }
-    case "spin": {
-      t.disabled = true;
-      const code = S.boardKey.slice(2);
-      try {
-        const r = await call("spin", { token: S.token, code, week_start: d.ws, loser_id: d.loser || null });
-        const B = cur();
-        B.data.spins = [r.spin, ...(B.data.spins || []).filter((x) => x.week_start !== r.spin.week_start)];
-        if (r.already) toast("Someone already spun this week. Here's how it landed.");
-        // Redraw with the slices the server actually used, then animate to the result.
-        const wheel = $("#wheel");
-        if (wheel) wheel.innerHTML = wheelSvg(r.spin.slices);
-        t.remove();
-        showWheelResult(r.spin, B.E.byId.get(r.spin.loser_id), false);
-      } catch (err) { toast(err.message); t.disabled = false; }
+    case "hurt": {
+      A?.hurt(e.id);
+      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${e.amt}`, { size: 22, color: "#ff6b78" });
+      if (e.id === my) { FX.flash($("#arena")); FX.play("hurt"); FX.buzz(40); }
       break;
     }
-    case "restore": copy(`${APP_URL}?me=${S.token}`, "Restore link copied. Keep it private."); break;
-    case "sign-out": if (confirm("Sign out on this phone? Copy your restore link first if you want to come back.")) signOut(); break;
-    case "toggle-public": {
-      e.preventDefault();
-      const on = !S.me.is_public;
-      try { await call("update_me", { token: S.token, is_public: on }); await refresh(true); toast(on ? "You're in the public league" : "Public league off"); }
-      catch (err) { toast(err.message); }
+    case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { size: 20, color: "#9af0ff" }); break; }
+    case "shield": FX.play("shield"); A?.shield(e.ids, 8 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
+    case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
+    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); break; }
+    case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
+    case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
+    case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("Back up!"); break;
+    case "phase": FX.play("phase"); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
+    case "feastEnd": if (e.healed) { FX.number(bx, by - 40, `+${fmt(e.healed)}`, { size: 30, color: "#7ee29d" }); FX.play("heal"); } else { FX.number(bx, by - 40, "Interrupted", { size: 26, grad: ["#fff3a0", "#ff7a3d"] }); FX.play("combo"); } break;
+    case "trivia": FX.play("warn"); break;
+    case "answered": if (e.id !== my) FX.play(e.valid ? "tap" : "blocked"); break;
+    case "triviaDone": FX.play(e.failed ? "wrong" : "right"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(true); } break;
+    case "paralysed": FX.play("stun"); banner("Paralysed", `${fmt(G.RULES.paralysedSteps)} steps down tomorrow`); break;
+    case "end": break;
+  }
+}
+function paintRaid() {
+  const v = V.raid; if (!v?.R || !$("#r-hp")) return;
+  const R = v.R, B = R.boss, mine = R.members.find((m) => m.id === v.my);
+  const clock = $("#r-clock"); clock.textContent = mmss(R.dur - R.t); clock.parentElement.classList.toggle("low", R.dur - R.t <= 30);
+  setBar($("#r-hp"), B.hp / B.max, `${fmt(B.hp)} / ${fmt(B.max)}`);
+  const pct = Math.ceil((B.hp / B.max) * 10) / 10;
+  if (!v.A && pct !== v.bossPct && $("#boss")) { v.bossPct = pct; $("#boss").innerHTML = Walker.boss(B.hp / B.max, false); }
+  const tele = $("#tele"), tt = tele.querySelector(".tt"), cdbar = tele.querySelector(".cd");
+  if (B.feast) {
+    tele.className = "tele feast";
+    tt.innerHTML = `${esc(B.attacks.feast)}<small>${fmt(B.feast.dealt)} / ${fmt(B.feast.need)} damage</small>`;
+    cdbar.style.width = `${Math.max(0, (B.feast.until - R.t) / 6) * 100}%`;
+  } else if (B.next && R.t >= B.next.warnAt) {
+    const a = G.ATTACKS[B.next.type], total = B.next.at - B.next.warnAt;
+    tele.className = "tele hot";
+    tt.innerHTML = `${esc(B.attacks[B.next.type] || a.label)}<small>${esc(a.what)} · ${Math.max(0, B.next.at - R.t).toFixed(1)}s</small>`;
+    cdbar.style.width = `${Math.max(0, (B.next.at - R.t) / total) * 100}%`;
+  } else {
+    tele.className = "tele idle";
+    tt.innerHTML = `Phase ${B.phase}<small>watching for its next move</small>`;
+    cdbar.style.width = "0";
+  }
+  for (const m of R.members) {
+    const el = mateEl(m.id); if (!el) continue;
+    const f = m.hp / m.max;
+    el.classList.toggle("dead", !m.alive);
+    el.classList.toggle("away", !!m.away);
+    if (v.A) {
+      const pt = v.A.screenOf(m.id, 1.05);
+      if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1]}px) translate(-50%, -100%)`;
+      const bar = el.querySelector("s");
+      bar.style.width = `${f * 100}%`;
+      bar.style.background = f > 0.5 ? "var(--green)" : f > 0.25 ? "var(--gold)" : "var(--red)";
+      const st = m.away ? "eye" : !m.alive ? "skull" : R.t < m.stunUntil ? "bolt" : R.t < m.shieldUntil ? "guard" : m.swing ? "fire" : "";
+      const stEl = el.querySelector(".st");
+      if (stEl.dataset.s !== st) { stEl.dataset.s = st; stEl.innerHTML = st ? ic(st) : ""; }
+    }
+  }
+  const ab = $("#ab");
+  if (!mine) { ab.disabled = true; hint(`${ic("squad")} Joining the fight…`); }
+  else {
+    const p = G.posOf(mine.pos), cd = Math.max(0, mine.cdUntil - R.t), total = G.abilityCd(mine);
+    if (v.abRow !== mine.pos) { v.abRow = mine.pos; ab.querySelector(".ic-slot").innerHTML = ic(ROW_ICON[mine.pos]); ab.querySelector(".al").textContent = p.ability; }
+    ab.querySelector(".secs").textContent = cd > 0 ? Math.ceil(cd) : "";
+    ab.querySelector(".ic-slot").style.opacity = cd > 0 ? 0.25 : 1;
+    ab.style.setProperty("--cd", `${cd > 0 ? (cd / total) * 360 : 0}deg`);
+    ab.disabled = cd > 0 || !mine.alive;
+    ab.classList.toggle("ready", cd <= 0 && mine.alive && R.t >= mine.stunUntil);
+    document.querySelectorAll("[data-move]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.move === mine.pos)));
+    if (!mine.alive) hint(`${ic("skull")} You're down. Answer your question`);
+    else if (R.t < mine.stunUntil) hint(`${ic("bolt")} Paralysed`);
+    else if (R.t < mine.moveUntil) hint(`${ic("arrowRight")} Moving rows`);
+    else if (mine.swing) hint(`${ic("fire")} Big swing: ${mine.swing} hits left`);
+    else if (v.taps >= 6) hint(null);
+    paintCombo(mine.combo, 1 + mine.combo / (G.RULES.comboMax * 2));
+  }
+  $("#feed").innerHTML = R.log.slice(0, 2).map((l) => `<div class="${l.kind}">${esc(l.text)}</div>`).join("");
+  const veil = $("#veil");
+  const want = !mine ? "" : mine.alive && R.t < mine.stunUntil ? "stun" : !mine.alive ? "down" : "";
+  if (veil.dataset.s !== want || want === "stun") {
+    veil.dataset.s = want;
+    veil.innerHTML = want === "stun" ? `<div class="veil stun"><b class="ol">Paralysed<br>${Math.ceil(mine.stunUntil - R.t)}s</b></div>` : want === "down" ? '<div class="veil down"></div>' : "";
+  }
+  paintTrivia();
+}
+function paintTrivia() {
+  const v = V.raid, R = v.R, T = R.trivia, box = $("#trivia");
+  const mineP = T?.per[v.my];
+  if (!T || !mineP) { if (box.innerHTML) box.innerHTML = ""; v.q = null; return; }
+  const Q = mineP.q, key = `${R.triviaRuns}`;
+  if (v.q !== key) {
+    v.q = key; v.ticked = 0; v.sentAns = false;
+    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}</div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
+      <h3 class="ol-sm">${esc(Q.q)}</h3>
+      <form data-form="answer"><input id="tv-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Name one…" maxlength="40" aria-label="Your answer"><button class="btn green">Go</button></form>
+      <div class="verdict" id="tv-verdict"></div>
+      <div class="votes" id="tv-votes"></div></div>`;
+    setTimeout(() => $("#tv-in")?.focus(), 50);
+  }
+  const left = Math.max(0, mineP.until - R.t);
+  const clock = $("#tv-clock");
+  clock.style.setProperty("--t", left / mineP.secs); clock.classList.toggle("low", left <= 5 && !mineP.ans);
+  clock.querySelector("span").innerHTML = mineP.ans || v.sentAns ? ic("check") : Math.ceil(left);
+  if (!mineP.ans && !v.sentAns && left <= 5 && Math.ceil(left) !== v.ticked) { v.ticked = Math.ceil(left); FX.play("tick"); }
+  const wrong = Object.values(T.per).filter((p) => p.ans && !p.ans.valid).length;
+  $("#tv-votes").innerHTML = R.members.filter((m) => T.per[m.id]).map((m) => {
+    const a = T.per[m.id].ans;
+    return `<span class="vote ${a ? (a.valid ? "ok" : "no") : ""}">${esc(m.id === v.my ? "You" : m.name)} ${a ? ic(a.valid ? "check" : "close") : "…"}</span>`;
+  }).join("") + `<span class="vote" style="background:none">${wrong} of ${Object.keys(T.per).length} wrong</span>`;
+  const mine = mineP.ans || v.localAns;
+  if (mine) {
+    const form = $("#trivia form"); if (form) form.remove();
+    $("#tv-verdict").innerHTML = mine.valid
+      ? `<b>${esc(mine.canon)}</b> <span class="rar r${mine.rarity}">${["", "Obvious", "Decent", "Rare"][mine.rarity]}</span> <span class="muted">Waiting for the squad…</span>`
+      : `<b>${esc(mine.text || "No answer")}</b> doesn't count. <span class="muted">Deep cuts: ${esc(Q.examples.join(", "))}</span>`;
+  }
+}
+function raidTapEvent(e) {
+  const v = V.raid; if (!v?.R) return;
+  const mine = v.R.members.find((m) => m.id === v.my);
+  if (!mine || !mine.alive || v.R.t < mine.stunUntil || v.R.t < mine.moveUntil || v.R.over) return;
+  const [x, y] = FX.local(e.clientX, e.clientY);
+  v.taps++;
+  let hit;
+  if (v.host) { hit = G.raidTap(v.R, v.my); if (!hit) return; }
+  else {
+    // The host decides the real hit; show a fair estimate straight away so tapping feels instant.
+    v.out.taps++;
+    const swing = mine.swing > 0;
+    hit = { dmg: (20 + mine.g.power * 4) * mine.stride * G.posOf(mine.pos).mult * (1 + mine.combo / (G.RULES.comboMax * 2)) * (swing ? 3 : 1), crit: false, swing };
+  }
+  FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, color: hit.swing ? "#ff9f43" : "#ffd166" });
+  FX.play(hit.crit || hit.swing ? "crit" : "hit");
+  if (hit.crit || hit.swing) { FX.shake($("#shake"), hit.swing ? 9 : 5, 180); FX.buzz(18); } else FX.buzz(5);
+  v.A?.heroAttack(v.my, { crit: hit.crit, big: hit.swing });
+  bossHurt(hit.crit || hit.swing);
+}
+function raidAct(kind, val) {
+  const v = V.raid; if (!v?.R) return;
+  if (v.host) {
+    if (kind === "ab") G.raidAbility(v.R, v.my);
+    if (kind === "move") G.raidMove(v.R, v.my, val);
+    if (kind === "ans") return G.raidAnswer(v.R, v.my, val);
+  } else {
+    if (kind === "ab") v.out.ab = true;
+    if (kind === "move") v.out.move = val;
+    if (kind === "ans") {
+      v.out.ans = val; v.sentAns = true;
+      // Check it here too, so you see straight away whether it counts.
+      const p = v.R.trivia?.per[v.my];
+      if (p) { v.localAns = { text: val, ...p.q.check(val) }; return v.localAns; }
+    }
+  }
+  return null;
+}
+
+// ---------- results ----------
+function renderResult() {
+  const res = V.result;
+  let body, won, title, sub;
+  if (res.kind === "tax") {
+    const r = res.r; won = r.beaten;
+    title = won ? "Victory" : "Taxed";
+    sub = `${fmt(r.taps)} taps · ${r.crits} crits · ${r.weak} weak-spot hits · ${r.receipts} receipt${r.receipts === 1 ? "" : "s"}`;
+    body = `<section class="panel">
+        <div class="rline plus"><span>Earned from steps so far</span><span class="rv">+${effortTag(r.earned)}</span></div>
+        <div class="rline minus"><span>Taxman took · ${Math.round(r.taxRate * (1 - r.knocked) * 100)}%</span><span class="rv">−${effortTag(r.taxed)}</span></div>
+        <div class="rline plus"><span>Stolen back · ${Math.round(r.stealPct * 100)}%</span><span class="rv">+${effortTag(r.stolen)}</span></div>
+        <div class="rline total"><span class="disp" style="font-size:18px">Banked</span><span class="rv">${coin(26)}<span id="count">${res.net == null ? "…" : "0"}</span></span></div>
+        <p class="tiny faint" style="margin:8px 0 0">Keep walking: steps after 7pm pay out after midnight on these terms.</p>
+      </section>`;
+  } else {
+    const out = res.out, my = me().id, mine = out.shares.find((s) => s.id === my), T = res.R?.lastTrivia;
+    const nm = (id) => (id === my ? "you" : out.names?.[id] || out.shares.find((x) => x.id === id)?.name || "someone");
+    won = out.how === "won";
+    title = { won: "Victory", timeout: "Time up", wiped: "Defeat" }[out.how];
+    sub = `${esc(out.boss)} · ${Math.round(out.frac * 100)}% dealt`;
+    body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed.</b><span class="small muted">Everyone who fought starts tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></section>` : ""}
+      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Steps</th><th>Damage</th><th>Loot</th><th>Tax</th></tr>
+        ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === my ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}${esc(s.id === my ? "You" : s.name)}</td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmt(s.dmg)}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
+        ${out.settle ? `<p class="small muted" style="margin:10px 0 0">${ic("coins")} Weekly settlement: ${esc(nm(out.settle.from))} (lowest walker) paid ${esc(nm(out.settle.to))} ${fmt(out.settle.amount)} Efforts.</p>` : ""}</section>
+      ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
+        ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
+      <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
+        ${!mine ? `<div class="small muted">You weren't in this one.</div>` : ""}${won ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(out.tier + 1).name)}</div>` : ""}</section>`;
+  }
+  $("#app").innerHTML = `<div class="results ${won ? "" : "lost"}" id="arena"><div class="inner">
+    <div class="ribbon ol">${title}</div>
+    <div class="subline">${sub}</div>
+    <div class="stack">${body}
+      <section class="panel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${res.lvlBefore}</b></div><div class="xp" style="height:10px"><i style="width:0%"></i></div><div id="lvlup"></div></section>
+      <button class="btn gold xl block" data-act="collect">${ic("coins")} Collect</button>
+    </div></div></div>`;
+  if (res.kind === "raid") { const mine = res.out.shares.find((s) => s.id === me().id); countUp($("#count"), mine ? mine.total : 0); }
+  FX.init($("#arena"));
+  if (won) setTimeout(() => FX.confetti(140), 250);
+}
+function countUp(el, to) {
+  if (!el) return;
+  const start = performance.now(), dur = 900;
+  const step = (t) => { const k = Math.min(1, (t - start) / dur), v = Math.round(to * (1 - (1 - k) ** 3)); el.textContent = (v < 0 ? "−" : "") + fmt(Math.abs(v)); if (k < 1) requestAnimationFrame(step); else FX.play(to < 0 ? "lose" : "coin"); };
+  requestAnimationFrame(step);
+}
+// The money's already in the wallet (the server paid it); this pulls the new balance and shows any level-up.
+async function collect() {
+  const res = V.result; if (!res || res.collected) return;
+  res.collected = true;
+  const btn = $("[data-act=collect]"), [x, y] = FX.centre(btn);
+  FX.coins(x, y, 30, x, -40); FX.play("coin");
+  btn.disabled = true;
+  try { await load(); } catch (e) { toast(e.message); }
+  btn.disabled = false;
+  const p = G.levelProgress(S.D.xp);
+  $(".results .xp i").style.width = `${p.pct * 100}%`;
+  $("#lvl-now").textContent = `Level ${p.lvl}`;
+  if (p.lvl > res.lvlBefore) { $("#lvlup").innerHTML = `<div class="lvlup ol">Level ${p.lvl}!</div>`; FX.play("levelup"); FX.confetti(100); }
+  btn.innerHTML = `Continue ${ic("arrowRight")}`;
+  btn.dataset.act = "back";
+}
+
+// ---------- clocks ----------
+// Countdowns tick every second; crossing 7pm (or the end of a window) reloads so the buttons are right.
+setInterval(() => {
+  if (S.view !== "main" || !S.D) return;
+  for (const el of document.querySelectorAll("[data-count]")) el.textContent = countdown(Number(el.dataset.count) - now());
+  const w = S.D.windows, t = now();
+  const edges = [w.tax.opens, w.tax.closes, w.raid.opens, w.raid.closes, S.D.fight ? Date.parse(S.D.fight.ends_at) : 0];
+  if (edges.some((e) => e && S.lastTick && S.lastTick < e && t >= e)) refresh(true);
+  S.lastTick = t;
+}, 1000);
+
+// ---------- events ----------
+document.addEventListener("pointerdown", (e) => {
+  FX.unlock();
+  if (!e.target.closest("#stage")) return;
+  e.preventDefault();
+  if (S.view === "tax") taxTap(e);
+  else if (S.view === "raid") raidTapEvent(e);
+});
+document.addEventListener("submit", async (e) => {
+  const f = e.target.closest("form[data-form]"); if (!f) return;
+  e.preventDefault();
+  const kind = f.dataset.form, data = Object.fromEntries(new FormData(f));
+  const btn = f.querySelector("button:not([type=button])");
+  const busy = async (fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (err) { toast(err.message); } finally { if (btn) btn.disabled = false; } };
+  switch (kind) {
+    case "answer": {
+      const text = $("#tv-in").value.trim(); if (!text) return;
+      const res = raidAct("ans", text);
+      if (res) FX.play(res.valid ? (res.rarity === 3 ? "rare" : "right") : "wrong");
+      paintTrivia();
       break;
     }
-    case "check-sync": {
-      const out = $("#sync-status");
-      out.textContent = "Checking…";
-      await refresh(true);
-      const r = S.mine.day(S.me.id, today());
-      const ts = d.kind === "steps" ? S.me.steps_synced_at : S.me.scroll_synced_at;
-      out.innerHTML = ts
-        ? `✅ Last ${d.kind === "steps" ? "sync" : "ping"} <b>${ago(ts)}</b>. Today: <b>${d.kind === "steps" ? fmt(r.steps) + " steps" : fmt(r.scrollMin) + " min"}</b>.`
-        : d.kind === "steps" ? "Nothing yet. Run the Shortcut or tap Sync now, then check again." : "Nothing yet. Open and close TikTok once, then check again.";
+    case "quiz-intro": S.answers.name = String(data.name || "").trim(); if (S.answers.name) quizAdvance(); break;
+    case "quiz-value": {
+      const q = QUESTIONS[S.qi];
+      S.answers[q.id] = q.type === "number" ? Math.max(1, Math.min(99, Number(data.v) || 1)) : String(data.v).trim();
+      quizAdvance();
       break;
     }
-    case "group-settings": {
-      const code = S.boardKey.slice(2);
-      if (S.adminKeys[code]) {
-        try { const r = await call("admin_members", { code, admin_key: S.adminKeys[code] }); groupSettingsSheet(r.members); }
-        catch (err) { toast(err.message); }
-      } else groupSettingsSheet([]);
-      break;
-    }
-    case "admin-login": {
-      const code = S.boardKey.slice(2);
-      const key = prompt("Admin key for this group:");
-      if (!key) break;
-      try {
-        const r = await call("admin_members", { code, admin_key: key.trim() });
-        S.adminKeys[code] = key.trim(); store.set("adminKeys", S.adminKeys);
-        groupSettingsSheet(r.members);
-      } catch (err) { toast(err.message); }
-      break;
-    }
-    case "leave-group": {
-      const code = S.boardKey.slice(2);
-      if (!confirm(`Leave ${boardName(S.boardKey)}? Your points stay on your profile.`)) break;
-      try {
-        await call("leave", { token: S.token, code });
-        delete S.boards[S.boardKey]; S.boardKey = null;
-        closeSheet(); await refresh(); toast("Left the group");
-      } catch (err) { toast(err.message); }
-      break;
-    }
+    case "code": await busy(async () => { S.invite = await lookupInvite(String(data.code)); render(); }); break;
+    case "squad-create": await busy(async () => {
+      const r = await call("squad_create", { token: S.token, name: data.name });
+      await load(); closeSheet();
+      if (S.view === "squad") { S.view = "setup"; S.setupStep = "steps"; render(); }
+      else render();
+      inviteSheet();
+      toast(`${squad().name} is ready. Code ${r.code}`);
+    }); break;
+    case "squad-join": await busy(async () => {
+      await call("join", { token: S.token, code: String(data.code).trim().toUpperCase() });
+      await load(); closeSheet();
+      if (S.view === "squad") { S.view = "setup"; S.setupStep = "steps"; }
+      render(); toast(`You're in ${squad().name}`);
+    }); break;
+    case "log-steps": await busy(async () => {
+      const r = await call("log", { token: S.token, steps: data.n, date: data.date, source: "manual" });
+      closeSheet(); await load(); render(); toast(r.message.replace(/^✅ /, ""));
+    }); break;
+    case "log-scroll": await busy(async () => {
+      await call("scroll_minutes", { token: S.token, minutes: data.n, date: data.date });
+      closeSheet(); await load(); render(); toast("Scrolling saved");
+    }); break;
   }
 });
-
-// Colour question: repaint the walker live as the slider moves.
 document.addEventListener("input", (e) => {
   if (e.target.matches("[data-hue]")) {
     S.answers.hue = Number(e.target.value);
-    const pv = $("#quiz-preview");
-    if (pv) pv.innerHTML = quizPreview();
+    const pv = $("#quiz-preview"); if (pv) pv.innerHTML = Walker.svg(S.answers, { mood: "ok" });
   }
 });
-
 document.addEventListener("change", (e) => {
-  if (e.target.dataset.act === "log-day") { S.logDay = e.target.value; render(); }
-  if (e.target.name === "journey" && e.target.value) {
-    const f = e.target.form;
-    f.challenge_km.value = e.target.value;
-    f.challenge_name.value = e.target.selectedOptions[0].dataset.name;
-  }
+  const t = e.target.dataset.toggle;
+  if (t === "sound") FX.setMuted(!e.target.checked);
+  if (t === "3d") store.set("no3d", !e.target.checked);
 });
-
-document.addEventListener("submit", async (e) => {
-  const form = e.target;
-  const kind = form.dataset.form;
-  if (!kind) return;
-  e.preventDefault();
-  const btn = form.querySelector("button:not([type=button])");
-  const f = Object.fromEntries(new FormData(form));
-  if (btn) btn.disabled = true;
-  try {
-    if (kind === "code") {
-      if (f.code.trim().length < 4) { toast("Enter the 6-character code"); return; }
-      S.invite = await lookupInvite(f.code);
-      render();
-    } else if (kind === "quiz-intro") {
-      S.answers.name = f.name.trim();
-      quizAdvance();
-    } else if (kind === "quiz-value") {
-      const q = QUESTIONS[S.qi];
-      S.answers[q.id] = q.type === "number" ? Math.max(1, Math.min(99, Number(f.v) || 7)) : f.v.trim().slice(0, 30);
-      quizAdvance();
-    } else if (kind === "join-code") {
-      if (f.code.trim().length < 4) { toast("Enter the 6-character code"); return; }
-      await joinGroup(f.code.trim().toUpperCase());
-    } else if (kind === "create") {
-      const r = await call("create", f);
-      S.adminKeys[r.code] = r.admin_key; store.set("adminKeys", S.adminKeys);
-      await joinGroup(r.code);
-      inviteSheet(r.code, f.name);
-    } else if (kind === "log-steps") {
-      const r = await call("log", { token: S.token, steps: f.steps, date: S.logDay || today(), source: "manual" });
-      toast(r.message);
-      await refresh(true);
-    } else if (kind === "log-scroll") {
-      const r = await call("scroll_minutes", { token: S.token, minutes: f.minutes, date: S.logDay || today() });
-      toast(r.message);
-      await refresh(true);
-    } else if (kind === "profile") {
-      await call("update_me", { token: S.token, name: f.name, platform: f.platform, ...(f.team !== undefined ? { code: S.boardKey.slice(2), team: f.team } : {}) });
-      closeSheet();
-      await refresh();
-      toast("Saved");
-    } else if (kind === "add-forfeit") {
-      await addForfeit(f.text);
-    } else if (kind === "admin") {
-      const settings = { ...f, teams: f.teams.split(",").map((s) => s.trim()).filter(Boolean), forfeits: f.forfeits.split("\n").map((s) => s.trim()).filter(Boolean) };
-      delete settings.journey;
-      const code = S.boardKey.slice(2);
-      await call("admin", { code, admin_key: S.adminKeys[code], settings });
-      closeSheet();
-      await refresh();
-      toast("Settings saved");
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "sheet") { closeSheet(); return; }
+  const t = e.target.closest("button, a[data-act]");
+  if (!t) return;
+  const d = t.dataset;
+  if (d.tab) { S.tab = d.tab; store.set("tab", d.tab); render(); scrollTo(0, 0); FX.play("tap"); return; }
+  if (d.answer !== undefined && S.view === "quiz") {
+    const q = QUESTIONS[S.qi];
+    S.answers[q.id] = d.answer;
+    document.querySelectorAll("[data-answer]").forEach((b) => b.setAttribute("aria-pressed", String(b === t)));
+    const pv = $("#quiz-preview"); if (pv) pv.innerHTML = Walker.svg(S.answers, { mood: "fresh" });
+    setTimeout(quizAdvance, 340);
+    return;
+  }
+  if (d.platform) { S.platform = d.platform; S.answers.name = $("[name=name]")?.value ?? S.answers.name; render(); return; }
+  if (d.setup) { S.setupPlatform = d.setup; if (S.view === "setup") render(); else setupSheet(d.kind); return; }
+  if (d.copy) { copy(d.copy); return; }
+  if (d.pos) {
+    me().pos = d.pos; render();
+    call("equip", { token: S.token, pos: d.pos }).catch((err) => toast(err.message));
+    return;
+  }
+  if (d.shoptab) { S.shopTab = d.shoptab; render(); return; }
+  if (d.item) { itemSheet(d.item, d.deal === "1"); FX.play("tap"); return; }
+  if (d.buy) { const item = G.itemById(d.buy); return shopAction("buy", { item: d.buy, deal: d.deal === "1" }, () => { FX.play("buy"); itemSheet(item.id, false); toast(`${item.name} equipped`); }); }
+  if (d.upgrade) return shopAction("upgrade", { item: d.upgrade }, () => { FX.play("levelup"); itemSheet(d.upgrade, false); });
+  if (d.equip) { const it = G.itemById(d.equip); return shopAction("equip", { slot: it.slot, item: it.id }, () => { FX.play("buy"); itemSheet(it.id, false); }); }
+  if (d.unequip) return shopAction("equip", { slot: d.unequip, item: null }, closeSheet);
+  if (d.move && V.raid) { raidAct("move", d.move); FX.play("tap"); return; }
+  switch (d.act) {
+    case "close-sheet": closeSheet(); break;
+    case "start": S.view = "quiz"; S.qi = 0; S.retake = false; render(); break;
+    case "quiz-back": if (S.qi > (S.retake ? 1 : 0)) { S.qi--; render(); } else { S.view = S.retake ? "main" : "welcome"; S.retake = false; render(); } break;
+    case "quiz-next": quizAdvance(); break;
+    case "quiz-restart": S.view = "quiz"; S.qi = 1; render(); break;
+    case "quiz-done": t.disabled = true; try { await finishQuiz(); } catch (err) { toast(err.message); t.disabled = false; } break;
+    case "retake": S.retake = true; S.answers = { ...answersOf(me()), name: me().name }; S.qi = 1; S.view = "quiz"; render(); scrollTo(0, 0); toast("Your class can change with your answers"); break;
+    case "skip-squad": S.view = "setup"; S.setupStep = "steps"; render(); break;
+    case "setup-next": S.setupStep = "remind"; render(); scrollTo(0, 0); break;
+    case "setup-done": S.view = "main"; S.tab = "today"; render(); scrollTo(0, 0); break;
+    case "setup-steps": setupSheet("steps"); break;
+    case "setup-scroll": setupSheet("scroll"); break;
+    case "log-steps": logSheet("steps"); break;
+    case "log-scroll": logSheet("scroll"); break;
+    case "check-sync": {
+      const out = $("#sync-status"), kind = d.kind;
+      out.textContent = "Checking…";
+      try {
+        await load();
+        const at = kind === "steps" ? me().steps_synced_at : me().scroll_synced_at;
+        out.innerHTML = at && Date.now() - Date.parse(at) < 30 * 60000 ? `<b style="color:var(--green)">It works.</b> Last sync ${ago(at)}.` : at ? `Last sync ${ago(at)}. Run it once now to test.` : "Nothing yet. Run it once, then check again.";
+      } catch (err) { out.textContent = err.message; }
+      break;
     }
-  } catch (err) {
-    toast(err.message);
-  } finally {
-    if (btn && document.contains(btn)) btn.disabled = false;
+    case "squad-sheet": squadSheet(); break;
+    case "invite": inviteSheet(); break;
+    case "share-invite": { const sq = squad(); share(`Join ${sq.name} on Effort. Out-walk us or pay up.`, `${APP_URL}?g=${sq.code}`); break; }
+    case "leave": {
+      const sq = squad();
+      if (!confirm(`Leave ${sq.name}? You'll miss the raids and the weekly table until you join a squad.`)) return;
+      try { await call("leave", { token: S.token, code: sq.code }); await load(); render(); toast(`You left ${sq.name}`); } catch (err) { toast(err.message); }
+      break;
+    }
+    case "copy-restore": copy(`${APP_URL}?me=${S.token}`, "Restore link copied. Keep it private"); break;
+    case "signout": if (confirm("Sign out on this phone? You'll need your restore link to get back in.")) signOut(); break;
+    case "tax": startTax(); break;
+    case "tax-stop": if (V.tax && confirm("End the fight now? You can't fight him again today.")) { V.tax.left = 0; } break;
+    case "raid": joinRaid(); break;
+    case "raid-result": if (S.D.raid?.result) { V.result = { kind: "raid", out: S.D.raid.result, R: null, lvlBefore: level() }; S.view = "result"; render(); } break;
+    case "raid-quit": if (!V.raid?.R || confirm("Leave the raid? Your squad keeps fighting, and you can rejoin while it's on.")) { leaveRaid(); S.view = "main"; await refresh(true); render(); } break;
+    case "ability": raidAct("ab"); break;
+    case "collect": collect(); break;
+    case "back": FX.destroy(); V.result = null; S.view = "main"; render(); scrollTo(0, 0); break;
   }
 });
-
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#sheet").hidden) { closeSheet(); render(); } });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && S.view === "main") refresh(true); });
-setInterval(() => { if (!document.hidden && S.view === "main" && $("#sheet").hidden) refresh(true); }, 90000);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
+// A phone that's locked or switched away stops running the fight, so it hands over hosting until it's back.
+document.addEventListener("visibilitychange", () => {
+  const v = V.raid;
+  if (v?.ch) {
+    if (document.hidden) { v.ch.untrack(); v.host = false; }
+    else { v.joinedAt = now(); v.ch.track({ at: v.joinedAt }); }
+  }
+  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); }
+});
 
 // ---------- updates ----------
-// Every deploy changes app.js's ETag. Home-screen apps can sit open for days, so check when the app
-// comes back to the front and every few minutes, and reload into the new version when nothing's in progress.
+// Every deploy changes app.js's ETag. Home-screen apps can sit open for days, so check when the app comes
+// back to the front and every few minutes, and reload into the new version when nothing's in progress.
 let releaseTag = null;
 async function checkForUpdate() {
   if (location.protocol !== "https:") return;
@@ -1503,10 +1520,9 @@ async function checkForUpdate() {
     const tag = res.headers.get("etag") || res.headers.get("last-modified");
     if (!tag) return;
     if (!releaseTag) { releaseTag = tag; return; }
-    if (tag !== releaseTag && S.view === "main" && $("#sheet").hidden) location.reload();
+    if (tag !== releaseTag && ["main", "welcome"].includes(S.view) && $("#sheet").hidden) location.reload();
   } catch { /* offline: try again later */ }
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
 setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
 
 // ---------- boot ----------
@@ -1515,25 +1531,28 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
   checkForUpdate();
   render();
   const params = new URLSearchParams(location.search);
-  const restore = params.get("me");
-  const inviteCode = params.get("g");
+  const restore = params.get("me"), inviteCode = params.get("g");
   if (restore && restore !== S.token) { S.token = restore; store.set("token", restore); }
   if (S.token) {
+    try { await load(); }
+    catch (e) {
+      if (/Unknown token/.test(e.message)) return signOut("That account doesn't exist any more");
+      $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><p class="muted">${esc(e.message)}</p><button class="btn gold" onclick="location.reload()">Try again</button></div>`;
+      return;
+    }
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
-    await refresh();
-    if (!S.me) return;
-    if (inviteCode && !S.groups.some((g) => g.code === inviteCode.toUpperCase())) {
+    S.view = "main"; render();
+    if (inviteCode && squad()?.code !== inviteCode.toUpperCase()) {
       try {
         const inv = await lookupInvite(inviteCode);
-        openSheet(`${sheetHead(`Join ${esc(inv.name)}?`)}<p>${inv.members} player${inv.members === 1 ? "" : "s"} are competing. You'll keep your level, par and badges.</p><div class="btn-row"><button class="btn" data-act="accept-invite">Join</button></div>`);
-        $("[data-act=accept-invite]").addEventListener("click", () => joinGroup(inv.code).catch((err) => toast(err.message)));
+        openSheet(`${sheetHead(`Join ${esc(inv.name)}?`)}<p class="small muted">${inv.members} player${inv.members === 1 ? "" : "s"} walking.${squad() ? ` You'll leave ${esc(squad().name)}.` : ""}</p>
+          <form data-form="squad-join"><input type="hidden" name="code" value="${esc(inv.code)}"><button class="btn green block">Join ${esc(inv.name)}</button></form>`);
       } catch (err) { toast(err.message); }
     }
     return;
   }
-  if (inviteCode) {
-    try { S.invite = await lookupInvite(inviteCode); } catch (err) { toast(err.message); }
-  }
+  if (inviteCode) { try { S.invite = await lookupInvite(inviteCode); } catch (err) { toast(err.message); } }
   S.view = "welcome";
   render();
+})();
 })();

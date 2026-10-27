@@ -395,10 +395,12 @@ function triviaSet(seed, count = 3) {
 // Top and bottom only get titles when there's a real gap between them.
 function weekTable(members) {
   const avg = members.reduce((s, m) => s + (m.weekSteps || 0), 0) / Math.max(1, members.length);
-  const rows = members.map((m) => ({ id: m.id, name: m.name, you: !!m.you, weekSteps: m.weekSteps || 0,
+  const rows = members.map((m) => ({ id: m.id, name: m.name, you: !!m.you, fresh: !!m.fresh, weekSteps: m.weekSteps || 0,
     stride: avg > 0 ? Math.round(clamp((m.weekSteps || 0) / avg, RULES.strideMin, RULES.strideMax) * 100) / 100 : 1, title: null }));
   rows.sort((a, b) => b.weekSteps - a.weekSteps);
-  if (rows.length >= 2 && rows[0].weekSteps > rows[rows.length - 1].weekSteps) { rows[0].title = "top"; rows[rows.length - 1].title = "last"; }
+  // Someone who joined late in the week (fresh) can't be crowned or blamed for it.
+  const ranked = rows.filter((r) => !r.fresh);
+  if (ranked.length >= 2 && ranked[0].weekSteps > ranked[ranked.length - 1].weekSteps) { ranked[0].title = "top"; ranked[ranked.length - 1].title = "last"; }
   return { avg, rows };
 }
 
@@ -426,17 +428,20 @@ function bossFor(tier) {
   const k = 2 ** lap, rk = (BOSSES[BOSSES.length - 1].reward * 1.1) ** lap; // lap 2 starts richer than the final boss of lap 1
   return { ...b, tier: t, lap: lap + 1, hp: b.hp * k, dmg: b.dmg * k ** 0.5, reward: b.reward * rk };
 }
+// A fighter. The live game passes stride and title from the whole squad's week (so they don't
+// depend on who turned up); the lab works them out from whoever is in the raid.
+function makeMember(m, row) {
+  const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
+  const maxHp = Math.round(80 + g.guard * 10);
+  return { ...m, g, perks, gearPts: points, weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
+    pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0,
+    cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind };
+}
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1 } = {}) {
   const r = rng(seed);
   const n = members.length;
   const table = weekTable(members);
-  const ms = members.map((m) => {
-    const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
-    const maxHp = Math.round(80 + g.guard * 10);
-    const row = table.rows.find((x) => x.id === m.id);
-    return { ...m, g, perks, gearPts: points, weekSteps: row.weekSteps, stride: row.stride, title: row.title, pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, dmg: 0, healed: 0, taken: 0,
-      cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind };
-  });
+  const ms = members.map((m) => makeMember(m, table.rows.find((x) => x.id === m.id)));
   // Boss level tracks how much stronger gear makes the squad than their bare stats (damage × toughness × perks),
   // so better gear never makes Sunday easier. Rewards grow faster than the level (see raidRewardCurve).
   const strength = ms.reduce((s, m) => {
@@ -495,7 +500,7 @@ function targetsOf(R, type) {
 }
 const PERK_WEIGHT = { rare: 0.6, epic: 1, legendary: 1.6, mythic: 2.4 };
 const TAX_ONLY = new Set(["taxStart", "steal"]);
-const alive = (R) => R.members.filter((m) => m.alive);
+const alive = (R) => R.members.filter((m) => m.alive && !m.away);
 const canAct = (R, m) => m.alive && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
 // `you: true` marks the person playing on this screen, so the log reads "You raise" not "You raises".
 const nm = (m) => (m.you ? "You" : m.name);
@@ -606,16 +611,17 @@ function triviaTime(m) { return RULES.triviaSeconds + Math.max(0, m.g.brains - 5
 // get theirs wrong, everyone is paralysed. Rare valid answers knock a slice off the boss either way.
 function startTrivia(R) {
   R.triviaRuns++;
-  const qs = triviaSet(R.seed + R.triviaRuns * 7919, R.members.length);
+  const who = R.members.filter((m) => !m.away);
+  const qs = triviaSet(R.seed + R.triviaRuns * 7919, who.length);
   const per = {}, botPlan = {};
-  R.members.forEach((m, i) => {
-    per[m.id] = { q: qs[i], secs: triviaTime(m), until: R.t + triviaTime(m), ans: null };
+  who.forEach((m, i) => {
+    per[m.id] = { i, q: qs[i], secs: triviaTime(m), until: R.t + triviaTime(m), ans: null };
     if (m.bot) {
       const knows = R.r() < 0.45 + m.g.brains * 0.045;
       botPlan[m.id] = { at: R.t + 4 + R.r() * 16, text: knows ? qs[i].sample(R.r, R.r() < 0.75) : pick(R.r, ["uhh", "idk", "pass", "42", "the sun?"]) };
     }
   });
-  R.trivia = { per, botPlan, started: R.t };
+  R.trivia = { per, botPlan, started: R.t, n: who.length };
   fx(R, { type: "trivia" });
   say(R, "Someone's down. Everyone gets a question. 2/3 wrong and you're all paralysed", "warn");
 }
@@ -731,6 +737,36 @@ function endRaid(R, how) {
   say(R, how === "won" ? `${R.boss.name} is down!` : how === "timeout" ? "Time's up" : "Squad wiped", how === "won" ? "good" : "bad");
 }
 
+// ---------- live raids ----------
+// Someone joins after the start: they fight from now on and the boss grows by one member's share.
+function raidAddMember(R, m) {
+  if (R.members.some((x) => x.id === m.id) || R.over) return null;
+  const per = R.boss.max / Math.max(1, R.members.length);
+  const x = makeMember(m, null);
+  R.members.push(x);
+  R.boss.max = Math.round(R.boss.max + per); R.boss.hp = Math.round(R.boss.hp + per);
+  R.sizeDmg = Math.min(1, 0.4 + 0.15 * R.members.length);
+  say(R, `${x.name} joins the fight`, "good");
+  return x;
+}
+// The whole fight as plain data, so the host's phone can stream it to the squad and anyone can take over.
+function raidExport(R) {
+  const { r: _r, fx: _fx, trivia, members, log, ...rest } = R;
+  return {
+    ...rest, log: log.slice(0, 8),
+    members: members.map(({ answers: _a, inv: _i, equipped: _e, ...m }) => m),
+    trivia: trivia ? { started: trivia.started, n: trivia.n, per: Object.fromEntries(Object.entries(trivia.per).map(([id, p]) => [id, { i: p.i, secs: p.secs, until: p.until, ans: p.ans }])) } : null,
+  };
+}
+function raidImport(d) {
+  const R = { ...d, log: d.log || [], fx: [], r: rng((d.seed + Math.floor(d.t * 1000)) >>> 0), members: d.members.map((m) => ({ ...m })) };
+  if (d.trivia) {
+    const qs = triviaSet(d.seed + d.triviaRuns * 7919, d.trivia.n);
+    R.trivia = { ...d.trivia, botPlan: {}, per: Object.fromEntries(Object.entries(d.trivia.per).map(([id, p]) => [id, { ...p, q: qs[p.i] }])) };
+  }
+  return R;
+}
+
 root.Game = {
   DEFAULT_RULES, get RULES() { return RULES; }, setRules,
   hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
@@ -740,6 +776,6 @@ root.Game = {
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
-  BOSSES, bossFor, ATTACKS, raidCreate, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
+  BOSSES, bossFor, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
 };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -1,21 +1,19 @@
 // Effort API. One function, routed by the last path segment:
-//   GET  /board?code=ABC123 | /board?league=public   scoreboard data (group or public league)
-//   POST /signup                       make a player (solo / public play), returns your token
-//   POST /create                       make a private group, returns code + admin key
-//   POST /join                         join a group (existing player token, or new profile)
-//   POST /leave                        leave a group
-//   GET  /log?t=TOKEN&steps=8421       log today's steps (iPhone Shortcut / manual)
+//   GET  /board?code=ABC123            a squad's name and players (for invite links)
+//   POST /signup                       make a player, returns your token
+//   POST /join                         join a squad (existing player token, or a new profile); you're only ever in one
+//   POST /squad_create                 make a squad and join it
+//   POST /leave                        leave your squad
+//   GET  /log?t=TOKEN&steps=8421       log today's steps (iPhone Shortcut / typed in)
 //   POST /hc?t=TOKEN                   HC Webhook (Android Health Connect) payload
 //   GET  /scroll?t=TOKEN&ev=open|close   short-video app opened/closed (Shortcut / MacroDroid automation)
 //   GET  /scroll?t=TOKEN&minutes=42      the day's scroll minutes in one go (Tasker)
-//   POST /scroll_minutes               self-reported scroll minutes from Screen Time / Digital Wellbeing
-//   POST /add_forfeit                  any member adds a forfeit to the group's wheel
-//   POST /spin                         spin the forfeit wheel for a finished week (server picks the slice)
-//   POST /hunt                         submit tonight's hunt (one per day, from 18:00 local)
+//   POST /scroll_minutes               typed-in scroll minutes from Screen Time / Digital Wellbeing
 //   POST /me | /update_me              read / edit your own profile
-//   POST /admin | /admin_members | /admin_remove   group admin
 //   POST /owner                        app owner: read and edit any player's data (owner key in app_config)
+//   POST /game, /tax_start, /tax_finish, /raid_join, /raid_sync, /raid_finish, /buy, /upgrade, /equip: the game, see game_api.ts
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { gameRoute } from "./game_api.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -36,7 +34,6 @@ const text = (body: string, status = 200) =>
 const fail = (msg: string, status = 400) => json({ ok: false, error: msg }, status);
 
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const HUNT_OPEN_HOUR = 18;
 function randomString(len: number, chars = CODE_CHARS + "abcdefghijkmnpqrstuvwxyz") {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   return Array.from(bytes, (b) => chars[b % chars.length]).join("");
@@ -95,11 +92,6 @@ async function groupByCode(code: unknown) {
   if (typeof code !== "string" || !code) return null;
   const { data } = await db.from("groups").select("*").eq("code", code.trim().toUpperCase()).maybeSingle();
   return data;
-}
-
-async function adminGroup(body: Record<string, unknown>) {
-  const g = await groupByCode(body.code);
-  return g && g.admin_key === body.admin_key ? g : null;
 }
 
 function publicGroup(g: Record<string, unknown>) {
@@ -227,7 +219,7 @@ async function ownerAction(op: string, body: Record<string, any>) {
     case "list": {
       const [pl, gr, mem] = await Promise.all([
         db.from("players").select("id,name,emoji,color,platform,tz,is_public,created_at,steps_synced_at,steps_source,scroll_synced_at,scroll_source,character").order("created_at", { ascending: false }).limit(5000),
-        db.from("groups").select("id,code,name,created_at").order("created_at"),
+        db.from("groups").select("id,code,name,created_at,tier,test_until").order("created_at"),
         db.from("memberships").select("player_id,group_id"),
       ]);
       return json({ ok: true, players: pl.data ?? [], groups: gr.data ?? [], memberships: mem.data ?? [] });
@@ -303,6 +295,13 @@ async function ownerAction(op: string, body: Record<string, any>) {
       if (error) throw error;
       return json({ ok: true, day, hunt: row });
     }
+    case "test_window": {
+      const minutes = Math.min(60, Math.max(0, Number(body.minutes) || 0));
+      const until = minutes ? new Date(Date.now() + minutes * 60000).toISOString() : null;
+      const { data, error } = await db.from("groups").update({ test_until: until }).eq("id", body.id).select("id,name,test_until").single();
+      if (error) throw error;
+      return json({ ok: true, group: data });
+    }
     case "delete_player": {
       await db.from("players").delete().eq("id", body.id);
       return json({ ok: true });
@@ -328,14 +327,6 @@ Deno.serve(async (req) => {
   try {
     switch (action) {
       case "board": {
-        if (q.get("league") === "public") {
-          // Everyone who opted in and has been active in the last 5 weeks.
-          const since = new Date(Date.now() - 35 * 86400000).toISOString();
-          const { data: players } = await db.from("players").select(PUBLIC_PLAYER_COLS).eq("is_public", true)
-            .or(`steps_synced_at.gte.${since},scroll_synced_at.gte.${since},created_at.gte.${since}`).limit(500);
-          const data = await dataFor((players ?? []).map((p) => p.id), 70);
-          return json({ ok: true, league: true, players: (players ?? []).map((p) => ({ ...p, joined_at: p.created_at })), ...data });
-        }
         const g = await groupByCode(q.get("code"));
         if (!g) return fail("No group with that code", 404);
         const { data: mem } = await db.from("memberships").select(`team, joined_at, players(${PUBLIC_PLAYER_COLS})`).eq("group_id", g.id).order("joined_at");
@@ -355,21 +346,6 @@ Deno.serve(async (req) => {
         return json({ ok: true, player: data, groups: [] });
       }
 
-      case "create": {
-        const name = clip(body.name, 40);
-        if (!name) return fail("Give the group a name");
-        const row = {
-          name,
-          code: randomString(6, CODE_CHARS),
-          admin_key: randomString(10),
-          daily_goal: clampGoal(body.daily_goal),
-          forfeit: clip(body.forfeit, 120) ?? "",
-        };
-        const { data, error } = await db.from("groups").insert(row).select().single();
-        if (error) throw error;
-        return json({ ok: true, code: data.code, admin_key: data.admin_key });
-      }
-
       case "join": {
         const g = await groupByCode(body.code);
         if (!g) return fail("No group with that code", 404);
@@ -383,12 +359,27 @@ Deno.serve(async (req) => {
           if (error) throw error;
           player = data;
         }
+        // One squad each: joining a new squad leaves the old one.
+        await db.from("memberships").delete().eq("player_id", player.id).neq("group_id", g.id);
         const { error } = await db.from("memberships").upsert(
           { player_id: player.id, group_id: g.id, team: g.teams.includes(body.team) ? body.team : null },
           { onConflict: "player_id,group_id", ignoreDuplicates: true },
         );
         if (error) throw error;
         return json({ ok: true, player, code: g.code, groups: await playerGroups(player.id) });
+      }
+
+      case "squad_create": {
+        const player = await playerByToken(body.token);
+        if (!player) return fail("Unknown token", 401);
+        const name = clip(body.name, 40);
+        if (!name) return fail("Give your squad a name");
+        const { data: g, error } = await db.from("groups").insert({ name, code: randomString(6, CODE_CHARS), admin_key: randomString(10) }).select().single();
+        if (error) throw error;
+        await db.from("memberships").delete().eq("player_id", player.id);
+        const { error: e2 } = await db.from("memberships").insert({ player_id: player.id, group_id: g.id });
+        if (e2) throw e2;
+        return json({ ok: true, code: g.code, admin_key: g.admin_key, groups: await playerGroups(player.id) });
       }
 
       case "leave": {
@@ -458,91 +449,6 @@ Deno.serve(async (req) => {
         return json({ ok: true, day, minutes, message: `📵 ${minutes} min of scrolling saved for ${prettyDay(day)}` });
       }
 
-      case "add_forfeit": {
-        const player = await playerByToken(body.token);
-        const g = await groupByCode(body.code);
-        if (!player || !g) return fail("Not found", 404);
-        const { count } = await db.from("memberships").select("player_id", { count: "exact", head: true }).eq("group_id", g.id).eq("player_id", player.id);
-        if (!count) return fail("You're not in this group", 403);
-        const item = clip(body.text, 60);
-        if (!item) return fail("Write a forfeit first");
-        if (g.forfeits.length >= 12) return fail("The wheel is full (12 forfeits). Ask the admin to clear some.");
-        if (g.forfeits.some((f: string) => f.toLowerCase() === item.toLowerCase())) return fail("That one's already on the wheel");
-        const { data, error } = await db.from("groups").update({ forfeits: [...g.forfeits, item] }).eq("id", g.id).select().single();
-        if (error) throw error;
-        return json({ ok: true, group: publicGroup(data) });
-      }
-
-      // Spin the forfeit wheel for a finished week (or the current week from Sunday 18:00 in the spinner's time zone).
-      // The server picks the slice so nobody can re-roll; the first spin for a week is final.
-      case "spin": {
-        const player = await playerByToken(body.token);
-        const g = await groupByCode(body.code);
-        if (!player || !g) return fail("Not found", 404);
-        const { count } = await db.from("memberships").select("player_id", { count: "exact", head: true }).eq("group_id", g.id).eq("player_id", player.id);
-        if (!count) return fail("You're not in this group", 403);
-        const ws = clip(body.week_start, 10) ?? "";
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(ws) || new Date(ws + "T12:00:00Z").getUTCDay() !== 1) return fail("Bad week");
-        const now = new Date();
-        const today = localDate(now, player.tz);
-        const thisMonday = (() => { const d = new Date(today + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
-        const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: player.tz, hour: "2-digit", hour12: false }).format(now));
-        const sundayEvening = new Date(today + "T12:00:00Z").getUTCDay() === 0 && hour >= 18;
-        if (ws > thisMonday || (ws === thisMonday && !sundayEvening)) return fail("The wheel unlocks on Sunday at 6pm");
-        const { data: existing } = await db.from("forfeit_spins").select("*").eq("group_id", g.id).eq("week_start", ws).maybeSingle();
-        if (existing) return json({ ok: true, spin: existing, already: true });
-        const slices = g.forfeits.length ? g.forfeits : [g.forfeit || "Buys the first round"];
-        const slice = crypto.getRandomValues(new Uint32Array(1))[0] % slices.length;
-        let loserId: string | null = null;
-        if (typeof body.loser_id === "string" && /^[0-9a-f-]{36}$/i.test(body.loser_id)) {
-          const { count: inGroup } = await db.from("memberships").select("player_id", { count: "exact", head: true }).eq("group_id", g.id).eq("player_id", body.loser_id);
-          if (inGroup) loserId = body.loser_id;
-        }
-        const row = { group_id: g.id, week_start: ws, loser_id: loserId, forfeit: slices[slice], slice, slices, spun_by: player.id };
-        const { data, error } = await db.from("forfeit_spins").insert(row).select("week_start,loser_id,forfeit,slice,slices,spun_at").single();
-        if (error) {
-          // Two people spun at once: return whichever landed first.
-          const { data: first } = await db.from("forfeit_spins").select("week_start,loser_id,forfeit,slice,slices,spun_at").eq("group_id", g.id).eq("week_start", ws).maybeSingle();
-          if (first) return json({ ok: true, spin: first, already: true });
-          throw error;
-        }
-        return json({ ok: true, spin: data });
-      }
-
-      // Tonight's hunt. {start:true} registers the run (so a reload can't buy a retry); the second call
-      // finishes it. Caps keep a tampered client honest: a run can't outscore what today's steps allow.
-      case "hunt": {
-        const player = await playerByToken(body.token);
-        if (!player) return fail("Unknown token", 401);
-        const now = new Date();
-        const day = localDate(now, player.tz);
-        const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: player.tz, hour: "2-digit", hour12: false }).format(now));
-        const { data: run } = await db.from("hunts").select("seconds,created_at").eq("player_id", player.id).eq("day", day).maybeSingle();
-        const { data: st } = await db.from("daily_steps").select("steps").eq("player_id", player.id).eq("day", day).maybeSingle();
-        const minutes = Math.min(15, Math.max(2, (st?.steps ?? 0) / 1000));
-        if (body.start === true) {
-          if (hour < HUNT_OPEN_HOUR) return fail(`The hunt opens at ${HUNT_OPEN_HOUR}:00`);
-          if (run) return fail("You've already hunted tonight");
-          const { error } = await db.from("hunts").insert({ player_id: player.id, day, score: 0, kills: 0, wave: 0, seconds: 0 });
-          if (error) return fail("You've already hunted tonight");
-          return json({ ok: true, minutes });
-        }
-        if (!run) return fail("Start the hunt first");
-        if (run.seconds > 0) return fail("You've already hunted tonight");
-        if (Date.now() - Date.parse(run.created_at) > (minutes * 60 + 300) * 1000) return fail("That run timed out");
-        const cap = Math.round(minutes * 60 * 60);
-        const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
-        const score = n(body.score, cap);
-        const row = {
-          score, kills: n(body.kills, Math.round(minutes * 150)), wave: n(body.wave, 200),
-          seconds: Math.max(1, n(body.seconds, Math.round(minutes * 60) + 30)),
-          survived: body.survived === true, boss_dmg: Math.floor(score / 20),
-        };
-        const { error } = await db.from("hunts").update(row).eq("player_id", player.id).eq("day", day).eq("seconds", 0);
-        if (error) throw error;
-        return json({ ok: true, hunt: row });
-      }
-
       case "me": {
         const player = await playerByToken(body.token);
         if (!player) return fail("Unknown token", 401);
@@ -571,48 +477,16 @@ Deno.serve(async (req) => {
         return json({ ok: true, player: data, groups: await playerGroups(player.id) });
       }
 
-      case "admin": {
-        const g = await adminGroup(body);
-        if (!g) return fail("Wrong admin key", 403);
-        const s = body.settings ?? {};
-        const patch: Record<string, unknown> = {};
-        if (clip(s.name, 40)) patch.name = clip(s.name, 40);
-        if (s.daily_goal) patch.daily_goal = clampGoal(s.daily_goal);
-        if (typeof s.forfeit === "string") patch.forfeit = clip(s.forfeit, 120);
-        if (clip(s.challenge_name, 60)) patch.challenge_name = clip(s.challenge_name, 60);
-        if (s.challenge_km) patch.challenge_km = Math.min(100000, Math.max(1, Number(s.challenge_km) || 460));
-        if (Array.isArray(s.teams)) patch.teams = s.teams.map((t: unknown) => clip(t, 24)).filter(Boolean).slice(0, 8);
-        if (Array.isArray(s.forfeits)) patch.forfeits = [...new Set(s.forfeits.map((t: unknown) => clip(t, 60)).filter(Boolean))].slice(0, 12);
-        for (const k of ["shortcut_url", "scroll_shortcut_url"]) {
-          if (typeof s[k] === "string") patch[k] = /^https:\/\/www\.icloud\.com\/shortcuts\//.test(s[k]) ? s[k] : null;
-        }
-        const { data, error } = await db.from("groups").update(patch).eq("id", g.id).select().single();
-        if (error) throw error;
-        return json({ ok: true, group: publicGroup(data) });
-      }
-
-      case "admin_members": {
-        const g = await adminGroup(body);
-        if (!g) return fail("Wrong admin key", 403);
-        const { data } = await db.from("memberships").select("joined_at, players(id,name,emoji,token,steps_synced_at)").eq("group_id", g.id).order("joined_at");
-        return json({ ok: true, members: (data ?? []).map((m: any) => m.players) });
-      }
-
-      case "admin_remove": {
-        const g = await adminGroup(body);
-        if (!g) return fail("Wrong admin key", 403);
-        await db.from("memberships").delete().eq("player_id", body.player_id).eq("group_id", g.id);
-        return json({ ok: true });
-      }
-
       case "owner": {
         if (!(await isOwner(body.key))) return fail("Wrong owner key", 403);
         if (body.op !== "list" && (typeof body.id !== "string" || !/^[0-9a-f-]{36}$/.test(body.id))) return fail("Bad player id");
         return await ownerAction(String(body.op ?? ""), body);
       }
 
-      default:
-        return fail("Unknown endpoint", 404);
+      default: {
+        const res = action ? await gameRoute(action, body, { db, json, fail, playerByToken }) : null;
+        return res ?? fail("Unknown endpoint", 404);
+      }
     }
   } catch (e) {
     console.error(e);
