@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.text.format.DateUtils
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
@@ -16,7 +17,7 @@ class MainActivity : ComponentActivity() {
     private var syncing = false
     private var lastError: String? = null
 
-    private val askPermission = registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+    private val askPermission: ActivityResultLauncher<Set<String>> = registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted: Set<String> ->
         if (StepSync.STEPS in granted) { StepSync.schedule(this); syncNow() } else render()
     }
 
@@ -57,7 +58,11 @@ class MainActivity : ComponentActivity() {
 
     private fun openEffort() = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(StepSync.APP_URL)))
 
-    private fun render() = lifecycleScope.launch {
+    private fun render() {
+        lifecycleScope.launch { show() }
+    }
+
+    private suspend fun show() {
         val c = this@MainActivity
         val status = HealthConnectClient.getSdkStatus(c)
         val view = when {
