@@ -4,36 +4,38 @@
 // drawing (palette, body, pattern, ears, eyes, mouth, hat, gear, chest badge) and the free-text word seeds the
 // fine details (proportions, tilt, spot placement, wobble), so two people only match if they answer identically.
 
+// Quick questions about you. The ids and answer values are what draw your walker, set your stats
+// (game.js) and get saved, so they stay fixed; only the wording here is free to change.
 const QUESTIONS = [
   { id: "name", type: "intro" },
-  { id: "time", q: "When are you least insufferable?", type: "choice", options: [
-    ["dawn", "Before anyone else is up", "🌅"], ["noon", "After I've eaten", "🍽️"], ["golden", "Golden hour, for the photos", "🌇"], ["night", "3am, achieving nothing", "🌙"]] },
-  { id: "pace", q: "Walking pace. Be honest.", type: "choice", options: [
-    ["amble", "Nowhere to be, ever", "🐌"], ["stroll", "Aggressively average", "🚶"], ["march", "Late for court", "⏱️"],
-    ["strut", "Like there's a camera on me", "🕶️"], ["wander", "No idea where I'm going", "🧭"], ["dash", "Away from my problems", "💨"]] },
-  { id: "land", q: "Where do you go to disappear?", type: "choice", options: [
-    ["mountains", "Up a mountain, no signal", "⛰️"], ["coast", "The sea, to stare at it", "🌊"], ["forest", "The woods. Don't follow me", "🌲"],
-    ["city", "A city at 2am", "🏙️"], ["desert", "Somewhere hot and empty", "🏜️"], ["tundra", "Somewhere cold enough to feel something", "🧊"]] },
-  { id: "carry", q: "What's on you at all times?", type: "choice", options: [
-    ["backpack", "A bag of stuff I never use", "🎒"], ["umbrella", "An umbrella. Trust issues", "☂️"], ["camera", "A camera, for the content", "📷"],
-    ["headphones", "Headphones, so nobody talks to me", "🎧"], ["book", "A book I'm not reading", "📖"], ["stick", "A stick. Found it, kept it", "🪵"], ["none", "Just my phone, sadly", "📱"]] },
-  { id: "creature", q: "Pick your familiar", type: "choice", options: [
-    ["fox", "Fox. Shady", "🦊"], ["owl", "Owl. Up too late", "🦉"], ["frog", "Frog. Unbothered", "🐸"], ["cat", "Cat. Doesn't care", "🐈"],
-    ["crow", "Crow. Holds grudges", "🐦‍⬛"], ["snail", "Snail. Gets there eventually", "🐌"], ["bear", "Bear. Hibernates", "🐻"], ["moth", "Moth. Drawn to screens", "🦋"]] },
-  { id: "morning", q: "First thing you do when you wake up?", type: "choice", options: [
-    ["coffee", "Caffeine, then personality", "☕"], ["out", "Out the door, no thoughts", "🚪"], ["snooze", "Snooze until it's a problem", "😴"],
-    ["music", "Music, too loud", "🔊"], ["stretch", "Stretch like a cat", "🧘"], ["scroll", "Check my phone. Obviously", "📱"]] },
-  { id: "laugh", q: "Your laugh, described by your friends", type: "choice", options: [
-    ["giggle", "Polite. Suspicious", "🤭"], ["snort", "A snort, then shame", "🐷"], ["cackle", "Villain origin story", "🦹"],
-    ["silent", "Silent, shaking, crying", "🫨"], ["boom", "The whole room hears it", "📣"], ["wheeze", "Wheezing, needs help", "😮‍💨"]] },
-  { id: "hat", q: "Pick a hat. It says a lot.", type: "choice", options: [
-    ["beanie", "Beanie, indoors", "🧶"], ["cap", "Cap, backwards", "🧢"], ["bucket", "Bucket hat, festival scars", "🎣"], ["flowers", "Flower crown, unironically", "🌼"],
-    ["wizard", "Wizard hat. Don't ask", "🔮"], ["band", "Sweatband, never sweats", "🎾"], ["none", "No hat. The hair is the personality", "💇"]] },
-  { id: "hue", q: "The colour you own way too much of", type: "hue" },
-  { id: "month", q: "Birth month. For the astrology people.", type: "choice", compact: true, options:
+  { id: "time", q: "Pick a dessert", type: "choice", options: [
+    ["dawn", "Fruit salad", "🍓"], ["noon", "Sticky toffee pudding", "🍮"], ["golden", "Doughnuts", "🍩"], ["night", "Tiramisu", "☕"]] },
+  { id: "pace", q: "Pick a takeaway", type: "choice", options: [
+    ["amble", "Chippy", "🍟"], ["stroll", "Pizza", "🍕"], ["march", "Burger", "🍔"],
+    ["strut", "Sushi", "🍣"], ["wander", "Thai", "🍜"], ["dash", "3am kebab", "🌯"]] },
+  { id: "land", q: "Dream holiday?", type: "choice", options: [
+    ["mountains", "Ski trip", "⛷️"], ["coast", "Beach, do nothing", "🏖️"], ["forest", "Cabin in the woods", "🌲"],
+    ["city", "City break", "🏙️"], ["desert", "Somewhere 40°C", "🏜️"], ["tundra", "Northern Lights", "🌌"]] },
+  { id: "carry", q: "Never leave the house without…", type: "choice", options: [
+    ["backpack", "My bag", "🎒"], ["umbrella", "An umbrella", "☂️"], ["camera", "A camera", "📷"],
+    ["headphones", "Headphones", "🎧"], ["book", "A book", "📖"], ["stick", "A walking stick", "🪵"], ["none", "Just my phone", "📱"]] },
+  { id: "creature", q: "Pick a pet", type: "choice", options: [
+    ["fox", "Fox", "🦊"], ["owl", "Owl", "🦉"], ["frog", "Frog", "🐸"], ["cat", "Cat", "🐈"],
+    ["crow", "Crow", "🐦‍⬛"], ["snail", "Snail", "🐌"], ["bear", "Bear", "🐻"], ["moth", "Moth", "🦋"]] },
+  { id: "morning", q: "First thing in the morning?", type: "choice", options: [
+    ["coffee", "Coffee", "☕"], ["out", "Gym", "🏋️"], ["snooze", "Snooze", "😴"],
+    ["music", "Music on", "🔊"], ["stretch", "Stretch", "🧘"], ["scroll", "Phone", "📱"]] },
+  { id: "laugh", q: "You have to get rid of one. Who goes?", type: "choice", options: [
+    ["giggle", "The Duolingo owl", "🦉"], ["snort", "Peppa Pig", "🐷"], ["cackle", "Clippy", "📎"],
+    ["silent", "Mr Blobby", "🎈"], ["boom", "Barney", "🦖"], ["wheeze", "Crazy Frog", "🐸"]] },
+  { id: "hat", q: "Pick a hat", type: "choice", options: [
+    ["beanie", "Beanie", "🧶"], ["cap", "Cap", "🧢"], ["bucket", "Bucket hat", "🎣"], ["flowers", "Flower crown", "🌼"],
+    ["wizard", "Wizard hat", "🔮"], ["band", "Sweatband", "🎾"], ["none", "No hat", "💇"]] },
+  { id: "hue", q: "Favourite colour?", type: "hue" },
+  { id: "month", q: "Birthday month?", type: "choice", compact: true, options:
     ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map((m, i) => [String(i), m, ""]) },
-  { id: "number", q: "Number between 1 and 99. Don't overthink it.", type: "number", min: 1, max: 99 },
-  { id: "word", q: "One word for your gravestone", type: "text", placeholder: "unbothered, snacks, why…" },
+  { id: "number", q: "Favourite number?", type: "number", min: 1, max: 99 },
+  { id: "word", q: "You in one word", type: "text", placeholder: "chaotic, hungry, tired…" },
 ];
 
 // ---------- seeded randomness ----------

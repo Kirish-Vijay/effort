@@ -711,7 +711,7 @@ function viewQuiz() {
         <div class="seg">${[["ios", "iPhone"], ["android", "Android"], ["other", "Other"]].map(([v, l]) => `<button type="button" data-platform="${v}" aria-pressed="${v === S.platform}">${l}</button>`).join("")}</div>
         <button class="btn gold block" style="margin-top:16px">Build my walker ${ic("arrowRight")}</button>
       </form>
-      <p class="small faint" style="text-align:center">12 questions. Your answers make your walker, your stats and your class.</p></section>`;
+      <p class="small faint" style="text-align:center">12 quick ones. They decide your look, your stats and your class.</p></section>`;
     return;
   }
   if (q.type === "choice") body = `<div class="opts ${q.compact ? "compact" : ""}">${q.options.map(([v, l, e]) => `<button class="opt" data-answer="${esc(v)}" aria-pressed="${String(a[q.id]) === v}">${e ? `<span class="e">${e}</span>` : ""}<span>${esc(l)}</span></button>`).join("")}</div>`;
