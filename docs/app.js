@@ -1082,7 +1082,13 @@ async function finishQuiz() {
     return;
   }
   const body = { name, character, platform: S.platform, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
-  const r = S.invite ? await call("join", { ...body, code: S.invite.code }) : await call("signup", body);
+  let r;
+  try { r = S.invite ? await call("join", { ...body, code: S.invite.code }) : await call("signup", body); }
+  catch (e) {
+    // Someone took the name while they were doing the quiz: back to the name, answers kept.
+    if (await nameTaken(name)) { S.view = "quiz"; S.qi = 0; render(); scrollTo(0, 0); throw new Error(`Someone just took the name ${name}. Pick another`); }
+    throw e;
+  }
   saveToken(r.player.token);
   store.del("draftAnswers");
   await load();
@@ -1096,6 +1102,10 @@ function quizAdvance() {
   store.set("draftAnswers", S.answers);
   if (S.qi < QUESTIONS.length - 1) { S.qi++; render(); scrollTo(0, 0); }
   else { S.view = "reveal"; render(); scrollTo(0, 0); }
+}
+// Names are unique across the whole game, ignoring case, spaces and punctuation (the database enforces it).
+async function nameTaken(name) {
+  try { const { data } = await realtime().rpc("name_taken", { p_name: name }); return data === true; } catch { return false; }
 }
 async function lookupInvite(code) {
   const b = await call("board", null, `?code=${encodeURIComponent(code.trim().toUpperCase())}`);
@@ -1768,7 +1778,13 @@ document.addEventListener("submit", async (e) => {
       paintTrivia();
       break;
     }
-    case "quiz-intro": S.answers.name = String(data.name || "").trim(); if (S.answers.name) quizAdvance(); break;
+    case "quiz-intro": {
+      const name = String(data.name || "").trim();
+      if (!name) break;
+      S.answers.name = name;
+      if (await nameTaken(name)) { toast(`Someone's already called ${name}. Pick something else`); f.querySelector("[name=name]")?.select(); break; }
+      quizAdvance(); break;
+    }
     case "quiz-value": {
       const q = QUESTIONS[S.qi];
       S.answers[q.id] = q.type === "number" ? Math.max(1, Math.min(99, Number(data.v) || 1)) : String(data.v).trim();
