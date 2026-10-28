@@ -23,6 +23,8 @@ function androidApp(t) {
 // if it isn't installed yet.
 // Both live on the site itself: the newest build, and app-version.json saying which build that is.
 const SITE = "https://effort-game.vercel.app/";
+// Kirish: the only player who sees The Lab.
+const OWNER_ID = "ff9cc9b5-b51a-4643-a779-63ed178862f9";
 const STEPS_APK = SITE + "effort-steps.apk";
 const stepsAppLink = (token) => `intent://connect?t=${token}#Intent;scheme=effort;package=io.github.kirishvijay.effort;S.browser_fallback_url=${encodeURIComponent(STEPS_APK)};end`;
 // Inside the Android app the game can ask for steps, usage access and reminders itself (android/MainActivity.kt).
@@ -677,7 +679,7 @@ function tabMe() {
       <label class="row spread" style="margin-bottom:12px"><span><b>Sound</b></span><input class="switch" type="checkbox" data-toggle="sound" ${FX.muted ? "" : "checked"} aria-label="Sound"></label>
       <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Switch off on older phones</span></span><input class="switch" type="checkbox" data-toggle="3d" ${store.get("no3d") ? "" : "checked"} aria-label="3D battles"></label>
       <p class="small muted" style="margin:0 0 8px">Your restore link also signs you in on another phone. Keep it private: it's your account.</p>
-      <div class="btn-row"><button class="btn sm" data-act="copy-restore">${ic("copy")} Copy restore link</button><a class="btn sm" href="lab.html">${ic("sliders")} The Lab</a></div>
+      <div class="btn-row"><button class="btn sm" data-act="copy-restore">${ic("copy")} Copy restore link</button>${me().id === OWNER_ID ? `<a class="btn sm" href="lab.html">${ic("sliders")} The Lab</a>` : ""}</div>
       <button class="btn xs red" style="margin-top:10px" data-act="signout">${ic("door")} Sign out on this phone</button>
     </section>`;
 }

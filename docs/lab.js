@@ -958,5 +958,15 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#sheet").hidden) $("#sheet").hidden = true; });
 
-render();
+// The Lab is the owner's: check who this phone is signed in as before opening it.
+const OWNER_ID = "ff9cc9b5-b51a-4643-a779-63ed178862f9";
+(async () => {
+  let ok = false;
+  try {
+    const t = JSON.parse(localStorage.getItem("ef_token"));
+    if (t) ok = (await (await fetch(`${API}/game`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: t }) })).json())?.me?.id === OWNER_ID;
+  } catch { /* not signed in, or offline */ }
+  if (ok) return render();
+  $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><p class="muted">The Lab is only open to the game's owner.</p><a class="btn gold" href="./">Back to the game</a></div>`;
+})();
 })();
