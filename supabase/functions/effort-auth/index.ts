@@ -7,7 +7,8 @@
 //   POST /signin {code, id, password}              → token
 //   POST /set_password {token, password}
 //   POST /status {token}                           which sign-in methods the account has
-//   POST /link_email {token, access_token}         save the email a Supabase Auth code just proved
+//   POST /email_ticket {token, email}              → ticket for the email's link, in case it opens in another browser
+//   POST /link_email {token | ticket, access_token} save the email a Supabase Auth code (or link) just proved
 //   POST /email_signin {access_token}              → token, for whoever's email it is
 //   POST /passkey_register_options {token}  /passkey_register {token, challenge_id, response, device}
 //   POST /passkey_login_options             /passkey_login {challenge_id, response} → token
@@ -73,16 +74,18 @@ async function verifiedEmail(accessToken: unknown) {
   if (error || !data.user?.email || !data.user.email_confirmed_at) return null;
   return data.user.email.toLowerCase();
 }
+// Passkey challenges last 5 minutes; an email link's ticket lasts as long as the email's code (an hour).
+const lifetime = (kind: string) => (kind === "email" ? 60 : 5) * 60000;
 async function newChallenge(kind: string, challenge: string, playerId: string | null) {
-  await db.from("auth_challenges").delete().lt("created_at", new Date(Date.now() - 5 * 60000).toISOString());
+  await db.from("auth_challenges").delete().lt("created_at", new Date(Date.now() - lifetime("email")).toISOString());
   const { data, error } = await db.from("auth_challenges").insert({ kind, challenge, player_id: playerId }).select("id").single();
   if (error) throw error;
   return data.id as string;
 }
-// Each challenge works once, for 5 minutes.
+// Each challenge works once.
 async function takeChallenge(id: unknown, kind: string) {
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/.test(id)) return null;
-  const { data } = await db.from("auth_challenges").delete().eq("id", id).eq("kind", kind).gt("created_at", new Date(Date.now() - 5 * 60000).toISOString()).select().maybeSingle();
+  const { data } = await db.from("auth_challenges").delete().eq("id", id).eq("kind", kind).gt("created_at", new Date(Date.now() - lifetime(kind)).toISOString()).select().maybeSingle();
   return data;
 }
 
@@ -142,10 +145,26 @@ Deno.serve(async (req) => {
         return json({ ok: true, has_password: !!p.password_hash, email: p.email ? maskEmail(p.email) : null, passkeys: count ?? 0 });
       }
 
-      case "link_email": {
+      case "email_ticket": {
         const p = await playerByToken(body.token);
         if (!p) return fail("Unknown token", 401);
+        const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail("That doesn't look like an email");
+        return json({ ok: true, ticket: await newChallenge("email", email, p.id) });
+      }
+
+      case "link_email": {
+        // From the game (token), or from the email's link opened in some other browser (ticket: whoever asked
+        // for the email, and only for that email address).
         const email = await verifiedEmail(body.access_token);
+        let p = null;
+        if (body.ticket) {
+          const t = await takeChallenge(body.ticket, "email");
+          if (!t || !email || t.challenge !== email) return fail("That link has expired. Ask for a new code in Effort");
+          const { data } = await db.from("players").select("id,name,token,password_hash,email").eq("id", t.player_id).maybeSingle();
+          p = data;
+        } else p = await playerByToken(body.token);
+        if (!p) return fail("Unknown token", 401);
         if (!email) return fail("That code didn't check out. Ask for a new one");
         const { data: other } = await db.from("players").select("id").ilike("email", email).neq("id", p.id).maybeSingle();
         if (other) return fail("That email is already on another Effort account");

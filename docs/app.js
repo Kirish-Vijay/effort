@@ -834,8 +834,10 @@ async function checkAuth() {
   if (!S.token) return;
   try {
     const r = await callAuth("status", { token: S.token });
-    const was = JSON.stringify(S.auth);
+    const was = JSON.stringify(S.auth), gotEmail = r.email && !S.auth?.email;
     S.auth = { has_password: r.has_password, email: r.email, passkeys: r.passkeys };
+    // Added by tapping the email's link in another browser: close the "type the code" sheet here.
+    if (gotEmail && $("#sheet [data-form^=email]")) { closeSheet(); toast(`Email added: ${r.email}`); }
     if (was !== JSON.stringify(S.auth) && ["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
   } catch { /* try again next time */ }
 }
@@ -884,7 +886,9 @@ async function passkeySignin() {
 // Email: Supabase Auth sends a 6-digit code; entering it proves the email, and the server takes it from there.
 async function sendEmailCode(email, forSignin) {
   // The email should carry a 6-digit code; if it carries a link instead, the link comes back here (see boot).
-  const { error } = await realtime().auth.signInWithOtp({ email, options: { shouldCreateUser: !forSignin, emailRedirectTo: APP_URL } });
+  // Adding an email, the link carries a one-use ticket too, because it often opens in Chrome rather than the app.
+  const back = forSignin ? APP_URL : `${APP_URL}?eticket=${(await callAuth("email_ticket", { token: S.token, email })).ticket}`;
+  const { error } = await realtime().auth.signInWithOtp({ email, options: { shouldCreateUser: !forSignin, emailRedirectTo: back } });
   if (error) throw new Error(/signups not allowed|not found|not allowed for otp/i.test(error.message) ? "No Effort account has that email" : error.message);
 }
 async function checkEmailCode(email, code) {
@@ -896,7 +900,7 @@ function emailSheet(email) {
   openSheet(`${sheetHead(S.auth?.email ? "Change your email" : "Add your email")}
     ${!email ? `<p class="small muted" style="margin:-4px 0 12px">We'll send a 6-digit code to check it's yours. If you ever forget your password or lose your phone, a code to this email gets you back in.</p>
       <form data-form="email-send" data-mode="link"><input type="email" name="email" required autocomplete="email" placeholder="you@example.com"><button class="btn green block" style="margin-top:12px">${ic("mail")} Send code</button></form>`
-    : `<p class="small muted" style="margin:-4px 0 12px">Type the code we sent to <b>${esc(email)}</b>. It can take a minute, and might be in spam.</p>
+    : `<p class="small muted" style="margin:-4px 0 12px">Type the code we sent to <b>${esc(email)}</b>, or tap the link in it. It can take a minute, and might be in spam.</p>
       <form data-form="email-verify" data-mode="link" data-email="${esc(email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="123456" class="code"><button class="btn green block" style="margin-top:12px">Confirm</button></form>
       <button class="btn xs" style="margin-top:10px" data-act="email-again">Use a different email</button>`}`);
   setTimeout(() => $("#sheet input")?.focus(), 50);
@@ -1891,7 +1895,7 @@ document.addEventListener("visibilitychange", () => {
     if (document.hidden) { v.ch.untrack(); v.host = false; }
     else { v.joinedAt = now(); v.ch.track({ at: v.joinedAt }); }
   }
-  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); checkAppUpdate(); }
+  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); checkAppUpdate(); if (!S.auth?.email) checkAuth(); }
 });
 
 // ---------- updates ----------
@@ -1918,12 +1922,25 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
   const params = new URLSearchParams(location.search);
   const restore = params.get("me"), inviteCode = params.get("g");
   // Back from an email link rather than a code: #access_token=… proves the email, same as a code does.
-  const hash = new URLSearchParams(location.hash.slice(1)), emailAccess = hash.get("access_token");
-  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  const hash = new URLSearchParams(location.hash.slice(1)), emailAccess = hash.get("access_token"), ticket = params.get("eticket");
+  if (location.hash || ticket) { params.delete("eticket"); history.replaceState(null, "", location.pathname + (String(params) ? `?${params}` : "")); }
   if (hash.get("error_description")) toast(`That email link didn't work (${hash.get("error_description")}). Use the 6-digit code instead`);
-  if (emailAccess && !S.token) {
-    try { return await signedIn((await callAuth("email_signin", { access_token: emailAccess })).token); }
-    catch (e) { toast(e.message); }
+  const emailPage = (title, sub, extra = "") => { $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><h2 class="ol-sm disp" style="margin:0">${title}</h2><p class="muted" style="margin:0;max-width:300px">${sub}</p>${extra}</div>`; };
+  if (emailAccess && ticket) {
+    // Adding an email: the ticket says whose account, so this works in any browser.
+    try {
+      const r = await callAuth("link_email", { ticket, access_token: emailAccess });
+      if (!S.token) return emailPage("Email added", `${esc(r.email)} is on your account. Go back to Effort; you can close this tab.`);
+      toast(`Email added: ${r.email}`);
+    } catch (e) { if (!S.token) return emailPage("That link didn't work", esc(e.message)); toast(e.message); }
+  } else if (emailAccess && !S.token) {
+    // Signing in. On Android in Chrome, hand the account to the Effort app if they have it.
+    try {
+      const r = await callAuth("email_signin", { access_token: emailAccess });
+      if (/Android/i.test(navigator.userAgent) && !NATIVE) return emailPage(`Found you, ${esc(r.name)}`, "Play in the Effort app? Tap below to sign in there.",
+        `<a class="btn gold block" href="${stepsAppLink(r.token)}">${ic("arrowRight")} Open the Effort app</a><a class="btn xs" href="${APP_URL}?me=${r.token}">Play here in Chrome instead</a>`);
+      return await signedIn(r.token);
+    } catch (e) { toast(e.message); }
   }
   if (restore && restore !== S.token) { S.token = restore; store.set("token", restore); }
   if (S.token) {
@@ -1936,7 +1953,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
     S.view = "main"; render();
     refreshPush(); keepPushAlive(); checkAppUpdate();
-    if (emailAccess) {
+    if (emailAccess && !ticket) {
       try { const r = await callAuth("link_email", { token: S.token, access_token: emailAccess }); toast(`Email added: ${r.email}`); }
       catch (e) { toast(e.message); }
     }
