@@ -384,6 +384,7 @@ function weekPanel() {
             <small class="pw ${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} raid power</small></span>
           <span class="ws"><span><b class="num">${fmt(today(r.id))}</b><small>today</small></span><span><b class="num">${fmt(r.weekSteps)}</b><small>week</small></span></span>
         </button>`).join("")}</div>
+      <button class="invite-row" data-act="invite">${ic("share")}<span class="grow">Invite to ${esc(squad().name)}</span><span class="small muted">Code</span><b class="code-chip">${squad().code}</b></button>
       <p class="tiny faint" style="margin:10px 0 0">Tap anyone to see their walker and stats. Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
     </section>`;
 }
