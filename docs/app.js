@@ -54,7 +54,7 @@ async function checkAppUpdate() {
   const show = latest > mine && Date.now() - (store.get("appUpdateLater") || 0) > 86400000;
   if (show === !!S.appUpdate) return;
   S.appUpdate = show;
-  if (S.view === "main" && $("#sheet").hidden) render();
+  softRender();
 }
 const updateBanner = () => !S.appUpdate ? "" : `<section class="panel update">
     <div class="row"><span class="ic-badge">${ic("upgrade")}</span><div class="grow"><b class="disp">New version of the app</b><span class="small muted" style="display:block">Install it over this one. Your account and progress stay.</span></div></div>
@@ -169,7 +169,7 @@ window.onEffortNative = (st) => {
   const synced = st.syncedAt && st.syncedAt !== S.native?.syncedAt;
   S.native = st;
   if (!$("#sheet").hidden && S.sheetKind) setupSheet(S.sheetKind);
-  else if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+  else softRender();
   if (synced && S.view === "main") refresh(true);
 };
 // The Android back button: close a sheet, step back through the quiz, or go back to Today; otherwise leave the app.
@@ -197,7 +197,7 @@ async function load() {
   return D;
 }
 async function refresh(silent) {
-  try { await load(); if (S.view === "main" && $("#sheet").hidden) render(); }
+  try { await load(); softRender(); }
   catch (e) {
     if (/Unknown token/.test(e.message)) return signOut("That account doesn't exist any more");
     if (!silent) toast(e.message);
@@ -292,7 +292,7 @@ async function refreshPush() {
   const st = await pushState();
   if (st === S.push) return;
   S.push = st;
-  if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+  softRender();
 }
 const b64ToBytes = (b64) => { const s = atob((b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(s, (c) => c.charCodeAt(0)); };
 async function enablePush() {
@@ -336,6 +336,31 @@ function pushBlock() {
 }
 
 // ---------- shell ----------
+// Swap in new markup, keeping every element whose markup hasn't changed (so pictures don't re-render and
+// nothing flickers). depth: how many levels down to look for unchanged pieces inside a changed one.
+// Remember each element's markup as drawn (before pictures fill in), a few levels down.
+function stamp(node, depth) { node._src = node.outerHTML; if (depth > 0) for (const c of node.children) stamp(c, depth - 1); }
+function morph(el, html, depth) {
+  const t = document.createElement("template"); t.innerHTML = html;
+  const next = [...t.content.children], prev = [...el.children];
+  next.forEach((n, i) => {
+    const src = n.outerHTML, old = prev[i];
+    if (old && old._src === src) return;
+    if (old && depth > 0 && old.tagName === n.tagName && old.className === n.className && old.getAttribute("style") === n.getAttribute("style") && old.children.length && n.children.length) {
+      for (const a of n.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
+      for (const a of [...old.attributes]) if (!n.hasAttribute(a.name)) old.removeAttribute(a.name);
+      morph(old, n.innerHTML, depth - 1);
+      old._src = src;
+      return;
+    }
+    stamp(n, depth);
+    if (old) old.replaceWith(n); else el.appendChild(n);
+  });
+  for (const extra of prev.slice(next.length)) extra.remove();
+}
+// Things that happen in the background (steps syncing, sign-in checks, notifications, app updates) redraw the
+// main screens only, never a fight, and never under an open sheet.
+const softRender = () => { if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render(); };
 function render() {
   const views = { boot: viewBoot, welcome: viewWelcome, signin: viewSignin, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, tax: renderTax, raid: renderRaid, result: renderResult };
   (views[S.view] || viewBoot)();
@@ -347,7 +372,7 @@ function viewMain() {
   const D = S.D, p = G.levelProgress(D.xp), cls = myClass();
   const tabs = { today: tabToday, raid: tabRaid, shop: tabShop, me: tabMe };
   if (!tabs[S.tab]) S.tab = "today";
-  $("#app").innerHTML = `
+  const html = `
     <header class="header">
       <button class="avatar" data-tab="me" aria-label="Your profile">${face(me().id)}</button>
       <div class="who"><div class="nm"><b>${esc(me().name)}</b><span class="lvl" title="Level">Lv ${p.lvl}</span></div><div class="cls">${esc(cls.name)} · <span class="faint">${fmt(p.into)}/${fmt(p.need)} XP</span></div><div class="xp"><i style="width:${p.pct * 100}%"></i></div></div>
@@ -356,6 +381,10 @@ function viewMain() {
     <div class="stack">${tabs[S.tab]()}</div>
     <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
       `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${ic(i)}${l}${dockDot(k)}</button>`).join("")}</div></nav>`;
+  // Already on the main screens: change only what's different. Coming from anywhere else: draw it fresh.
+  const app = $("#app");
+  if (app.firstElementChild?.matches("header.header")) morph(app, html, 3);
+  else { app.innerHTML = html; for (const c of app.children) stamp(c, 3); }
 }
 function walletHtml() {
   const w = S.D.wallet;
@@ -909,7 +938,7 @@ async function checkAuth() {
     S.auth = { has_password: r.has_password, email: r.email, passkeys: r.passkeys };
     // Added by tapping the email's link in another browser: close the "type the code" sheet here.
     if (gotEmail && $("#sheet [data-form^=email]")) { closeSheet(); toast(`Email added: ${r.email}`); }
-    if (was !== JSON.stringify(S.auth) && ["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+    if (was !== JSON.stringify(S.auth)) softRender();
     promptAccount();
   } catch { /* try again next time */ }
 }
@@ -2030,6 +2059,7 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
 // A phone that's locked or switched away stops running the fight, so it hands over hosting until it's back.
 document.addEventListener("visibilitychange", () => {
+  if (document.hidden && updateSafe()) { location.reload(); return; }
   const v = V.raid;
   if (v?.ch) {
     if (document.hidden) { v.ch.untrack(); v.host = false; }
@@ -2041,7 +2071,10 @@ document.addEventListener("visibilitychange", () => {
 // ---------- updates ----------
 // Every deploy changes app.js's ETag. Home-screen apps can sit open for days, so check when the app comes
 // back to the front and every few minutes, and reload into the new version when nothing's in progress.
-let releaseTag = null;
+let releaseTag = null, updateReady = false;
+// A new version is on the site: load it the next time the game goes into the background (switching apps,
+// locking the phone), so it never reloads in front of you. Never during a fight or with a sheet open.
+const updateSafe = () => updateReady && ["main", "welcome"].includes(S.view) && !V.tax && !V.raid && $("#sheet").hidden;
 async function checkForUpdate() {
   if (location.protocol !== "https:") return;
   try {
@@ -2049,7 +2082,7 @@ async function checkForUpdate() {
     const tag = res.headers.get("etag") || res.headers.get("last-modified");
     if (!tag) return;
     if (!releaseTag) { releaseTag = tag; return; }
-    if (tag !== releaseTag && ["main", "welcome"].includes(S.view) && $("#sheet").hidden) location.reload();
+    if (tag !== releaseTag) updateReady = true;
   } catch { /* offline: try again later */ }
 }
 setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
