@@ -213,6 +213,7 @@ function signOut(msg) {
     const token = S.token;
     currentSub().then((sub) => sub && callPush("unsubscribe", { token, endpoint: sub.endpoint })).catch(() => {});
   }
+  if (S.D?.me) store.set("lastUser", { id: S.D.me.id, name: S.D.me.name, code: S.D.squad?.code || null, character: S.D.me.character || null });
   store.del("token"); store.del("pushSynced");
   nat("setToken", "");
   Object.assign(S, { token: null, D: null, view: "welcome" });
@@ -669,9 +670,10 @@ function tabMe() {
       <div class="ptitle"><span class="ic-badge green">${ic("lock")}</span><h2 class="ol-sm">Signing in</h2>${needsAccount() ? `<span class="side chip red">Needs ${S.auth.email ? "a password" : S.auth.has_password ? "an email" : "email + password"}</span>` : ""}</div>
       <p class="small muted" style="margin:-4px 0 12px">How you get back in on a new phone, or if you're ever signed out. Set up at least one.</p>
       <div class="meths">${signinMethods()}</div>
+      <button class="btn sm block" style="margin-top:12px" data-act="signout">${ic("door")} Sign out</button>
     </section>
     <section class="panel">
-      <div class="ptitle"><span class="ic-badge">${ic("link")}</span><h2 class="ol-sm">This phone</h2></div>
+      <div class="ptitle"><span class="ic-badge">${ic("link")}</span><h2 class="ol-sm">This phone</h2>${NATIVE ? `<span class="side chip">App ${esc(S.native?.version || "?")}</span>` : ""}</div>
       <label class="row spread" style="margin-bottom:12px"><span><b>Sound</b></span><input class="switch" type="checkbox" data-toggle="sound" ${FX.muted ? "" : "checked"} aria-label="Sound"></label>
       <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Switch off on older phones</span></span><input class="switch" type="checkbox" data-toggle="3d" ${store.get("no3d") ? "" : "checked"} aria-label="3D battles"></label>
       <p class="small muted" style="margin:0 0 8px">Your restore link also signs you in on another phone. Keep it private: it's your account.</p>
@@ -862,8 +864,10 @@ function viewSignin() {
     const x = st.people.find((p) => p.id === st.id);
     body = `<div class="walker-big has-fallback" style="height:180px;width:160px"><span class="fb">${Walker.svg(answersOf(x), { mood: "fresh" })}</span></div>
       <h1 class="ol disp ob-title" style="text-align:center">Hi, ${esc(x.name)}</h1>
-      ${x.has_password ? `<form class="panel" data-form="signin-password"><span class="field-label">Your password</span><input type="password" name="password" required autocomplete="current-password" placeholder="Password"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`
-        : `<div class="guide small">${esc(x.name)} hasn't set a password. Try <b>Fingerprint / Face ID</b> or <b>Email me a code</b> instead (back one step). If you set up none of them, ask Kirish for your restore link.</div>`}`;
+      ${st.quick && passkeysReady() ? `<button class="btn gold xl block" data-act="passkey-signin">${ic("fingerprint")} Fingerprint / Face ID</button>` : ""}
+      ${st.quick && !st.code ? `<div class="guide small">Not in a squad, so no password sign-in here. Use fingerprint, or go back for an email code.</div>` : x.has_password ? `<form class="panel" data-form="signin-password"><span class="field-label">Your password</span><input type="password" name="password" required autocomplete="current-password" placeholder="Password"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`
+        : `<div class="guide small">${esc(x.name)} hasn't set a password. Try <b>Fingerprint / Face ID</b> or <b>Email me a code</b> instead (back one step). If you set up none of them, ask Kirish for your restore link.</div>`}
+      ${st.quick ? `<button class="btn block" style="margin-top:12px" data-act="signin">${ic("mail")} Other ways to sign in</button>` : ""}`;
   }
   $("#app").innerHTML = `<section class="onboard">${head}${body}</section>`;
 }
@@ -892,6 +896,13 @@ async function checkAuth() {
 // Passkeys: in the Android app through Android's Credential Manager, elsewhere through the browser (WebAuthn).
 const passkeysReady = () => (NATIVE ? typeof NATIVE.passkey === "function" && (typeof NATIVE.passkeysAvailable !== "function" || NATIVE.passkeysAvailable())
   : !!(window.PublicKeyCredential && window.SimpleWebAuthnBrowser));
+const passkeyBlocker = () => {
+  if (passkeysReady()) return null;
+  if (NATIVE && typeof NATIVE.passkey !== "function") return { why: "Needs the newest Effort app", update: true };
+  if (NATIVE) return { why: "Needs Android 9 or newer" };
+  if (!window.PublicKeyCredential) return { why: "This browser can't. Try Chrome, or Safari on iPhone" };
+  return { why: "Couldn't load it. Check your connection and reopen Effort" };
+};
 const passkeyWaits = {};
 window.onEffortPasskey = (id, ok, out) => {
   const w = passkeyWaits[id]; delete passkeyWaits[id];
@@ -956,7 +967,10 @@ function emailSheet(email) {
 function signinMethods() {
   const a = S.auth || {};
   const row = (icon, title, sub, act, label, gold) => `<div class="meth"><span class="mic">${ic(icon)}</span><span class="grow"><b>${title}</b><small>${sub}</small></span><button class="btn xs ${gold ? "gold" : ""}" data-act="${act}">${label}</button></div>`;
-  return (passkeysReady() ? row("fingerprint", "Fingerprint / Face ID", a.passkeys ? `On${a.passkeys > 1 ? ` · ${a.passkeys} devices` : ""}. Works on a new phone with the same Google or Apple account` : "Sign in with a touch, even on a new phone", "passkey-add", a.passkeys ? "Add another" : "Add", !a.passkeys) : "")
+  const pk = passkeyBlocker();
+  const finger = !pk ? row("fingerprint", "Fingerprint / Face ID", a.passkeys ? `On${a.passkeys > 1 ? ` · ${a.passkeys} devices` : ""}. Works on a new phone with the same Google or Apple account` : "Sign in with a touch, even on a new phone", "passkey-add", a.passkeys ? "Add another" : "Add", !a.passkeys)
+    : `<div class="meth"><span class="mic">${ic("fingerprint")}</span><span class="grow"><b>Fingerprint / Face ID</b><small>${pk.why}</small></span>${pk.update ? `<a class="btn xs gold" href="${STEPS_APK}">Update</a>` : ""}</div>`;
+  return finger
     + row("mail", "Email", a.email ? `${esc(a.email)}. For when you forget everything` : "Get back in with a code if you forget everything", "email-add", a.email ? "Change" : "Add", !a.email)
     + row("lock", "Password", a.has_password ? "Set. Squad code, your name, then this" : "Squad code, your name, then a password", "password", a.has_password ? "Change" : "Set", false);
 }
@@ -1003,7 +1017,8 @@ function viewWelcome() {
     </section>
     <button class="btn gold xl block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Make my walker"}</button>
     ${inv ? "" : `<form data-form="code" class="row" style="margin-top:12px"><input type="text" name="code" placeholder="Got a squad code?" autocomplete="off" maxlength="6" class="grow code"><button class="btn blue sm">Join</button></form>`}
-    <button class="btn block" style="margin-top:12px" data-act="signin">${ic("user")} I already play: sign in</button>
+    ${store.get("lastUser") ? `<button class="btn green block" style="margin-top:12px" data-act="signin-again">${ic("user")} Sign back in as ${esc(store.get("lastUser").name)}</button>` : ""}
+    <button class="btn block" style="margin-top:12px" data-act="signin">${ic("user")} ${store.get("lastUser") ? "Someone else: sign in" : "I already play: sign in"}</button>
   </section>`;
 }
 const QUESTIONS = Walker.QUESTIONS;
@@ -1913,9 +1928,15 @@ document.addEventListener("click", async (e) => {
     case "close-sheet": closeSheet(); break;
     case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
     case "signin": S.view = "signin"; S.signin = { step: "code" }; render(); scrollTo(0, 0); break;
+    case "signin-again": {
+      const u = store.get("lastUser");
+      if (!u) break;
+      S.view = "signin"; S.signin = { step: "password", quick: true, code: u.code, id: u.id, people: [{ id: u.id, name: u.name, character: u.character, has_password: true }] };
+      render(); scrollTo(0, 0); setTimeout(() => $("[name=password]")?.focus(), 50); break;
+    }
     case "signin-back": {
       const st = S.signin;
-      if (!st || st.step === "code") { S.view = "welcome"; S.signin = null; }
+      if (!st || st.step === "code" || st.quick) { S.view = "welcome"; S.signin = null; }
       else st.step = st.step === "password" ? "who" : st.step === "emailcode" ? "email" : "code";
       render(); break;
     }
@@ -1970,7 +1991,11 @@ document.addEventListener("click", async (e) => {
     }
     case "wallet": walletSheet(); break;
     case "copy-restore": copy(`${APP_URL}?me=${S.token}`, "Restore link copied. Keep it private"); break;
-    case "signout": if (confirm("Sign out on this phone? You'll need your restore link to get back in.")) signOut(); break;
+    case "signout": {
+      const a = S.auth || {}, ways = [a.passkeys && "fingerprint", a.email && "an email code", a.has_password && "your password"].filter(Boolean);
+      if (confirm(ways.length ? `Sign out on this phone? You can sign back in with ${ways.join(", ").replace(/, ([^,]*)$/, " or $1")}.` : "Sign out on this phone? You haven't added an email, password or fingerprint, so you'd need your restore link to get back in.")) signOut("Signed out");
+      break;
+    }
     case "tax": startTax(); break;
     case "tax-stop": if (V.tax && confirm("End the fight now? You can't fight him again today.")) { V.tax.left = 0; } break;
     case "raid": joinRaid(); break;
