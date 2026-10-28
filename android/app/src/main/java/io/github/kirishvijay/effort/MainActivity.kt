@@ -15,6 +15,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.credentials.CreatePublicKeyCredentialRequest
+import androidx.credentials.CreatePublicKeyCredentialResponse
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetPublicKeyCredentialOption
+import androidx.credentials.PublicKeyCredential
+import androidx.credentials.exceptions.CreateCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
@@ -29,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private var health = "none"     // ok | update (Health Connect needs installing) | none
     private var stepsOn = false
     private var lastError: String? = null
+    private val credentials by lazy { CredentialManager.create(this) }
 
     private val askSteps: ActivityResultLauncher<Set<String>> =
         registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted: Set<String> ->
@@ -163,5 +173,27 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface fun testReminder() = runOnUiThread { Reminders.show(this@MainActivity, test = true) }
 
         @JavascriptInterface fun syncNow() = runOnUiThread { sync() }
+
+        // Passkeys need Android 9+. The game passes WebAuthn options JSON; the answer goes back to
+        // window.onEffortPasskey(id, ok, json-or-reason).
+        @JavascriptInterface fun passkeysAvailable(): Boolean = Build.VERSION.SDK_INT >= 28
+
+        @JavascriptInterface fun passkey(kind: String, requestJson: String, id: String) = runOnUiThread {
+            lifecycleScope.launch {
+                val (ok, out) = try {
+                    if (kind == "create") {
+                        val r = credentials.createCredential(this@MainActivity, CreatePublicKeyCredentialRequest(requestJson)) as CreatePublicKeyCredentialResponse
+                        true to r.registrationResponseJson
+                    } else {
+                        val r = credentials.getCredential(this@MainActivity, GetCredentialRequest(listOf(GetPublicKeyCredentialOption(requestJson))))
+                        true to (r.credential as PublicKeyCredential).authenticationResponseJson
+                    }
+                } catch (e: CreateCredentialCancellationException) { false to "cancelled" }
+                catch (e: GetCredentialCancellationException) { false to "cancelled" }
+                catch (e: NoCredentialException) { false to "none" }
+                catch (e: Exception) { false to (e.message ?: "failed") }
+                web.evaluateJavascript("window.onEffortPasskey && window.onEffortPasskey(${JSONObject.quote(id)}, $ok, ${JSONObject.quote(out)})", null)
+            }
+        }
     }
 }

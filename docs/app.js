@@ -158,7 +158,7 @@ const S = {
   answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null, retake: false,
   setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false, push: "unknown",
   native: NATIVE ? nativeStatus() : null, sheetKind: null,
-  signin: null, hasPassword: null,
+  signin: null, auth: null,
 };
 // The app reports what's connected (and each sync); redraw whatever's showing, and pull new numbers after a sync.
 window.onEffortNative = (st) => {
@@ -449,7 +449,7 @@ function ledgerPanel() {
     <div class="feedlist">${rows.map((r) => `<div class="it"><span class="grow">${esc(label(r))}</span><span class="amt ${r.amount >= 0 ? "plus" : "minus"}">${signedEfforts(r.amount)}</span></div>`).join("")}</div></section>`;
 }
 function tabToday() {
-  return `${updateBanner()}${taxHero()}${weekPanel()}${ledgerPanel()}
+  return `${updateBanner()}${authNudge()}${taxHero()}${weekPanel()}${ledgerPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How a day works</h2></div>
       <div class="how">
@@ -659,10 +659,14 @@ function tabMe() {
         : `<p class="small muted" style="margin:0 0 10px">You're not in a squad.</p><button class="btn green block" data-act="squad-sheet">${ic("squad")} Make or join a squad</button>`}
     </section>
     <section class="panel">
+      <div class="ptitle"><span class="ic-badge green">${ic("lock")}</span><h2 class="ol-sm">Signing in</h2>${noWayBackIn() ? `<span class="side chip red">Not set up</span>` : ""}</div>
+      <p class="small muted" style="margin:-4px 0 12px">How you get back in on a new phone, or if you're ever signed out. Set up at least one.</p>
+      <div class="meths">${signinMethods()}</div>
+    </section>
+    <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("link")}</span><h2 class="ol-sm">This phone</h2></div>
       <label class="row spread" style="margin-bottom:12px"><span><b>Sound</b></span><input class="switch" type="checkbox" data-toggle="sound" ${FX.muted ? "" : "checked"} aria-label="Sound"></label>
       <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Switch off on older phones</span></span><input class="switch" type="checkbox" data-toggle="3d" ${store.get("no3d") ? "" : "checked"} aria-label="3D battles"></label>
-      ${passwordRow()}
       <p class="small muted" style="margin:0 0 8px">Your restore link also signs you in on another phone. Keep it private: it's your account.</p>
       <div class="btn-row"><button class="btn sm" data-act="copy-restore">${ic("copy")} Copy restore link</button><a class="btn sm" href="lab.html">${ic("sliders")} The Lab</a></div>
       <button class="btn xs red" style="margin-top:10px" data-act="signout">${ic("door")} Sign out on this phone</button>
@@ -787,17 +791,25 @@ async function signedIn(token) {
   S.signin = null; S.view = "main"; S.tab = "today";
   render(); scrollTo(0, 0);
   toast(`Welcome back, ${me().name}`);
-  refreshPush(); checkAppUpdate(); checkPassword();
+  refreshPush(); checkAppUpdate(); checkAuth();
 }
 function viewSignin() {
   const st = S.signin || (S.signin = { step: "code" });
   const head = `<div class="quiz-top"><button class="iconbtn" data-act="signin-back" aria-label="Back">${ic("chevronLeft")}</button><span class="grow"></span></div>`;
   let body;
   if (st.step === "code") body = `<h1 class="ol disp ob-title">Sign in</h1>
-    <p class="muted">Already playing on another phone, or got signed out? Find yourself in your squad.</p>
-    <form class="panel" data-form="signin-code"><span class="field-label">Your squad code</span><div class="row"><input type="text" name="code" maxlength="6" required placeholder="ABC123" class="grow code" autocomplete="off" autocapitalize="characters" value="${esc(st.code || "")}"><button class="btn blue sm">Next</button></div>
+    <p class="muted">Already playing on another phone, or got signed out?</p>
+    ${passkeysReady() ? `<button class="btn gold xl block" data-act="passkey-signin">${ic("fingerprint")} Fingerprint / Face ID</button>` : ""}
+    <button class="btn blue block" data-act="signin-email">${ic("mail")} Email me a code</button>
+    <form class="panel" data-form="signin-code"><span class="field-label">Or with your password</span><span class="field-label" style="margin-top:4px">Your squad code</span><div class="row"><input type="text" name="code" maxlength="6" required placeholder="ABC123" class="grow code" autocomplete="off" autocapitalize="characters" value="${esc(st.code || "")}"><button class="btn blue sm">Next</button></div>
       <p class="tiny faint" style="margin:8px 0 0">It's on Me → your squad, on any squad-mate's phone.</p></form>
     <form class="panel" data-form="signin-link"><span class="field-label">Or paste your restore link</span><div class="row"><input type="text" name="link" required placeholder="https://…?me=…" class="grow" autocomplete="off"><button class="btn sm">Go</button></div></form>`;
+  else if (st.step === "email") body = `<h1 class="ol disp ob-title">Email me a code</h1>
+    <p class="muted">Use the email you added under Me. We'll send a 6-digit code.</p>
+    <form class="panel" data-form="email-send" data-mode="signin"><input type="email" name="email" required autocomplete="email" placeholder="you@example.com" value="${esc(st.email || "")}"><button class="btn gold block" style="margin-top:12px">${ic("mail")} Send code</button></form>`;
+  else if (st.step === "emailcode") body = `<h1 class="ol disp ob-title">Check your email</h1>
+    <p class="muted">Type the code we sent to <b>${esc(st.email)}</b>. It can take a minute, and might be in spam.</p>
+    <form class="panel" data-form="email-verify" data-mode="signin" data-email="${esc(st.email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="123456" class="code"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`;
   else if (st.step === "who") body = `<h1 class="ol disp ob-title">Which one's you?</h1><p class="muted">${esc(st.squad.name)}</p>
     <div class="mates">${st.people.map((x) => `<button class="mate pick" data-signin="${x.id}"><div class="face has-fallback" style="width:40px;height:40px"><span class="fb">${head2d(answersOf(x))}</span></div><div class="grow"><b>${esc(x.name)}</b><small>${x.has_password ? "Password set" : "No password yet"}</small></div>${ic("arrowRight")}</button>`).join("")}</div>`;
   else {
@@ -805,23 +817,104 @@ function viewSignin() {
     body = `<div class="walker-big has-fallback" style="height:180px;width:160px"><span class="fb">${Walker.svg(answersOf(x), { mood: "fresh" })}</span></div>
       <h1 class="ol disp ob-title" style="text-align:center">Hi, ${esc(x.name)}</h1>
       ${x.has_password ? `<form class="panel" data-form="signin-password"><span class="field-label">Your password</span><input type="password" name="password" required autocomplete="current-password" placeholder="Password"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`
-        : `<div class="guide small">${esc(x.name)} hasn't set a sign-in password yet. On a phone where you're still signed in, go to <b>Me → Sign-in password</b> and set one, then come back. Lost that phone? Ask Kirish for your restore link.</div>`}`;
+        : `<div class="guide small">${esc(x.name)} hasn't set a password. Try <b>Fingerprint / Face ID</b> or <b>Email me a code</b> instead (back one step). If you set up none of them, ask Kirish for your restore link.</div>`}`;
   }
   $("#app").innerHTML = `<section class="onboard">${head}${body}</section>`;
 }
 function passwordSheet() {
-  openSheet(`${sheetHead(S.hasPassword ? "Change your password" : "Set a sign-in password")}
+  openSheet(`${sheetHead(S.auth?.has_password ? "Change your password" : "Set a sign-in password")}
     <p class="small muted" style="margin:-4px 0 12px">For signing in on a new phone, or if you ever get signed out: <b>Sign in</b> on the welcome screen → your squad code → tap your name → this password.</p>
     <form data-form="set-password"><input type="password" name="password" required minlength="4" maxlength="64" autocomplete="new-password" placeholder="At least 4 characters">
       <input type="password" name="again" required minlength="4" maxlength="64" autocomplete="new-password" placeholder="Same again" style="margin-top:8px">
       <button class="btn green block" style="margin-top:12px">Save</button></form>`);
   setTimeout(() => $("#sheet input")?.focus(), 50);
 }
-async function checkPassword() {
+// Which ways back in this account has: password, email, passkeys (fingerprint / Face ID).
+async function checkAuth() {
   if (!S.token) return;
-  try { const r = await callAuth("status", { token: S.token }); if (r.has_password !== S.hasPassword) { S.hasPassword = r.has_password; if (S.view === "main" && S.tab === "me" && $("#sheet").hidden) render(); } } catch { /* try again next time */ }
+  try {
+    const r = await callAuth("status", { token: S.token });
+    const was = JSON.stringify(S.auth);
+    S.auth = { has_password: r.has_password, email: r.email, passkeys: r.passkeys };
+    if (was !== JSON.stringify(S.auth) && ["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+  } catch { /* try again next time */ }
 }
-const passwordRow = () => `<div class="row spread" style="margin-bottom:12px"><span><b>Sign-in password</b><span class="small muted" style="display:block">${S.hasPassword ? "Set. Use it to sign in on another phone" : "Not set. Set one so you can't get locked out"}</span></span><button class="btn xs ${S.hasPassword ? "" : "gold"}" data-act="password">${S.hasPassword ? "Change" : "Set"}</button></div>`;
+const noWayBackIn = () => S.auth && !S.auth.has_password && !S.auth.email && !S.auth.passkeys;
+
+// Passkeys: in the Android app through Android's Credential Manager, elsewhere through the browser (WebAuthn).
+const passkeysReady = () => (NATIVE ? typeof NATIVE.passkey === "function" && (typeof NATIVE.passkeysAvailable !== "function" || NATIVE.passkeysAvailable())
+  : !!(window.PublicKeyCredential && window.SimpleWebAuthnBrowser));
+const passkeyWaits = {};
+window.onEffortPasskey = (id, ok, out) => {
+  const w = passkeyWaits[id]; delete passkeyWaits[id];
+  if (!w) return;
+  if (ok) { try { w.resolve(JSON.parse(out)); } catch { w.reject(new Error("failed")); } } else w.reject(new Error(out));
+};
+function passkeyCall(kind, options) {
+  if (NATIVE) return new Promise((resolve, reject) => { const id = Math.random().toString(36).slice(2); passkeyWaits[id] = { resolve, reject }; NATIVE.passkey(kind, JSON.stringify(options), id); });
+  const W = window.SimpleWebAuthnBrowser;
+  return kind === "create" ? W.startRegistration({ optionsJSON: options }) : W.startAuthentication({ optionsJSON: options });
+}
+// Cancelling the phone's prompt isn't an error worth shouting about.
+const passkeyFailed = (e) => {
+  const m = String(e?.message || e);
+  if (/cancel|NotAllowed|abort/i.test(m) || e?.name === "NotAllowedError") return toast("Cancelled");
+  if (m === "none") return toast("No fingerprint sign-in saved for Effort on this phone yet");
+  toast(m.length < 120 ? m : "That didn't work. Try again");
+};
+const deviceName = () => (NATIVE ? "Android app" : /iPhone|iPad/.test(navigator.userAgent) ? "iPhone" : /Android/.test(navigator.userAgent) ? "Android" : "Computer");
+async function addPasskey() {
+  try {
+    const o = await callAuth("passkey_register_options", { token: S.token });
+    const response = await passkeyCall("create", o.options);
+    await callAuth("passkey_register", { token: S.token, challenge_id: o.challenge_id, response, device: deviceName() });
+    await checkAuth(); render(); FX.play("levelup");
+    toast("Fingerprint / Face ID sign-in is on");
+  } catch (e) { passkeyFailed(e); }
+}
+async function passkeySignin() {
+  try {
+    const o = await callAuth("passkey_login_options", {});
+    const response = await passkeyCall("get", o.options);
+    const r = await callAuth("passkey_login", { challenge_id: o.challenge_id, response });
+    await signedIn(r.token);
+  } catch (e) { passkeyFailed(e); }
+}
+
+// Email: Supabase Auth sends a 6-digit code; entering it proves the email, and the server takes it from there.
+async function sendEmailCode(email, forSignin) {
+  const { error } = await realtime().auth.signInWithOtp({ email, options: { shouldCreateUser: !forSignin } });
+  if (error) throw new Error(/signups not allowed|not found|not allowed for otp/i.test(error.message) ? "No Effort account has that email" : error.message);
+}
+async function checkEmailCode(email, code) {
+  const { data, error } = await realtime().auth.verifyOtp({ email, token: String(code).trim(), type: "email" });
+  if (error || !data?.session) throw new Error("That code's wrong or has expired");
+  return data.session.access_token;
+}
+function emailSheet(email) {
+  openSheet(`${sheetHead(S.auth?.email ? "Change your email" : "Add your email")}
+    ${!email ? `<p class="small muted" style="margin:-4px 0 12px">We'll send a 6-digit code to check it's yours. If you ever forget your password or lose your phone, a code to this email gets you back in.</p>
+      <form data-form="email-send" data-mode="link"><input type="email" name="email" required autocomplete="email" placeholder="you@example.com"><button class="btn green block" style="margin-top:12px">${ic("mail")} Send code</button></form>`
+    : `<p class="small muted" style="margin:-4px 0 12px">Type the code we sent to <b>${esc(email)}</b>. It can take a minute, and might be in spam.</p>
+      <form data-form="email-verify" data-mode="link" data-email="${esc(email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="123456" class="code"><button class="btn green block" style="margin-top:12px">Confirm</button></form>
+      <button class="btn xs" style="margin-top:10px" data-act="email-again">Use a different email</button>`}`);
+  setTimeout(() => $("#sheet input")?.focus(), 50);
+}
+
+// The ways back in, with a button each (Me, the sign-up's last step, and the Today nudge).
+function signinMethods() {
+  const a = S.auth || {};
+  const row = (icon, title, sub, act, label, gold) => `<div class="meth"><span class="mic">${ic(icon)}</span><span class="grow"><b>${title}</b><small>${sub}</small></span><button class="btn xs ${gold ? "gold" : ""}" data-act="${act}">${label}</button></div>`;
+  return (passkeysReady() ? row("fingerprint", "Fingerprint / Face ID", a.passkeys ? `On${a.passkeys > 1 ? ` · ${a.passkeys} devices` : ""}. Works on a new phone with the same Google or Apple account` : "Sign in with a touch, even on a new phone", "passkey-add", a.passkeys ? "Add another" : "Add", !a.passkeys) : "")
+    + row("mail", "Email", a.email ? `${esc(a.email)}. For when you forget everything` : "Get back in with a code if you forget everything", "email-add", a.email ? "Change" : "Add", !a.email)
+    + row("lock", "Password", a.has_password ? "Set. Squad code, your name, then this" : "Squad code, your name, then a password", "password", a.has_password ? "Change" : "Set", false);
+}
+// Players who can't get back in if they're signed out: a nudge on Today until they set one up (Later hides it for 3 days).
+const authNudge = () => (!noWayBackIn() || Date.now() - (store.get("authNudgeLater") || 0) < 3 * 86400000) ? "" : `<section class="panel update">
+    <div class="row"><span class="ic-badge">${ic("lock")}</span><div class="grow"><b class="disp">Don't get locked out</b><span class="small muted" style="display:block">If this phone signs you out or you get a new one, you'll need one of these to get back in.</span></div></div>
+    <div class="meths" style="margin-top:12px">${signinMethods()}</div>
+    <button class="btn xs" style="margin-top:10px" data-act="auth-later">Later</button>
+  </section>`;
 
 // ---------- onboarding ----------
 function viewWelcome() {
@@ -912,7 +1005,7 @@ function viewSetup() {
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
       <span class="field-label">So you can't get locked out</span>
-      ${S.hasPassword ? `<span class="chip green">${ic("check")} Sign-in password set</span>` : `<button class="btn sm block" data-act="password">${ic("lock")} Set a sign-in password</button>`}
+      <div class="meths">${signinMethods()}</div>
       <p class="small faint" style="margin:14px 0">Tip: add Effort to your home screen (Share → Add to Home Screen on iPhone, ⋮ → Add to Home screen on Android) so it opens like an app.</p>
       <button class="btn gold xl block" data-act="setup-done">Let's go ${ic("arrowRight")}</button>`}
   </section>`;
@@ -933,7 +1026,7 @@ async function finishQuiz() {
   store.del("draftAnswers");
   await load();
   S.view = S.invite ? "setup" : "squad"; S.setupStep = "steps"; S.invite = null;
-  S.hasPassword = false;
+  S.auth = { has_password: false, email: null, passkeys: 0 };
   refreshPush();
   render(); scrollTo(0, 0);
 }
@@ -1652,10 +1745,22 @@ document.addEventListener("submit", async (e) => {
       const r = await callAuth("signin", { code: S.signin.code, id: S.signin.id, password: data.password });
       await signedIn(r.token);
     }); break;
+    case "email-send": await busy(async () => {
+      const email = String(data.email).trim().toLowerCase(), forSignin = f.dataset.mode === "signin";
+      await sendEmailCode(email, forSignin);
+      if (forSignin) { S.signin = { step: "emailcode", email }; render(); setTimeout(() => $("[name=code]")?.focus(), 50); }
+      else emailSheet(email);
+    }); break;
+    case "email-verify": await busy(async () => {
+      const access = await checkEmailCode(f.dataset.email, data.code);
+      if (f.dataset.mode === "signin") { const r = await callAuth("email_signin", { access_token: access }); await signedIn(r.token); return; }
+      const r = await callAuth("link_email", { token: S.token, access_token: access });
+      S.auth = { ...(S.auth || {}), email: r.email }; closeSheet(); render(); toast("Email added");
+    }); break;
     case "set-password": await busy(async () => {
       if (data.password !== data.again) throw new Error("Those two don't match");
       await callAuth("set_password", { token: S.token, password: data.password });
-      S.hasPassword = true; closeSheet(); render(); toast("Password saved");
+      S.auth = { ...(S.auth || {}), has_password: true }; closeSheet(); render(); toast("Password saved");
     }); break;
     case "log-steps": await busy(async () => {
       const r = await call("log", { token: S.token, steps: data.n, date: data.date, source: "manual" });
@@ -1715,10 +1820,15 @@ document.addEventListener("click", async (e) => {
     case "signin-back": {
       const st = S.signin;
       if (!st || st.step === "code") { S.view = "welcome"; S.signin = null; }
-      else st.step = st.step === "password" ? "who" : "code";
+      else st.step = st.step === "password" ? "who" : st.step === "emailcode" ? "email" : "code";
       render(); break;
     }
     case "password": passwordSheet(); break;
+    case "passkey-add": t.disabled = true; await addPasskey(); t.disabled = false; break;
+    case "passkey-signin": t.disabled = true; await passkeySignin(); t.disabled = false; break;
+    case "email-add": case "email-again": emailSheet(); break;
+    case "signin-email": S.signin = { step: "email" }; render(); setTimeout(() => $("[name=email]")?.focus(), 50); break;
+    case "auth-later": store.set("authNudgeLater", Date.now()); render(); break;
     case "app-update-later": store.set("appUpdateLater", Date.now()); S.appUpdate = false; render(); break;
     case "native-steps": natOr("connectSteps"); break;
     case "native-scroll": natOr("connectScroll"); break;
@@ -1816,7 +1926,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
     }
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
     S.view = "main"; render();
-    refreshPush(); keepPushAlive(); checkAppUpdate(); checkPassword();
+    refreshPush(); keepPushAlive(); checkAppUpdate(); checkAuth();
     if (inviteCode && squad()?.code !== inviteCode.toUpperCase()) {
       try {
         const inv = await lookupInvite(inviteCode);

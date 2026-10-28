@@ -594,3 +594,12 @@ button.mate.pick { width: 100%; cursor: pointer; color: inherit; font: inherit; 
 button.mate.pick:active { transform: translateY(1px); }
 input[type=password] { width: 100%; border-radius: 12px; border: 2px solid var(--ink); background: var(--inset); box-shadow: inset 0 2px 4px rgba(0,0,0,.45); color: var(--text); padding: 10px 12px; font: 600 16px/1.2 var(--ui); outline: none; }
 input[type=password]:focus { border-color: var(--cyan); }
+
+/* Ways to sign back in */
+.meths { display: grid; gap: 8px; }
+.meth { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: var(--inset); border: 2px solid var(--ink); }
+.meth .mic { width: 34px; height: 34px; flex: none; border-radius: 11px; display: grid; place-items: center; font-size: 18px; color: var(--gold); background: rgba(255,255,255,.06); border: 2px solid var(--ink); }
+.meth b { display: block; font: 400 15px/1.15 var(--display); }
+.meth small { display: block; font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+input[type=email] { width: 100%; border-radius: 12px; border: 2px solid var(--ink); background: var(--inset); box-shadow: inset 0 2px 4px rgba(0,0,0,.45); color: var(--text); padding: 10px 12px; font: 600 16px/1.2 var(--ui); outline: none; }
+input[type=email]:focus { border-color: var(--cyan); }
