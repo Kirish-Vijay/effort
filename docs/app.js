@@ -8,6 +8,7 @@ const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
 const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
 const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
 const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push";
+const AUTH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-auth";
 // On Android in a browser: the Effort app does steps, scrolling and the 6:45pm ping with a tap each.
 function androidApp(t) {
   return `<p class="small" style="margin-top:0">The Effort app does it all: steps and scrolling with one tap each, and the 6:45pm ping.</p>
@@ -157,6 +158,7 @@ const S = {
   answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null, retake: false,
   setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false, push: "unknown",
   native: NATIVE ? nativeStatus() : null, sheetKind: null,
+  signin: null, hasPassword: null,
 };
 // The app reports what's connected (and each sync); redraw whatever's showing, and pull new numbers after a sync.
 window.onEffortNative = (st) => {
@@ -170,7 +172,7 @@ window.onEffortNative = (st) => {
 window.effortBack = () => {
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   if (["tax", "raid"].includes(S.view)) return true;
-  const back = $("[data-act=quiz-back]") || $("[data-act=back]");
+  const back = $("[data-act=quiz-back]") || $("[data-act=signin-back]") || $("[data-act=back]");
   if (back) { back.click(); return true; }
   if (S.view === "main" && S.tab !== "today") { S.tab = "today"; render(); return true; }
   return false;
@@ -330,7 +332,7 @@ function pushBlock() {
 
 // ---------- shell ----------
 function render() {
-  const views = { boot: viewBoot, welcome: viewWelcome, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, tax: renderTax, raid: renderRaid, result: renderResult };
+  const views = { boot: viewBoot, welcome: viewWelcome, signin: viewSignin, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, tax: renderTax, raid: renderRaid, result: renderResult };
   (views[S.view] || viewBoot)();
   hydratePortraits();
 }
@@ -660,7 +662,8 @@ function tabMe() {
       <div class="ptitle"><span class="ic-badge">${ic("link")}</span><h2 class="ol-sm">This phone</h2></div>
       <label class="row spread" style="margin-bottom:12px"><span><b>Sound</b></span><input class="switch" type="checkbox" data-toggle="sound" ${FX.muted ? "" : "checked"} aria-label="Sound"></label>
       <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Switch off on older phones</span></span><input class="switch" type="checkbox" data-toggle="3d" ${store.get("no3d") ? "" : "checked"} aria-label="3D battles"></label>
-      <p class="small muted" style="margin:0 0 8px">Your restore link logs you in on another phone. Keep it private: it's your account.</p>
+      ${passwordRow()}
+      <p class="small muted" style="margin:0 0 8px">Your restore link also signs you in on another phone. Keep it private: it's your account.</p>
       <div class="btn-row"><button class="btn sm" data-act="copy-restore">${ic("copy")} Copy restore link</button><a class="btn sm" href="lab.html">${ic("sliders")} The Lab</a></div>
       <button class="btn xs red" style="margin-top:10px" data-act="signout">${ic("door")} Sign out on this phone</button>
     </section>`;
@@ -770,6 +773,56 @@ function inviteSheet() {
     <button class="btn green block" style="margin-top:12px" data-act="share-invite">${ic("share")} Share the link</button>`);
 }
 
+// ---------- signing in on another phone ----------
+// Squad code → tap your name → your password (set under Me). Or paste a restore link.
+async function callAuth(action, body, query = "") {
+  const res = await fetch(`${AUTH}/${action}${query}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const data = await res.json().catch(() => ({ ok: false, error: "Couldn't reach the server" }));
+  if (!res.ok || data.ok === false) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+async function signedIn(token) {
+  saveToken(token);
+  await load();
+  S.signin = null; S.view = "main"; S.tab = "today";
+  render(); scrollTo(0, 0);
+  toast(`Welcome back, ${me().name}`);
+  refreshPush(); checkAppUpdate(); checkPassword();
+}
+function viewSignin() {
+  const st = S.signin || (S.signin = { step: "code" });
+  const head = `<div class="quiz-top"><button class="iconbtn" data-act="signin-back" aria-label="Back">${ic("chevronLeft")}</button><span class="grow"></span></div>`;
+  let body;
+  if (st.step === "code") body = `<h1 class="ol disp ob-title">Sign in</h1>
+    <p class="muted">Already playing on another phone, or got signed out? Find yourself in your squad.</p>
+    <form class="panel" data-form="signin-code"><span class="field-label">Your squad code</span><div class="row"><input type="text" name="code" maxlength="6" required placeholder="ABC123" class="grow code" autocomplete="off" autocapitalize="characters" value="${esc(st.code || "")}"><button class="btn blue sm">Next</button></div>
+      <p class="tiny faint" style="margin:8px 0 0">It's on Me → your squad, on any squad-mate's phone.</p></form>
+    <form class="panel" data-form="signin-link"><span class="field-label">Or paste your restore link</span><div class="row"><input type="text" name="link" required placeholder="https://…?me=…" class="grow" autocomplete="off"><button class="btn sm">Go</button></div></form>`;
+  else if (st.step === "who") body = `<h1 class="ol disp ob-title">Which one's you?</h1><p class="muted">${esc(st.squad.name)}</p>
+    <div class="mates">${st.people.map((x) => `<button class="mate pick" data-signin="${x.id}"><div class="face has-fallback" style="width:40px;height:40px"><span class="fb">${head2d(answersOf(x))}</span></div><div class="grow"><b>${esc(x.name)}</b><small>${x.has_password ? "Password set" : "No password yet"}</small></div>${ic("arrowRight")}</button>`).join("")}</div>`;
+  else {
+    const x = st.people.find((p) => p.id === st.id);
+    body = `<div class="walker-big has-fallback" style="height:180px;width:160px"><span class="fb">${Walker.svg(answersOf(x), { mood: "fresh" })}</span></div>
+      <h1 class="ol disp ob-title" style="text-align:center">Hi, ${esc(x.name)}</h1>
+      ${x.has_password ? `<form class="panel" data-form="signin-password"><span class="field-label">Your password</span><input type="password" name="password" required autocomplete="current-password" placeholder="Password"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`
+        : `<div class="guide small">${esc(x.name)} hasn't set a sign-in password yet. On a phone where you're still signed in, go to <b>Me → Sign-in password</b> and set one, then come back. Lost that phone? Ask Kirish for your restore link.</div>`}`;
+  }
+  $("#app").innerHTML = `<section class="onboard">${head}${body}</section>`;
+}
+function passwordSheet() {
+  openSheet(`${sheetHead(S.hasPassword ? "Change your password" : "Set a sign-in password")}
+    <p class="small muted" style="margin:-4px 0 12px">For signing in on a new phone, or if you ever get signed out: <b>Sign in</b> on the welcome screen → your squad code → tap your name → this password.</p>
+    <form data-form="set-password"><input type="password" name="password" required minlength="4" maxlength="64" autocomplete="new-password" placeholder="At least 4 characters">
+      <input type="password" name="again" required minlength="4" maxlength="64" autocomplete="new-password" placeholder="Same again" style="margin-top:8px">
+      <button class="btn green block" style="margin-top:12px">Save</button></form>`);
+  setTimeout(() => $("#sheet input")?.focus(), 50);
+}
+async function checkPassword() {
+  if (!S.token) return;
+  try { const r = await callAuth("status", { token: S.token }); if (r.has_password !== S.hasPassword) { S.hasPassword = r.has_password; if (S.view === "main" && S.tab === "me" && $("#sheet").hidden) render(); } } catch { /* try again next time */ }
+}
+const passwordRow = () => `<div class="row spread" style="margin-bottom:12px"><span><b>Sign-in password</b><span class="small muted" style="display:block">${S.hasPassword ? "Set. Use it to sign in on another phone" : "Not set. Set one so you can't get locked out"}</span></span><button class="btn xs ${S.hasPassword ? "" : "gold"}" data-act="password">${S.hasPassword ? "Change" : "Set"}</button></div>`;
+
 // ---------- onboarding ----------
 function viewWelcome() {
   const inv = S.invite;
@@ -786,7 +839,7 @@ function viewWelcome() {
     </section>
     <button class="btn gold xl block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Make my walker"}</button>
     ${inv ? "" : `<form data-form="code" class="row" style="margin-top:12px"><input type="text" name="code" placeholder="Got a squad code?" autocomplete="off" maxlength="6" class="grow code"><button class="btn blue sm">Join</button></form>`}
-    <p class="small faint" style="text-align:center;margin-top:16px">${NATIVE ? "Already playing in Chrome? Open Effort there and tap Me → Steps → Open Effort in the app." : "Played on another phone? Open your restore link from the Me tab there."}</p>
+    <button class="btn block" style="margin-top:12px" data-act="signin">${ic("user")} I already play: sign in</button>
   </section>`;
 }
 const QUESTIONS = Walker.QUESTIONS;
@@ -858,6 +911,8 @@ function viewSetup() {
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
+      <span class="field-label">So you can't get locked out</span>
+      ${S.hasPassword ? `<span class="chip green">${ic("check")} Sign-in password set</span>` : `<button class="btn sm block" data-act="password">${ic("lock")} Set a sign-in password</button>`}
       <p class="small faint" style="margin:14px 0">Tip: add Effort to your home screen (Share → Add to Home Screen on iPhone, ⋮ → Add to Home screen on Android) so it opens like an app.</p>
       <button class="btn gold xl block" data-act="setup-done">Let's go ${ic("arrowRight")}</button>`}
   </section>`;
@@ -878,6 +933,7 @@ async function finishQuiz() {
   store.del("draftAnswers");
   await load();
   S.view = S.invite ? "setup" : "squad"; S.setupStep = "steps"; S.invite = null;
+  S.hasPassword = false;
   refreshPush();
   render(); scrollTo(0, 0);
 }
@@ -1579,6 +1635,28 @@ document.addEventListener("submit", async (e) => {
       if (S.view === "squad") { S.view = "setup"; S.setupStep = "steps"; }
       render(); toast(`You're in ${squad().name}`);
     }); break;
+    case "signin-code": await busy(async () => {
+      const code = String(data.code).trim().toUpperCase();
+      const r = await callAuth("people", null, `?code=${encodeURIComponent(code)}`);
+      if (!r.people.length) throw new Error("Nobody's in that squad");
+      S.signin = { step: "who", code, squad: r.squad, people: r.people };
+      render();
+    }); break;
+    case "signin-link": {
+      const m = String(data.link).match(/[?&]me=([A-Za-z0-9]{10,64})/) || String(data.link).trim().match(/^([A-Za-z0-9]{10,64})$/);
+      if (!m) { toast("That doesn't look like a restore link"); break; }
+      await busy(() => signedIn(m[1]));
+      break;
+    }
+    case "signin-password": await busy(async () => {
+      const r = await callAuth("signin", { code: S.signin.code, id: S.signin.id, password: data.password });
+      await signedIn(r.token);
+    }); break;
+    case "set-password": await busy(async () => {
+      if (data.password !== data.again) throw new Error("Those two don't match");
+      await callAuth("set_password", { token: S.token, password: data.password });
+      S.hasPassword = true; closeSheet(); render(); toast("Password saved");
+    }); break;
     case "log-steps": await busy(async () => {
       const r = await call("log", { token: S.token, steps: data.n, date: data.date, source: "manual" });
       closeSheet(); await load(); render(); toast(r.message.replace(/^✅ /, ""));
@@ -1617,6 +1695,7 @@ document.addEventListener("click", async (e) => {
   if (d.platform) { S.platform = d.platform; S.answers.name = $("[name=name]")?.value ?? S.answers.name; render(); return; }
   if (d.setup) { S.setupPlatform = d.setup; if (S.view === "setup") render(); else setupSheet(d.kind); return; }
   if (d.copy) { copy(d.copy); return; }
+  if (d.signin && S.signin) { S.signin.id = d.signin; S.signin.step = "password"; render(); setTimeout(() => $("[name=password]")?.focus(), 50); return; }
   if (d.pos) {
     me().pos = d.pos; render();
     call("equip", { token: S.token, pos: d.pos }).catch((err) => toast(err.message));
@@ -1632,6 +1711,14 @@ document.addEventListener("click", async (e) => {
   switch (d.act) {
     case "close-sheet": closeSheet(); break;
     case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
+    case "signin": S.view = "signin"; S.signin = { step: "code" }; render(); scrollTo(0, 0); break;
+    case "signin-back": {
+      const st = S.signin;
+      if (!st || st.step === "code") { S.view = "welcome"; S.signin = null; }
+      else st.step = st.step === "password" ? "who" : "code";
+      render(); break;
+    }
+    case "password": passwordSheet(); break;
     case "app-update-later": store.set("appUpdateLater", Date.now()); S.appUpdate = false; render(); break;
     case "native-steps": natOr("connectSteps"); break;
     case "native-scroll": natOr("connectScroll"); break;
@@ -1729,7 +1816,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
     }
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
     S.view = "main"; render();
-    refreshPush(); keepPushAlive(); checkAppUpdate();
+    refreshPush(); keepPushAlive(); checkAppUpdate(); checkPassword();
     if (inviteCode && squad()?.code !== inviteCode.toUpperCase()) {
       try {
         const inv = await lookupInvite(inviteCode);
