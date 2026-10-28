@@ -960,9 +960,9 @@ function signinMethods() {
     + row("mail", "Email", a.email ? `${esc(a.email)}. For when you forget everything` : "Get back in with a code if you forget everything", "email-add", a.email ? "Change" : "Add", !a.email)
     + row("lock", "Password", a.has_password ? "Set. Squad code, your name, then this" : "Squad code, your name, then a password", "password", a.has_password ? "Change" : "Set", false);
 }
-// Players who can't get back in if they're signed out: a nudge on Today until they set one up (Later hides it for 3 days).
-const authNudge = () => (!noWayBackIn() || Date.now() - (store.get("authNudgeLater") || 0) < 3 * 86400000) ? "" : `<section class="panel update">
-    <div class="row"><span class="ic-badge">${ic("lock")}</span><div class="grow"><b class="disp">Don't get locked out</b><span class="small muted" style="display:block">If this phone signs you out or you get a new one, you'll need one of these to get back in.</span></div></div>
+// Players without both an email and a password: a nudge on Today until they add them (Later hides it for 3 days).
+const authNudge = () => (!S.auth || (S.auth.email && S.auth.has_password) || Date.now() - (store.get("authNudgeLater") || 0) < 3 * 86400000) ? "" : `<section class="panel update">
+    <div class="row"><span class="ic-badge">${ic("lock")}</span><div class="grow"><b class="disp">Make your account permanent</b><span class="small muted" style="display:block">Add an email and a password, so you can get back in on a new phone or if you're ever signed out.</span></div></div>
     <div class="meths" style="margin-top:12px">${signinMethods()}</div>
     <button class="btn xs" style="margin-top:10px" data-act="auth-later">Later</button>
   </section>`;
@@ -1037,10 +1037,20 @@ function viewSquad() {
   </section>`;
 }
 function viewSetup() {
-  const step = S.setupStep;
+  const step = S.setupStep, a = S.auth || {};
+  // A ticked row once it's done, a button until then.
+  const need = (icon, title, done, doneText, todo, act) => `<div class="meth"><span class="mic">${ic(icon)}</span><span class="grow"><b>${title}</b><small>${done ? doneText : todo}</small></span>${done ? `<span class="chip green">${ic("check")} Done</span>` : `<button class="btn xs gold" data-act="${act}">Add</button>`}</div>`;
   $("#app").innerHTML = `<section class="onboard">
-    <div class="dots"><i class="on"></i><i class="on"></i><i class="${step === "remind" ? "on" : ""}"></i></div>
-    ${step === "steps" && NATIVE ? `<h1 class="ol disp ob-title">Connect your phone</h1>
+    <div class="dots"><i class="on"></i><i class="${step === "account" ? "" : "on"}"></i><i class="${step === "remind" ? "on" : ""}"></i></div>
+    ${step === "account" ? `<h1 class="ol disp ob-title">Make it permanent</h1>
+      <p class="muted">Add an email and a password so you can always get back in: a new phone, getting signed out, anything.</p>
+      <section class="panel"><div class="meths">
+        ${need("mail", "Email", a.email, esc(a.email || ""), "We'll send a code to check it's yours", "email-add")}
+        ${need("lock", "Password", a.has_password, "Set. Squad code, your name, then this", "Signs you in on any phone", "password")}
+      </div></section>
+      <button class="btn gold xl block" style="margin-top:14px" data-act="account-next" ${a.email && a.has_password ? "" : "disabled"}>Next ${ic("arrowRight")}</button>
+      <button class="btn xs" style="margin:12px auto 0;display:flex" data-act="account-next" data-skip="1">Skip for now</button>`
+    : step === "steps" && NATIVE ? `<h1 class="ol disp ob-title">Connect your phone</h1>
       <p class="muted">Two taps. Your steps and scrolling count by themselves from then on.</p>
       <section class="panel"><span class="field-label">Steps</span>${nativeSetup("steps")}<span class="field-label">Scrolling (optional)</span>${nativeSetup("scroll")}</section>
       <div class="btn-row" style="margin-top:12px"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
@@ -1076,7 +1086,8 @@ async function finishQuiz() {
   saveToken(r.player.token);
   store.del("draftAnswers");
   await load();
-  S.view = S.invite ? "setup" : "squad"; S.setupStep = "steps"; S.invite = null;
+  S.afterAccount = S.invite ? "setup" : "squad"; S.invite = null;
+  S.view = "setup"; S.setupStep = "account";
   S.auth = { has_password: false, email: null, passkeys: 0 };
   refreshPush();
   render(); scrollTo(0, 0);
@@ -1898,6 +1909,9 @@ document.addEventListener("click", async (e) => {
     case "retake": S.retake = true; S.answers = { ...answersOf(me()), name: me().name }; S.qi = 1; S.view = "quiz"; render(); scrollTo(0, 0); toast("Your class can change with your answers"); break;
     case "skip-squad": S.view = "setup"; S.setupStep = "steps"; render(); break;
     case "setup-next": S.setupStep = "remind"; render(); scrollTo(0, 0); break;
+    case "account-next":
+      if (t.dataset.skip && !confirm("Skip it? Without an email and password you can't get this account back if you lose your phone or get signed out.")) break;
+      S.view = S.afterAccount === "squad" ? "squad" : "setup"; S.setupStep = "steps"; render(); scrollTo(0, 0); break;
     case "setup-done": S.view = "main"; S.tab = "today"; render(); scrollTo(0, 0); break;
     case "setup-steps": setupSheet("steps"); break;
     case "setup-scroll": setupSheet("scroll"); break;
