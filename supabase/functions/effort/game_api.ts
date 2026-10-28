@@ -250,7 +250,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
           }),
         };
         const [{ data: cur }, { data: last }] = await Promise.all([
-          db.from("raids").select("id,slot,tier,status,started_at,ends_at,result").eq("group_id", squad.group.id).eq("slot", rw.slot).maybeSingle(),
+          db.from("raids").select("id,slot,tier,status,started_at,ends_at,result,goal").eq("group_id", squad.group.id).eq("slot", rw.slot).maybeSingle(),
           db.from("raids").select("slot,tier,result,ends_at").eq("group_id", squad.group.id).eq("status", "done").order("ends_at", { ascending: false }).limit(1),
         ]);
         raid = cur; lastRaid = last?.[0] ?? null;
@@ -309,13 +309,15 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (!squad) return fail("Join a squad first");
       const w = raidWindow(now, test);
       let { data: raid } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).maybeSingle();
+      const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
       if (!raid) {
         if (!w.open) return fail("The raid opens on Sunday at 7pm");
+        // The squad's weekly step goal, frozen as the raid starts: missed, and the boss is enraged.
+        const g = G.squadGoal(squad.group.tier, roster);
         await db.from("raids").upsert({ group_id: squad.group.id, slot: w.slot, tier: squad.group.tier, seed: crypto.getRandomValues(new Uint32Array(1))[0] >>> 1,
-          started_at: new Date(now).toISOString(), ends_at: new Date(w.closes).toISOString() }, { onConflict: "group_id,slot", ignoreDuplicates: true });
+          started_at: new Date(now).toISOString(), ends_at: new Date(w.closes).toISOString(), goal: { ...g, enraged: !g.met } }, { onConflict: "group_id,slot", ignoreDuplicates: true });
         ({ data: raid } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).single());
       }
-      const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
       return json({ ok: true, now, me: player.id, raid, roster, boss: G.bossFor(raid.tier) });
     }
 
@@ -454,7 +456,7 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
   const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
   let result: Any = { how, frac: 0, pool: 0, shares: [], boss: G.bossFor(raid.tier).name, tier: raid.tier, settle: null };
   if (fighters.length) {
-    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin });
+    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged });
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
     for (const m of R.members) { const r = report[m.id]; m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7); }
     // Nobody can have dealt more than the boss had.

@@ -635,3 +635,9 @@ button.mate.pick > svg:last-child { flex: none; opacity: .5; }
 .invite-row:active { transform: translateY(1px); }
 .invite-row > svg:first-child { color: var(--green, #7ee29d); flex: none; }
 .invite-row .code-chip { font: 400 16px/1 var(--display); letter-spacing: .12em; padding: 5px 8px; border-radius: 9px; background: var(--inset); border: 2px solid var(--ink); }
+
+/* Squad goal before Sunday */
+.goalbar { position: relative; height: 26px; border-radius: 99px; background: var(--inset); border: 2px solid var(--ink); overflow: hidden; }
+.goalbar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(180deg, #ff9a7a, #e8483f); border-radius: 99px; transition: width .6s; }
+.goal.met .goalbar i { background: linear-gradient(180deg, #a6f3c0, #3fbf6f); }
+.goalbar span { position: relative; display: block; text-align: center; font: 400 14px/22px var(--display); text-shadow: 0 1px 2px #000; font-variant-numeric: tabular-nums; }

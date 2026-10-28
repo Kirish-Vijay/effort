@@ -49,6 +49,11 @@ const DEFAULT_RULES = {
   raidBossDmg: 15,          // a swipe at level 1
   raidRewardPerMember: 150, // Efforts per squad member per boss level, on a win
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
+  raidGoalPerDay: 5000,     // the squad's weekly goal before Sunday: this many steps a day for each player…
+  raidGoalStep: 500,        // …plus this much more for each boss up the ladder (back to the start every lap)
+  raidGoalDays: 6,          // Monday to Saturday (Sunday's steps before the raid count too)
+  enragedHp: 2.5,           // miss the goal and the boss has this much more health…
+  enragedDmg: 1.5,          // …and hits this much harder
   triviaSeconds: 25,
   triviaFailShare: 2 / 3,   // when someone dies everyone gets one question; 2/3 of the squad wrong = paralysed
   rarityBossDmg: 0.001,     // each rarity point in trivia knocks this share off the boss
@@ -428,6 +433,22 @@ function bossFor(tier) {
   const k = 2 ** lap, rk = (BOSSES[BOSSES.length - 1].reward * 1.1) ** lap; // lap 2 starts richer than the final boss of lap 1
   return { ...b, tier: t, lap: lap + 1, hp: b.hp * k, dmg: b.dmg * k ** 0.5, reward: b.reward * rk };
 }
+// The squad's weekly goal before Sunday: between them, everyone (bar players who joined after Thursday)
+// averages perDay steps a day, Monday to Saturday. Brett asks 5,000, Rory 5,500, Wisp 6,000 and so on;
+// each new lap starts again at 5,000. Miss it and Sunday's boss is enraged.
+function raidGoal(tier, players) {
+  const i = (Math.max(1, Math.floor(tier || 1)) - 1) % BOSSES.length;
+  const perDay = RULES.raidGoalPerDay + RULES.raidGoalStep * i;
+  const n = Math.max(1, players);
+  return { perDay, players: n, target: perDay * RULES.raidGoalDays * n };
+}
+// The goal for a squad from its week table rows ({ weekSteps, fresh }).
+function squadGoal(tier, rows) {
+  const counted = rows.filter((r) => !r.fresh);
+  const g = raidGoal(tier, counted.length || rows.length);
+  const steps = rows.reduce((a, r) => a + (r.weekSteps || 0), 0);
+  return { ...g, steps, met: steps >= g.target };
+}
 // A fighter. The live game passes stride and title from the whole squad's week (so they don't
 // depend on who turned up); the lab works them out from whoever is in the raid.
 function makeMember(m, row) {
@@ -437,7 +458,7 @@ function makeMember(m, row) {
     pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0,
     cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind };
 }
-function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1 } = {}) {
+function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false } = {}) {
   const r = rng(seed);
   const n = members.length;
   const table = weekTable(members);
@@ -454,12 +475,12 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   const lvl = Math.round(strength ** RULES.raidLvlCurve * 100) / 100;
   const def = bossFor(tier);
   // Shorter test raids get a proportionally smaller boss so the pacing feels the same.
-  const max = Math.round(RULES.raidHpPerMember * n * lvl * def.hp * (minutes / 15));
+  const max = Math.round(RULES.raidHpPerMember * n * lvl * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1));
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null,
     // Balanced for a squad of four; smaller squads take lighter hits. Short test raids pay proportionally less.
     sizeDmg: Math.min(1, 0.4 + 0.15 * n), timeShare: Math.min(1, minutes / 15),
-    boss: { ...def, hp: max, max, phase: 1, next: null, feast: null, warned: false },
+    boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged },
     members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
   };
   scheduleAttack(R);
@@ -776,6 +797,6 @@ root.Game = {
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
-  BOSSES, bossFor, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
+  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
 };
 })(typeof window !== "undefined" ? window : globalThis);

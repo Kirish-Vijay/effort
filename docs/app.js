@@ -488,7 +488,24 @@ function raidPreview() {
     const row = T.rows.find((r) => r.id === m.id);
     return { id: m.id, name: m.name, stats: G.stats(m.character || {}), equipped: m.id === me().id ? me().gear : m.gear, inv: m.id === me().id ? S.D.inv : {}, weekSteps: m.weekSteps, stride: row.stride, title: row.title };
   });
-  return G.raidCreate(members, { seed: 1, tier: sq.tier });
+  return G.raidCreate(members, { seed: 1, tier: sq.tier, enraged: !goalNow().met });
+}
+// This week's squad goal (see Game.squadGoal): once the raid has started, the server's frozen copy.
+const goalNow = () => S.D.raid?.goal || G.squadGoal(squad().tier, weekRows().rows);
+function goalPanel() {
+  if (!squad()) return "";
+  const g = goalNow(), boss = G.bossFor(squad().tier), pct = Math.min(1, g.steps / Math.max(1, g.target));
+  const left = Math.max(0, g.target - g.steps), daysLeft = Math.max(1, 6 - ((new Date().getDay() + 6) % 7));
+  const frozen = !!S.D.raid?.goal;
+  return `<section class="panel goal ${g.met ? "met" : ""}">
+      <div class="ptitle"><span class="ic-badge ${g.met ? "green" : "red"}">${ic(g.met ? "check" : "steps")}</span><h2 class="ol-sm">Squad goal</h2><span class="side chip ${g.met ? "green" : "red"}">${g.met ? "Made it" : frozen ? "Missed" : `${fmt(left)} to go`}</span></div>
+      <div class="goalbar"><i style="width:${pct * 100}%"></i><span>${fmt(g.steps)} / ${fmt(g.target)} steps</span></div>
+      <p class="small muted" style="margin:10px 0 0">${g.met
+        ? `${esc(boss.name)} stays normal on Sunday. Every step past this still raises your raid power.`
+        : frozen ? `The squad missed the goal, so ${esc(boss.name)} is enraged: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder.`
+        : `Between you, average ${fmt(g.perDay)} steps a day each, Monday to Saturday (Sunday's count too). Miss it and ${esc(boss.name)} is <b>enraged</b> on Sunday: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder. About ${fmt(left / g.players / daysLeft)} a day each from here.`}</p>
+      <p class="tiny faint" style="margin:6px 0 0">${g.players} player${g.players === 1 ? "" : "s"} × ${fmt(g.perDay)} × 6 days. Each boss up the ladder asks 500 more a day; it's back to 5,000 at the start of every lap.${squad().members.some((m) => m.fresh) ? " Players who joined after Thursday don't add to it this week." : ""}</p>
+    </section>`;
 }
 const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
 function raidHero() {
@@ -508,7 +525,7 @@ function raidHero() {
   }
   return `<section class="panel hero">
       <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #5a4bb0 0%, #24306e 45%, #121a44 100%)"></div>
-        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p></div>
+        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}${boss.enraged ? ` <span class="chip red">${ic("bolt")} ${S.D.raid?.goal ? "Enraged" : "Enraged unless you hit the goal"}</span>` : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p></div>
         <div class="portrait">${portraitImg("boss", boss.id, { w: 300, h: 320 })}</div></div>
       <div class="body">
         <div class="tiles">
@@ -525,7 +542,7 @@ function tabRaid() {
   if (!squad()) return `${noSquadPanel()}${howRaids()}`;
   const st = myStats(), cls = myClass(), sug = G.suggestedPosition(st), pos = me().pos || sug, tier = squad().tier;
   const lap = Math.floor((tier - 1) / G.BOSSES.length) + 1;
-  return `${raidHero()}${weekPanel()}
+  return `${raidHero()}${goalPanel()}${weekPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${lap}</span></div>
       <div class="ladder">${G.BOSSES.map((b, i) => {
@@ -775,13 +792,15 @@ function logSheet(kind) {
 function profileSheet(id) {
   const x = squad()?.members.find((m) => m.id === id);
   if (!x) return;
-  const you = id === me().id, st = G.stats(x.character || {}), cls = G.classOf(st), pos = G.posOf(you ? me().pos : x.pos);
+  const you = id === me().id, st = G.stats(x.character || {}), cls = G.classOf(st);
   const row = weekRows().rows.find((r) => r.id === id), gear = you ? me().gear : x.gear || {};
+  // Best spot from their stats with gear on; if they've picked somewhere else, say so too.
+  const best = G.posOf(G.suggestedPosition(G.loadout(st, gear, you ? S.D.inv : {}).g)), picked = (you ? me().pos : x.pos) || null;
   const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
   openSheet(`${sheetHead(esc(you ? "You" : x.name))}
     <div class="profile">
       <div class="walker-big has-fallback"><span class="fb">${Walker.svg(ANS[id], { mood: "fresh", label: `${x.name}'s walker` })}</span>${portraitImg("walker", id, { w: 340, h: 400 })}</div>
-      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span><span class="chip">Level ${x.level}</span><span class="chip">${pos.e} ${pos.label} in raids</span></div>
+      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span><span class="chip">Level ${x.level}</span><span class="chip">${best.e} Best at the ${best.label.toLowerCase()}</span>${picked && picked !== best.id ? `<span class="chip">Plays ${G.posOf(picked).label.toLowerCase()}</span>` : ""}</div>
       <p class="tiny faint" style="text-align:center;margin:8px 0 12px">${esc(cls.blurb)}</p>
     </div>
     <div class="tiles">
@@ -1377,7 +1396,7 @@ function becomeHost() {
   if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
   if (!R) {
     const here = Object.keys(v.present).filter((id) => v.roster[id]);
-    R = G.raidCreate((here.length ? here : [v.my]).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin });
+    R = G.raidCreate((here.length ? here : [v.my]).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged });
   }
   R.dur = (ends - started) / 1000;
   R.t = Math.max(R.t, (now() - started) / 1000);
@@ -1510,7 +1529,7 @@ function renderRaid() {
   $("#app").innerHTML = `<div class="arena raid" id="arena"><div class="shake-wrap" id="shake">
     <div class="hud">
       <div class="bossbar"><div class="por">${ic("raid")}<span class="lv">LV ${R.lvl.toFixed(1)}</span></div>
-        <div class="nm"><b class="ol-sm">${esc(R.boss.name)}</b><small>Boss ${R.tier} · ${R.members.filter((m) => !m.away).length} fighting</small></div>
+        <div class="nm"><b class="ol-sm">${esc(R.boss.name)}${R.boss.enraged ? ' <span class="chip red" style="height:18px;font-size:9.5px;padding:0 6px">Enraged</span>' : ""}</b><small>Boss ${R.tier} · ${R.members.filter((m) => !m.away).length} fighting</small></div>
         <div class="right"><span class="timer">${ic("clock")}<span id="r-clock"></span></span><button class="hbtn" data-act="raid-quit" aria-label="Leave the raid">${ic("close")}</button></div></div>
       <div class="hp" id="r-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
     </div>
