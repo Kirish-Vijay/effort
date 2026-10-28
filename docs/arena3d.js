@@ -128,7 +128,8 @@ function prepareModel(gltf, spec) {
     o.frustumCulled = false;
     const src = o.material;
     // Re-light the model with the same toon ramp as everything else, keeping its colours/textures.
-    o.material = toon(src.color ? src.color.clone() : 0xffffff, { map: src.map || null, vertexColors: !!src.vertexColors, transparent: !!src.transparent, opacity: src.opacity ?? 1 });
+    const paint = spec.paint?.[src.name];
+    o.material = toon(paint ? new THREE.Color(paint) : src.color ? src.color.clone() : 0xffffff, { map: src.map || null, vertexColors: !!src.vertexColors, transparent: !!src.transparent, opacity: src.opacity ?? 1 });
     if (spec.tint) o.material.color.lerp(new THREE.Color(spec.tint), 0.35);
   });
   const mixer = new THREE.AnimationMixer(obj), clips = {};
