@@ -883,7 +883,8 @@ async function passkeySignin() {
 
 // Email: Supabase Auth sends a 6-digit code; entering it proves the email, and the server takes it from there.
 async function sendEmailCode(email, forSignin) {
-  const { error } = await realtime().auth.signInWithOtp({ email, options: { shouldCreateUser: !forSignin } });
+  // The email should carry a 6-digit code; if it carries a link instead, the link comes back here (see boot).
+  const { error } = await realtime().auth.signInWithOtp({ email, options: { shouldCreateUser: !forSignin, emailRedirectTo: APP_URL } });
   if (error) throw new Error(/signups not allowed|not found|not allowed for otp/i.test(error.message) ? "No Effort account has that email" : error.message);
 }
 async function checkEmailCode(email, code) {
@@ -1916,6 +1917,14 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
   render();
   const params = new URLSearchParams(location.search);
   const restore = params.get("me"), inviteCode = params.get("g");
+  // Back from an email link rather than a code: #access_token=… proves the email, same as a code does.
+  const hash = new URLSearchParams(location.hash.slice(1)), emailAccess = hash.get("access_token");
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  if (hash.get("error_description")) toast(`That email link didn't work (${hash.get("error_description")}). Use the 6-digit code instead`);
+  if (emailAccess && !S.token) {
+    try { return await signedIn((await callAuth("email_signin", { access_token: emailAccess })).token); }
+    catch (e) { toast(e.message); }
+  }
   if (restore && restore !== S.token) { S.token = restore; store.set("token", restore); }
   if (S.token) {
     try { await load(); }
@@ -1926,7 +1935,12 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
     }
     history.replaceState(null, "", `${APP_URL}?me=${S.token}`);
     S.view = "main"; render();
-    refreshPush(); keepPushAlive(); checkAppUpdate(); checkAuth();
+    refreshPush(); keepPushAlive(); checkAppUpdate();
+    if (emailAccess) {
+      try { const r = await callAuth("link_email", { token: S.token, access_token: emailAccess }); toast(`Email added: ${r.email}`); }
+      catch (e) { toast(e.message); }
+    }
+    checkAuth();
     if (inviteCode && squad()?.code !== inviteCode.toUpperCase()) {
       try {
         const inv = await lookupInvite(inviteCode);
