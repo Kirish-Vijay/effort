@@ -354,8 +354,12 @@ function viewMain() {
 }
 function walletHtml() {
   const w = S.D.wallet;
-  if (w < 0) return `<div class="wallet"><span class="cur debt" title="You're in debt"><span class="cico">${coin()}</span>−${fmt(-w)}</span></div>`;
-  return `<div class="wallet"><span class="cur" title="Endeavours (100 Efforts each)"><span class="cico">${gem()}</span>${fmt(Math.floor(w / PER_E()))}</span><span class="cur" title="Efforts"><span class="cico">${coin()}</span>${w % PER_E()}</span></div>`;
+  if (w < 0) return `<button class="wallet" data-act="wallet" aria-label="You owe ${fmt(-w)} Efforts"><span class="cur eff debt"><span class="cico">${coin(24)}</span><span class="cv"><b>−${fmt(-w)}</b><small>Efforts owed</small></span></span></button>`;
+  const n = Math.floor(w / PER_E()), e = w % PER_E();
+  return `<button class="wallet" data-act="wallet" aria-label="${n} Endeavours and ${e} Efforts. What are these?">
+      <span class="cur end"><span class="cico">${gem(24)}</span><span class="cv"><b>${fmt(n)}</b><small>Endeavour${n === 1 ? "" : "s"}</small></span></span>
+      <span class="cur eff"><span class="cico">${coin(24)}</span><span class="cv"><b>${e}</b><small>Effort${e === 1 ? "" : "s"}</small></span></span>
+    </button>`;
 }
 // A dot on the dock when something's waiting: the Taxman is open, or the raid is live.
 function dockDot(tab) {
@@ -787,6 +791,17 @@ function profileSheet(id) {
       return it ? `<div class="slot full" style="--rc:${G.tierOf(it.tier).color};cursor:default"><div class="art">${itemArt(it)}</div><span class="slab">${esc(it.name)}</span></div>`
         : `<div class="slot" style="cursor:default"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[sl])}<span>${slotName[sl]}</span></div></div>`;
     }).join("")}</div>`);
+}
+// What the two currencies are, from tapping the wallet.
+function walletSheet() {
+  const w = S.D.wallet, R = G.RULES;
+  openSheet(`${sheetHead("Your money")}
+    <div class="money">
+      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut at 7pm unless you beat him.</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : w % PER_E()}</b></div>
+      <div class="mrow"><span class="mic">${gem(44)}</span><div class="grow"><b>Endeavours</b><span>${PER_E()} Efforts make 1 Endeavour, automatically. Gear in the shop costs Endeavours.</span></div><b class="num">${fmt(Math.max(0, Math.floor(w / PER_E())))}</b></div>
+    </div>
+    ${w < 0 ? `<p class="small" style="color:#ff9aa3;margin:12px 0 0">You're in debt: your next ${fmt(-w)} Efforts pay it off before you keep any.</p>` : `<p class="tiny faint" style="margin:12px 0 0">So ${fmt(w)} Efforts in total: ${fmt(Math.floor(w / PER_E()))} Endeavour${Math.floor(w / PER_E()) === 1 ? "" : "s"} and ${w % PER_E()} Effort${w % PER_E() === 1 ? "" : "s"} towards the next.</p>`}
+    <button class="btn gold block" style="margin-top:14px" data-tab="shop">${ic("bag")} Spend them in the shop</button>`);
 }
 function squadSheet() {
   const sq = squad();
@@ -1821,7 +1836,7 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, a[data-act]");
   if (!t) return;
   const d = t.dataset;
-  if (d.tab) { S.tab = d.tab; store.set("tab", d.tab); render(); scrollTo(0, 0); FX.play("tap"); return; }
+  if (d.tab) { if (!$("#sheet").hidden) closeSheet(); S.tab = d.tab; store.set("tab", d.tab); render(); scrollTo(0, 0); FX.play("tap"); return; }
   if (d.answer !== undefined && S.view === "quiz") {
     const q = QUESTIONS[S.qi];
     S.answers[q.id] = d.answer;
@@ -1904,6 +1919,7 @@ document.addEventListener("click", async (e) => {
       try { await call("leave", { token: S.token, code: sq.code }); await load(); render(); toast(`You left ${sq.name}`); } catch (err) { toast(err.message); }
       break;
     }
+    case "wallet": walletSheet(); break;
     case "copy-restore": copy(`${APP_URL}?me=${S.token}`, "Restore link copied. Keep it private"); break;
     case "signout": if (confirm("Sign out on this phone? You'll need your restore link to get back in.")) signOut(); break;
     case "tax": startTax(); break;

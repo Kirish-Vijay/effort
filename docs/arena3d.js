@@ -7,7 +7,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 
 let buildWalker = null;
-try { ({ buildWalker } = await import("./walker3d.js")); } catch { /* falls back to simple walkers */ }
+try { ({ buildWalker } = await import("./ninja3d.js")); } catch { /* falls back to simple walkers */ }
 
 const INK = 0x1f2a24;
 const ROWS = { front: -0.4, mid: 1.1, back: 2.6 };

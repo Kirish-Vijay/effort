@@ -976,16 +976,22 @@ function coin(size) {
 }
 function gem(size) {
   size = size || 20;
-  const fc = (d, c) => `<path d="${d}" fill="${c}"/>`;
+  // An Endeavour: a crystal shuriken. Four blades, each split into a lit and a shaded facet, round a hole.
+  const tips = [[32, 3], [61, 32], [32, 61], [3, 32]], inner = [[40.5, 23.5], [40.5, 40.5], [23.5, 40.5], [23.5, 23.5]];
+  const lit = ["#c8f6ff", "#7fe0ff", "#45b9f5", "#9becff"], dark = ["#2f9be8", "#1f86dc", "#1559b8", "#2a8fe0"];
+  const star = tips.map((t, k) => `L${t[0]} ${t[1]}L${inner[k][0]} ${inner[k][1]}`).join("").replace(/^L/, "M") + "Z";
+  let facets = "";
+  tips.forEach((t, k) => {
+    const a = inner[(k + 3) % 4], b = inner[k];
+    facets += `<path d="M32 32L${a[0]} ${a[1]}L${t[0]} ${t[1]}Z" fill="${lit[k]}"/><path d="M32 32L${t[0]} ${t[1]}L${b[0]} ${b[1]}Z" fill="${dark[k]}"/>`;
+  });
   const body =
-    `<path d="M20 9H44L59 24L32 57L5 24Z" fill="${INK}" stroke="${INK}" stroke-width="6" stroke-linejoin="round"/>` +
-    fc("M20 9L26 24H5Z", "#7fe0ff") + fc("M20 9H44L38 24H26Z", "#c8f6ff") + fc("M44 9L59 24H38Z", "#2f9be8") +
-    fc("M5 24H26L32 57Z", "#45b9f5") + fc("M26 24H38L32 57Z", "#1f86dc") + fc("M38 24H59L32 57Z", "#1559b8") +
-    fc("M20 9L26 24L23 18Z", "#e9fbff") +
-    `<path d="M20 9L26 24M44 9L38 24M5 24H59M26 24L32 57L38 24" fill="none" stroke="${INK}" stroke-width="1.3" opacity=".35" stroke-linejoin="round"/>` +
-    `<path d="M20 9H44L59 24L32 57L5 24Z" fill="none" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>` +
-    `<path d="M10 24L22 38" stroke="#e9fbff" stroke-width="2" stroke-linecap="round" opacity=".7"/>` +
-    Sp(27, 15.5, 5.5) + Sp(52, 8, 3.4);
+    `<path d="${star}" fill="${INK}" stroke="${INK}" stroke-width="6" stroke-linejoin="round"/>` + facets +
+    `<path d="M32 32L32 3M32 32L61 32M32 32L32 61M32 32L3 32" stroke="${INK}" stroke-width="1.2" opacity=".3"/>` +
+    `<path d="${star}" fill="none" stroke="${INK}" stroke-width="3" stroke-linejoin="round"/>` +
+    `<circle cx="32" cy="32" r="7.5" fill="#0d1a3a" stroke="${INK}" stroke-width="3"/><circle cx="32" cy="32" r="7.5" fill="none" stroke="#c8f6ff" stroke-width="1.6" opacity=".7"/>` +
+    `<path d="M29 9L31 22" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".8"/>` +
+    Sp(50, 12, 4.5) + Sp(13, 50, 3);
   return `<svg ${NS} viewBox="0 0 64 64" width="${size}" height="${size}" focusable="false" aria-hidden="true">${body}</svg>`;
 }
 
