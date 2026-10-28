@@ -19,7 +19,13 @@ const TIERS = [
   { id: "epic", label: "Epic", color: "#a86bff", lvl: 6, price: 1200 },
   { id: "legendary", label: "Legendary", color: "#ffb21e", lvl: 11, price: 3000 },
   { id: "mythic", label: "Mythic", color: "#ff4d6a", lvl: 18, price: 7500 },
+  { id: "relic", label: "Relic", color: "#2ee6c8", lvl: 25, price: 15000 },
+  // Season gear: on sale only during its season, with a bonus for wearing the whole set.
+  { id: "s1", label: "Season 1", color: "#5fd0a8", lvl: 6, price: 1800, season: "s1" },
 ];
+const SETS = {
+  s1: { name: "The Long Way Up kit", season: "s1", bonus: ["spCharge", 0.25], what: "Wear all three: your special charges 25% faster" },
+};
 // id: short kebab-case, unique. stats: object of bonuses. perk: [type, value] or null.
 const ITEMS = [
   // ---------- GENERIC: weapons ----------
@@ -155,6 +161,41 @@ const ITEMS = [
   { id: "incomplete-tarot", cls: "hedge", slot: "trinket", tier: "epic", name: "Tarot Deck With Missing Cards", e: "🎴", stats: { luck: 5 }, perk: ["critChance", 0.04], text: "Every reading is the Tower. Every single time." },
   { id: "free-paper-horoscope", cls: "hedge", slot: "trinket", tier: "legendary", name: "Free Newspaper Horoscope", e: "📰", stats: { brains: 7 }, perk: ["trivia", 5], text: "Mercury is in retrograde. So are you." },
   { id: "all-knowing-8-ball", cls: "hedge", slot: "trinket", tier: "mythic", name: "The All-Knowing Magic 8-Ball", e: "🎱", stats: { luck: 10 }, perk: ["loot", 0.35], text: "Signs point to yes. Signs always point to yes." },
+  // ---- Relic: 1.45× Mythic, every class ----
+  { id: "guest-list-damned", cls: "bouncer", slot: "weapon", tier: "relic", name: "The Guest List of the Damned", e: "📜", stats: { power: 20, guard: 7 }, perk: ["taxStart", 45], text: "Every name crossed out. In pen." },
+  { id: "nightclub-door-plate", cls: "bouncer", slot: "armour", tier: "relic", name: "Plate Armour Cut From a Nightclub Door", e: "🚪", stats: { guard: 20, power: 7 }, perk: ["thorns", 2.5], text: "Push to enter. Pull to regret." },
+  { id: "ancient-earpiece", cls: "bouncer", slot: "trinket", tier: "relic", name: "Coiled Earpiece of the Ancient Bouncers", e: "🎧", stats: { guard: 15 }, perk: ["secondWind", 1], text: "Hears trouble three postcodes away." },
+  { id: "bypass-jousting-scooter", cls: "menace", slot: "weapon", tier: "relic", name: "Jousting Scooter of the Bypass", e: "🛴", stats: { power: 20, speed: 7 }, perk: ["combo", 1.25], text: "Top speed: illegal. Steering: optional." },
+  { id: "thousand-skid-leathers", cls: "menace", slot: "armour", tier: "relic", name: "Leathers of a Thousand Skids", e: "🧥", stats: { guard: 20, speed: 7 }, perk: ["dodge", 0.15], text: "Asphalt-tested. Mum-disapproved." },
+  { id: "fourteen-point-licence", cls: "menace", slot: "trinket", tier: "relic", name: "Licence With Fourteen Points", e: "🪪", stats: { speed: 15 }, perk: ["critChance", 0.15], text: "Technically still valid. Technically." },
+  { id: "particle-whisk", cls: "mad", slot: "weapon", tier: "relic", name: "Particle Accelerator Whisk", e: "🌀", stats: { power: 20, brains: 7 }, perk: ["critDmg", 1.25], text: "Beats eggs at the speed of light." },
+  { id: "hazmat-dressing-gown", cls: "mad", slot: "armour", tier: "relic", name: "Hazmat Dressing Gown", e: "🥼", stats: { guard: 20, power: 7 }, perk: ["feast", 2.5], text: "Fluffy. Lead-lined. Faintly glowing." },
+  { id: "sentient-petri-dish", cls: "mad", slot: "trinket", tier: "relic", name: "Sentient Petri Dish", e: "🧫", stats: { brains: 15 }, perk: ["feast", 2.5], text: "It's growing. It's learning. It wants a name." },
+  { id: "shoelace-wrecking-ball", cls: "gremlin", slot: "weapon", tier: "relic", name: "Wrecking Ball on a Shoelace", e: "⚫", stats: { power: 20, luck: 7 }, perk: ["critDmg", 1.25], text: "Swung once. Regretted forever." },
+  { id: "fever-dream-pyjamas", cls: "gremlin", slot: "armour", tier: "relic", name: "Fever Dream Pyjamas", e: "🌙", stats: { guard: 20, luck: 7 }, perk: ["lifesteal", 0.05], text: "The pattern changes when you're not looking." },
+  { id: "screaming-gnome", cls: "gremlin", slot: "trinket", tier: "relic", name: "The Garden Gnome That Screams", e: "🧌", stats: { luck: 15 }, perk: ["lifesteal", 0.05], text: "Only at night. Only at you." },
+  { id: "rainbow-crossing-pike", cls: "lollipop", slot: "weapon", tier: "relic", name: "Rainbow Crossing Pike", e: "🌈", stats: { power: 20, guard: 7 }, perk: ["shield", 8], text: "Everyone crosses. Nobody passes." },
+  { id: "lighthouse-hivis", cls: "lollipop", slot: "armour", tier: "relic", name: "Hi-Vis You Can See From Lighthouses", e: "🦺", stats: { guard: 20, speed: 7 }, perk: ["shield", 8], text: "Ships steer round you. So do bosses." },
+  { id: "whistle-of-ages", cls: "lollipop", slot: "trinket", tier: "relic", name: "The Whistle of Ages", e: "📯", stats: { speed: 15 }, perk: ["heal", 0.45], text: "One blast. Three generations stop." },
+  { id: "card-catalogue-cannon", cls: "librarian", slot: "weapon", tier: "relic", name: "Card Catalogue Cannon", e: "🗃️", stats: { power: 20, brains: 7 }, perk: ["trivia", 10], text: "Fires index cards. Alphabetically." },
+  { id: "silent-reading-robes", cls: "librarian", slot: "armour", tier: "relic", name: "Robes of Silent Reading", e: "📖", stats: { guard: 20, brains: 7 }, perk: ["cdr", 0.35], text: "Absorbs sound, light and late fines." },
+  { id: "never-returned-first-edition", cls: "librarian", slot: "trinket", tier: "relic", name: "First Edition, Never Returned", e: "📕", stats: { brains: 15 }, perk: ["trivia", 10], text: "Due back in 1923. Still reading it." },
+  { id: "trafalgar-flock", cls: "pigeon", slot: "weapon", tier: "relic", name: "The Trafalgar Square Flock", e: "🕊️", stats: { power: 20, luck: 7 }, perk: ["critChance", 0.15], text: "Thirty thousand birds. One grudge." },
+  { id: "monument-mantle", cls: "pigeon", slot: "armour", tier: "relic", name: "Mantle of Every Monument", e: "🗽", stats: { guard: 20, luck: 7 }, perk: ["secondWind", 1], text: "Stood on Nelson. Sat on everyone else." },
+  { id: "the-golden-chip", cls: "pigeon", slot: "trinket", tier: "relic", name: "The Golden Chip", e: "🍟", stats: { luck: 15 }, perk: ["loot", 0.45], text: "Dropped by a king. Claimed by a King." },
+  { id: "midnight-surge-pricing", cls: "courier", slot: "weapon", tier: "relic", name: "Midnight Surge Pricing", e: "💸", stats: { power: 20, brains: 7 }, perk: ["taxStart", 45], text: "Delivery fee: everything you own." },
+  { id: "thermal-cube-armour", cls: "courier", slot: "armour", tier: "relic", name: "Thermal Delivery Cube Armour", e: "🧊", stats: { guard: 20, brains: 7 }, perk: ["cdr", 0.35], text: "Keeps chips hot. Blows bosses cold." },
+  { id: "lost-in-transit", cls: "courier", slot: "trinket", tier: "relic", name: "Parcel Marked Lost in Transit", e: "📦", stats: { speed: 15 }, perk: ["combo", 1.25], text: "Nobody knows what's inside. It hums." },
+  { id: "hundred-heist-glove", cls: "pickpocket", slot: "weapon", tier: "relic", name: "Velvet Glove of a Hundred Heists", e: "🧤", stats: { power: 20, speed: 7 }, perk: ["steal", 0.13], text: "Soft as silk. Sticky as glue." },
+  { id: "invisible-raincoat", cls: "pickpocket", slot: "armour", tier: "relic", name: "The Invisible Raincoat", e: "🫥", stats: { guard: 20, speed: 7 }, perk: ["loot", 0.45], text: "You can't see it. That's the point." },
+  { id: "bank-of-england-key", cls: "pickpocket", slot: "trinket", tier: "relic", name: "Spare Key to the Bank of England", e: "🗝️", stats: { speed: 15 }, perk: ["steal", 0.13], text: "Found it under a mat. Told nobody." },
+  { id: "ley-line-rod", cls: "hedge", slot: "weapon", tier: "relic", name: "Ley Line Divining Rod", e: "🪄", stats: { power: 20, brains: 7 }, perk: ["critChance", 0.15], text: "Twitches near treasure, ghosts and Greggs." },
+  { id: "stone-circle-cloak", cls: "hedge", slot: "armour", tier: "relic", name: "Cloak Woven at a Stone Circle", e: "🪨", stats: { guard: 20, luck: 7 }, perk: ["heal", 0.45], text: "Smells of druid. Works like magic." },
+  { id: "certain-tea-leaves", cls: "hedge", slot: "trinket", tier: "relic", name: "Tea Leaves of Absolute Certainty", e: "🍵", stats: { luck: 15 }, perk: ["loot", 0.45], text: "Says you'll win. Says it in Earl Grey." },
+  // ---- Season 1 set: any class ----
+  { id: "s1-trekking-pole", slot: "weapon", tier: "s1", set: "s1", season: "s1", name: "Trekking Pole, Slightly Bent", e: "🥢", stats: { power: 8, speed: 3 }, perk: null, text: "Bent at Dartmoor. Still pointing north." },
+  { id: "s1-waxed-jacket", slot: "armour", tier: "s1", set: "s1", season: "s1", name: "Waxed Jacket (Leaks a Bit)", e: "🧥", stats: { guard: 8, luck: 3 }, perk: null, text: "Keeps out most of the rain and none of the drizzle." },
+  { id: "s1-os-map", slot: "trinket", tier: "s1", set: "s1", season: "s1", name: "Ordnance Survey Map, Folded Wrong", e: "🗺️", stats: { brains: 6 }, perk: null, text: "Nobody has ever folded one back properly. Nobody ever will." },
 ];
-root.EffortItems = { CLASSES, TIERS, ITEMS };
+root.EffortItems = { CLASSES, TIERS, ITEMS, SETS };
 })(typeof window !== "undefined" ? window : globalThis);

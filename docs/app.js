@@ -118,6 +118,7 @@ const PERKS = {
   feast: (v) => `×${v} damage while the boss is feasting`,
   dodge: (v) => `${Math.round(v * 100)}% chance to dodge a hit`,
   loot: (v) => `+${Math.round(v * 100)}% raid rewards`,
+  spCharge: (v) => `Your special charges ${Math.round(v * 100)}% faster`,
 };
 const perkText = (p) => (p ? PERKS[p[0]]?.(p[1]) || "" : "");
 const statLabel = (k) => G.STATS.find((s) => s.id === k)?.label || k;
@@ -374,7 +375,7 @@ const viewBoot = () => { $("#app").innerHTML = `<div class="boot"><div class="lo
 
 function viewMain() {
   const D = S.D, p = G.levelProgress(D.xp), cls = myClass();
-  const tabs = { today: tabToday, raid: tabRaid, shop: tabShop, me: tabMe };
+  const tabs = { today: tabToday, raid: tabRaid, journey: tabJourney, shop: tabShop, me: tabMe };
   if (!tabs[S.tab]) S.tab = "today";
   const html = `
     <header class="header">
@@ -383,7 +384,7 @@ function viewMain() {
       ${walletHtml()}
     </header>
     <div class="stack">${tabs[S.tab]()}</div>
-    <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
+    <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["journey", "Journey", "flag"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
       `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${ic(i)}${l}${dockDot(k)}</button>`).join("")}</div></nav>`;
   // Already on the main screens: change only what's different. Coming from anywhere else: draw it fresh.
   const app = $("#app");
@@ -403,7 +404,153 @@ function walletHtml() {
 function dockDot(tab) {
   if (tab === "today" && ["open", "live"].includes(taxState())) return '<i class="ping"></i>';
   if (tab === "raid" && ["open", "live"].includes(raidState())) return '<i class="ping"></i>';
+  if (tab === "journey" && toClaim().length) return '<i class="ping"></i>';
   return "";
+}
+
+// ---------- Journey: the season ----------
+const season = () => S.D.season || null;
+const seasonContent = () => (season() ? window.EffortSeasons?.[season().id] : null);
+const claimedSet = () => new Set(season()?.claimed || []);
+// Everything there is to claim right now: open chapters not read, track tiers reached, bounties done.
+function toClaim() {
+  const Z = season(); if (!Z || Z.upcoming) return [];
+  const got = claimedSet(), out = [];
+  for (const k of Z.chapters) if (!got.has(`${Z.id}:ch:${k}`)) out.push({ what: "chapter", k });
+  for (let k = 1; k <= Z.track; k++) if (!got.has(`${Z.id}:tr:${k}`)) out.push({ what: "track", k });
+  for (const b of Z.bounties) if (b.done && !got.has(b.ref)) out.push({ what: "bounty", ref: b.ref });
+  return out;
+}
+const affixLine = (Z) => { const A = G.AFFIXES[Z.affix]; return A ? `<span class="chip fogchip">${ic("eye")} ${esc(A.name)}: ${esc(A.what)}</span>` : ""; };
+const longDate = (day) => new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+function journeyTeaser() {
+  const Z = season(), C = seasonContent(); if (!Z || !C) return "";
+  const n = toClaim().length;
+  return `<button class="panel teaser" data-tab="journey">
+      <span class="ic-badge gold">${ic("flag")}</span>
+      <span class="grow"><small>Season ${Z.n}${Z.upcoming ? ` · starts ${longDate(Z.start)}` : ` · week ${Z.week} of 13`}</small><b>${esc(Z.name)}</b>
+        <span class="tiny muted">${Z.upcoming ? esc(Z.route) : `${fmt(Z.miles)} of ${fmt(Z.total)} miles`}${n ? ` · <span class="gold-t">${n} to claim</span>` : ""}</span></span>
+      ${ic("arrowRight")}</button>`;
+}
+// Lon/lat to map units, squashed for latitude so Britain looks like Britain.
+const proj = ([lon, lat]) => [(lon + 6.5) * 0.58 * 100, (58.9 - lat) * 100];
+function journeyMap(Z, C) {
+  const pts = C.landmarks.map((l) => proj(l.at)), coast = C.coast.map(proj);
+  const xs = coast.map((p) => p[0]), ys = coast.map((p) => p[1]);
+  const pad = 30, x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad, w = Math.max(...xs) - x0 + pad, h = Math.max(...ys) - y0 + pad;
+  const S1 = G.seasonById(Z.id), m = Z.miles, M = S1.miles;
+  let i = 0; while (i < M.length - 2 && m >= M[i + 1]) i++;
+  const f = Math.max(0, Math.min(1, (m - M[i]) / (M[i + 1] - M[i]))), at = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f];
+  const done = [...pts.slice(0, i + 1), at], line = (ps) => ps.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
+  const next = C.landmarks.findIndex((_, k) => M[k] > m);
+  return `<div class="jmap"><svg viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Map of the route, ${fmt(m)} of ${fmt(Z.total)} miles walked">
+      <path d="M${line(coast)}Z" class="land"/>
+      <polyline points="${line(pts)}" class="route"/>
+      <polyline points="${line(done)}" class="walked"/>
+      ${pts.map((p, k) => `<circle cx="${p[0]}" cy="${p[1]}" r="${k === next ? 9 : 7}" class="lm ${M[k] <= m ? "reached" : ""} ${k === next ? "next" : ""}"/>`).join("")}
+      <circle cx="${at[0]}" cy="${at[1]}" r="22" class="you-glow"/><circle cx="${at[0]}" cy="${at[1]}" r="11" class="you"/>
+      ${next >= 0 ? `<text x="${pts[next][0] + 16}" y="${pts[next][1] + 6}" class="lmt">${esc(C.landmarks[next].name)}</text>` : ""}
+    </svg></div>
+    <div class="jstats"><div><b>${fmt(m)}</b><small>of ${fmt(Z.total)} miles</small></div>
+      ${next >= 0 ? `<div><b>${fmt(M[next] - m)}</b><small>miles to ${esc(C.landmarks[next].name)}</small></div>` : `<div><b>${ic("check")}</b><small>Route walked</small></div>`}
+      <div><b>${fmt(G.RULES.stepsPerMile)}</b><small>steps a mile, by your squad's average walker</small></div></div>`;
+}
+function tabJourney() {
+  const Z = season(), C = seasonContent();
+  if (!Z || !C) return `${updateBanner()}<section class="panel"><div class="ptitle"><span class="ic-badge gold">${ic("flag")}</span><h2 class="ol-sm">The next season</h2></div><p class="small muted" style="margin:0">It's on its way. Keep walking.</p></section>`;
+  const got = claimedSet(), sq = squad();
+  const hero = `<section class="panel jhero">
+      <div class="caps gold-t">Season ${Z.n} · ${Z.upcoming ? `starts ${longDate(Z.start)}` : `week ${Z.week} of 13 · ends ${longDate(Z.end)}`}</div>
+      <h1 class="ol disp">${esc(Z.name)}</h1>
+      <p class="small muted" style="margin:0">${esc(C.blurb)}</p>
+      <div class="chips" style="margin-top:8px"><span class="chip">${ic("flag")} ${esc(Z.route)}</span>${affixLine(Z)}</div>
+    </section>`;
+  if (Z.upcoming) return `${updateBanner()}${hero}<section class="panel">${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">On ${longDate(Z.start)} your squad sets off from Land's End. A new chapter of the story opens each week as you reach each landmark. Every boss fights in fog this season, and three bounties land every Monday.</p></section>`;
+  const firstLocked = C.chapters.findIndex((_, i) => !Z.chapters.includes(i + 1));
+  const hidden = firstLocked < 0 ? 0 : C.chapters.length - firstLocked - 1;
+  const chapters = C.chapters.slice(0, firstLocked < 0 ? undefined : firstLocked + 1).map((ch, i) => {
+    const k = i + 1, open = Z.chapters.includes(k), read = got.has(`${Z.id}:ch:${k}`), M = G.seasonById(Z.id).miles;
+    const why = !open ? (Z.week < k ? `opens in week ${k}` : `at ${C.landmarks[i].name}, ${fmt(M[i] - Z.miles)} miles on`) : "";
+    return `<button class="chap ${open ? "open" : "locked"} ${read ? "read" : ""}" ${open ? `data-act="chapter" data-k="${k}"` : "disabled"}>
+        <span class="n">${read ? ic("check") : k}</span><span class="grow"><b>${open ? esc(ch.title) : "Locked"}</b><small>${esc(C.landmarks[i].name)}${why ? ` · ${why}` : ""}</small></span>
+        ${open && !read ? `<span class="chip gold">+${G.RULES.chapterReward}</span>` : open ? "" : ic("lock")}</button>`;
+  }).join("");
+  const bounty = (b) => {
+    const claimed = got.has(b.ref), pct = Math.min(1, b.have / b.need);
+    return `<div class="bounty ${b.done ? "done" : ""}"><div class="row spread" style="gap:8px"><b>${esc(b.label)}</b>${b.current ? "" : `<span class="chip">Last week</span>`}</div>
+        <div class="bar"><i style="width:${pct * 100}%"></i></div>
+        <div class="row spread"><small class="muted">${b.need > 1 ? `${fmt(b.have)} / ${fmt(b.need)}` : b.done ? "Done" : "Not yet"}</small>
+          ${claimed ? `<span class="chip green">${ic("check")} Claimed</span>` : b.done ? `<button class="btn xs gold" data-act="claim" data-what="bounty" data-ref="${b.ref}">Claim +${G.RULES.bountyReward}</button>` : `<span class="chip">+${G.RULES.bountyReward} each</span>`}</div></div>`;
+  };
+  const bounties = Z.bounties.filter((b) => b.current || (b.done && !got.has(b.ref)));
+  const nextTier = Math.min(G.RULES.trackTiers, Z.track + 1), into = Z.mySteps - Z.track * G.RULES.trackSteps;
+  const unclaimedTiers = Array.from({ length: Z.track }, (_, j) => j + 1).filter((k) => !got.has(`${Z.id}:tr:${k}`));
+  const titles = Object.entries(G.TRACK_TITLES).filter(([k]) => got.has(`${Z.id}:tr:${k}`)).map(([, t]) => t);
+  const set = I.ITEMS.filter((i) => i.set === Z.set);
+  return `${updateBanner()}${hero}
+    <section class="panel">${sq ? journeyMap(Z, C) : `${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">Join a squad to walk the route together.</p>`}</section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("receipt")}</span><h2 class="ol-sm">The story</h2><span class="side chip">${Z.chapters.length} of 13 open</span></div>
+      <p class="small muted" style="margin:-4px 0 10px">One chapter a week, once the squad reaches its landmark. ${G.RULES.chapterReward} Efforts for reading each one.</p>
+      <div class="chaps">${chapters}${hidden ? `<div class="chap locked more"><span class="n">${ic("lock")}</span><span class="grow"><b>${hidden} more to come</b><small>${esc(C.landmarks.slice(-hidden).map((l) => l.name).join(", "))}</small></span></div>` : ""}</div>
+    </section>
+    ${sq ? `<section class="panel">
+      <div class="ptitle"><span class="ic-badge red">${ic("target")}</span><h2 class="ol-sm">This week's bounties</h2><span class="side chip">New on Monday</span></div>
+      <p class="small muted" style="margin:-4px 0 10px">Squad goals. When one's done, everyone claims ${G.RULES.bountyReward} Efforts.</p>
+      <div class="bounties">${bounties.map(bounty).join("")}</div>
+    </section>` : ""}
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge gold">${ic("trophy")}</span><h2 class="ol-sm">Season track</h2><span class="side chip">Tier ${Z.track} of ${G.RULES.trackTiers}</span></div>
+      <p class="small muted" style="margin:-4px 0 10px">A tier for every ${fmt(G.RULES.trackSteps)} of your own steps this season. Every fifth tier pays more and gives you a title.</p>
+      <div class="track">${Array.from({ length: G.RULES.trackTiers }, (_, j) => { const k = j + 1, r = G.trackReward(k); return `<span class="tt ${k <= Z.track ? (got.has(`${Z.id}:tr:${k}`) ? "got" : "ready") : ""} ${r.title ? "big" : ""}" title="Tier ${k}: ${r.efforts} Efforts${r.title ? `, ${r.title}` : ""}">${r.title ? ic("crown") : k}</span>`; }).join("")}</div>
+      ${Z.track < G.RULES.trackTiers ? `<div class="bar" style="margin-top:10px"><i style="width:${(into / G.RULES.trackSteps) * 100}%"></i></div><p class="tiny muted" style="margin:6px 0 0">${fmt(G.RULES.trackSteps - into)} steps to tier ${nextTier}${G.trackReward(nextTier).title ? ` and the title ${G.trackReward(nextTier).title}` : ""}. ${fmt(Z.mySteps)} steps this season.</p>` : `<p class="small" style="margin:8px 0 0">Every tier done. End to Ender.</p>`}
+      ${titles.length ? `<div class="chips" style="margin-top:8px">${titles.map((t) => `<span class="chip gold">${ic("crown")} ${esc(t)}</span>`).join("")}</div>` : ""}
+      ${unclaimedTiers.length ? `<button class="btn gold block" style="margin-top:12px" data-act="claim-track">Claim ${unclaimedTiers.length} tier${unclaimedTiers.length > 1 ? "s" : ""} · +${fmt(unclaimedTiers.reduce((s, k) => s + G.trackReward(k).efforts, 0))}</button>` : ""}
+    </section>
+    <section class="panel">
+      <div class="ptitle"><span class="ic-badge">${ic("bag")}</span><h2 class="ol-sm">${esc(I.SETS[Z.set]?.name || "Season gear")}</h2><span class="side chip">This season only</span></div>
+      ${setNote()}
+      <div class="items">${set.map((i) => itemCard(i)).join("")}</div>
+    </section>`;
+}
+function setNote() {
+  const Z = season(), set = Z && I.SETS[Z.set];
+  return set ? `<p class="small muted" style="margin:0 0 10px">Any class can wear it. ${esc(set.what)}. On sale until ${longDate(Z.end)}, then it's gone.</p>` : "";
+}
+function chapterSheet(k) {
+  const Z = season(), C = seasonContent(); if (!Z || !C?.chapters[k - 1]) return;
+  const ch = C.chapters[k - 1], read = claimedSet().has(`${Z.id}:ch:${k}`);
+  openSheet(`${sheetHead(`Chapter ${k}`)}
+    <div class="story"><div class="caps gold-t">${esc(C.landmarks[k - 1].name)}</div><h2 class="ol-sm disp">${esc(ch.title)}</h2>${ch.text.map((p) => `<p>${esc(p)}</p>`).join("")}</div>
+    ${read ? `<button class="btn block" data-act="close-sheet">Close</button>` : `<button class="btn gold block xl" data-act="claim" data-what="chapter" data-k="${k}">Done reading · +${G.RULES.chapterReward}</button>`}`);
+}
+async function claim(what, k, ref) {
+  if (S.busy) return;
+  S.busy = true;
+  try {
+    const r = await call("season_claim", { token: S.token, what, k, ref });
+    season().claimed.push(r.ref); S.D.wallet = r.wallet;
+    FX.play("coin"); toast(`+${fmt(r.amount)} Efforts`);
+    if (!$("#sheet").hidden) closeSheet();
+    render();
+  } catch (e) { toast(e.message); }
+  finally { S.busy = false; }
+}
+async function claimTrack() {
+  const Z = season(); if (!Z || S.busy) return;
+  S.busy = true;
+  let total = 0;
+  const btn = $("[data-act=claim-track]"); if (btn) { btn.disabled = true; btn.textContent = "Claiming…"; }
+  try {
+    for (let k = 1; k <= Z.track; k++) {
+      if (claimedSet().has(`${Z.id}:tr:${k}`)) continue;
+      const r = await call("season_claim", { token: S.token, what: "track", k });
+      Z.claimed.push(r.ref); S.D.wallet = r.wallet; total += r.amount;
+    }
+  } catch (e) { toast(e.message); }
+  finally { S.busy = false; }
+  if (total) { FX.play("levelup"); toast(`+${fmt(total)} Efforts`); }
+  render();
 }
 
 // ---------- This week: the table everything hangs off ----------
@@ -492,7 +639,7 @@ function ledgerPanel() {
     <div class="feedlist">${rows.map((r) => `<div class="it"><span class="grow">${esc(label(r))}</span><span class="amt ${r.amount >= 0 ? "plus" : "minus"}">${signedEfforts(r.amount)}</span></div>`).join("")}</div></section>`;
 }
 function tabToday() {
-  return `${updateBanner()}${authNudge()}${taxHero()}${weekPanel()}${ledgerPanel()}
+  return `${updateBanner()}${authNudge()}${taxHero()}${journeyTeaser()}${weekPanel()}${ledgerPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How a day works</h2></div>
       <div class="how">
@@ -589,7 +736,7 @@ function tabRaid() {
         const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
         return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.style || b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
-      <p class="small muted" style="margin:10px 0 0">Each Sunday the lobby picks: last week's boss again, one up, or one down. Each step up is tougher, so climbing before your gear's ready can lose. After the last, the ladder loops, twice as tough and twice as rich.</p>
+      <p class="small muted" style="margin:10px 0 0">Each Sunday the lobby picks: last week's boss again, one up, or one down. Each step up is tougher, so climbing before your gear's ready can lose. After Vex the ladder keeps going: the bosses come round again, each step a little tougher and a little richer.</p>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2><span class="side chip gold">Best: ${G.posOf(sug).label}</span></div>
@@ -627,6 +774,7 @@ function howRaids() {
 // ---------- Shop ----------
 function itemCard(item, { deal = false } = {}) {
   const inv = S.D.inv, t = G.tierOf(item.tier), own = item.id in inv, on = me().gear[item.slot] === item.id, locked = !own && t.lvl > level();
+  const gone = !own && !G.onSale(item, S.D.today.day);
   const st = G.itemStats(item, inv[item.id] || 0), price = G.priceOf(item, deal);
   return `<button class="item ${item.tier} ${locked ? "locked" : ""}" style="--rc:${t.color}" data-item="${item.id}" data-deal="${deal ? 1 : ""}" aria-label="${esc(item.name)}">
     <div class="art-wrap"><span class="rarity">${t.label}</span><div class="art">${itemArt(item)}</div>
@@ -634,8 +782,8 @@ function itemCard(item, { deal = false } = {}) {
       ${locked ? `<span class="lockover">${ic("lock")}</span>` : ""}</div>
     <div class="meta"><h4>${esc(item.name)}</h4>
       <div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div></div>
-    ${item.perk ? `<div class="perk">${esc(perkText(item.perk))}</div>` : "<div></div>"}
-    <div class="foot">${locked ? `<span class="buy">Level ${t.lvl}</span>` : own ? `<span class="buy owned">${on ? "Equipped" : "Owned"}</span>` : `<span class="buy ${S.D.wallet < price ? "poor" : ""}">${gem(18)}${fmt(price / PER_E())}</span>`}</div>
+    ${item.perk ? `<div class="perk">${esc(perkText(item.perk))}</div>` : item.set ? `<div class="perk">${esc(I.SETS[item.set]?.what || "")}</div>` : "<div></div>"}
+    <div class="foot">${gone ? `<span class="buy">${G.seasonById(item.season) && S.D.today.day < G.seasonById(item.season).start ? `From ${new Date(G.seasonById(item.season).start + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "Gone"}</span>` : locked ? `<span class="buy">Level ${t.lvl}</span>` : own ? `<span class="buy owned">${on ? "Equipped" : "Owned"}</span>` : `<span class="buy ${S.D.wallet < price ? "poor" : ""}">${gem(18)}${fmt(price / PER_E())}</span>`}</div>
   </button>`;
 }
 const dealsToday = () => G.dealsFor(S.D.today.day, myClass().id, level());
@@ -645,7 +793,8 @@ function tabShop() {
   const sort = (a, b) => tierRank(a) - tierRank(b) || G.SLOTS.indexOf(a.slot) - G.SLOTS.indexOf(b.slot);
   const lists = {
     class: I.ITEMS.filter((i) => i.cls === cls.id).sort(sort),
-    all: I.ITEMS.filter((i) => !i.cls).sort(sort),
+    all: I.ITEMS.filter((i) => !i.cls && !i.season).sort(sort),
+    season: I.ITEMS.filter((i) => i.season && (G.onSale(i, S.D.today.day) || i.id in inv)).sort(sort),
     deals: dealsToday().map(G.itemById).filter(Boolean),
     bag: I.ITEMS.filter((i) => i.id in inv).sort(sort),
   };
@@ -661,8 +810,9 @@ function tabShop() {
           : `<div class="slot"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[s])}<span>${slotName[s]}</span></div></div>`;
       }).join("")}</div>
     </section>
-    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Everyone", 0], ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
+    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Everyone", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
       `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
+    ${tab === "season" ? setNote() : ""}
     ${tab === "deals" ? `<p class="small muted" style="margin:0">Three picks for your class each day, about ${Math.round(G.RULES.dealDiscount * 100)}% off. New ones at midnight.</p>` : ""}
     <div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i, { deal: tab === "deals" })).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`;
 }
@@ -677,8 +827,9 @@ function itemSheet(id, deal) {
     <p class="flavour">${esc(item.text)}</p>
     <div class="tiles">${Object.entries(st).map(([k, v]) => `<div class="tile"><div class="k" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])} ${statLabel(k)}</div><div class="v">+${v}${own && !maxed ? `<small>→ +${next[k]}</small>` : ""}</div></div>`).join("")}</div>
     ${item.perk ? `<div class="perkbox">${ic("star")}<span>${esc(perkText(item.perk))}</span></div>` : ""}
+    ${item.set ? `<div class="perkbox">${ic("star")}<span>${esc(I.SETS[item.set]?.name || "")}. ${esc(I.SETS[item.set]?.what || "")}</span></div>` : ""}
     <div class="btn-row" style="margin-top:12px">
-      ${locked ? `<button class="btn block" disabled>${ic("lock")} Unlocks at level ${t.lvl}</button>`
+      ${!own && !G.onSale(item, S.D.today.day) ? `<button class="btn block" disabled>${G.seasonById(item.season) && S.D.today.day < G.seasonById(item.season).start ? `On sale from ${longDate(G.seasonById(item.season).start)}` : "Only sold during its season"}</button>` : locked ? `<button class="btn block" disabled>${ic("lock")} Unlocks at level ${t.lvl}</button>`
         : !own ? `<button class="btn green xl block" data-buy="${id}" data-deal="${deal ? 1 : ""}" ${wallet < price ? "disabled" : ""}>Buy ${priceTag(price)}</button>`
         : `${on ? `<button class="btn" data-unequip="${item.slot}">Take off</button>` : `<button class="btn blue" data-equip="${id}">Equip</button>`}
            ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
@@ -1513,7 +1664,7 @@ function becomeHost() {
   if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
   if (!R) {
     const here = Object.keys(v.present).filter((id) => v.roster[id]);
-    R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged });
+    R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged, affix: v.raid.goal?.affix || null });
     for (const m of R.members) m.away = !(m.id in v.present);
   }
   R.dur = (ends - started) / 1000;
@@ -1674,7 +1825,9 @@ function renderRaid() {
     const mine = R.members.find((m) => m.id === v.my) || v.roster[v.my];
     setTimeout(() => toast(mine.title === "top" ? `Top walker this week: you hit ×${mine.stride.toFixed(2)}` : mine.title === "last" ? `Dead weight this week: ×${mine.stride.toFixed(2)} power, and the boss knows it` : `Your steps give you ×${mine.stride.toFixed(2)} power`), 900);
     FX.play("roar"); setTimeout(() => banner(R.boss.name, R.boss.title), 150);
+    if (R.affix && G.AFFIXES[R.affix]) setTimeout(() => toast(`${G.AFFIXES[R.affix].name}: ${G.AFFIXES[R.affix].what}`), 3200);
   }
+  $("#arena").classList.toggle("fogged", R.affix === "fog");
   paintRaid();
 }
 // Sound, shake and (for the person hit) a banner for each boss's signature move.
@@ -2227,6 +2380,9 @@ document.addEventListener("click", async (e) => {
     case "raid-result": if (S.D.raid?.result) { V.result = { kind: "raid", out: S.D.raid.result, R: null, lvlBefore: level() }; S.view = "result"; render(); } break;
     case "raid-quit": if (!V.raid?.R || confirm("Leave the raid? Your squad keeps fighting, and you can rejoin while it's on.")) { leaveRaid(); S.view = "main"; await refresh(true); render(); } break;
     case "ability": raidAct("ab"); break;
+    case "chapter": chapterSheet(Number(d.k)); break;
+    case "claim": claim(d.what, Number(d.k), d.ref); break;
+    case "claim-track": claimTrack(); break;
     case "special": raidAct("sp"); break;
     case "collect": collect(); break;
     case "back": FX.destroy(); V.result = null; S.view = "main"; render(); scrollTo(0, 0); break;

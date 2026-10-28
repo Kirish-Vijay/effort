@@ -46,12 +46,12 @@ const DEFAULT_RULES = {
   lapHp: 2,                 // after the last boss the ladder loops: each lap has this much more health…
   lapDmg: 1.4142,           // …hits this much harder…
   lapReward: 5.5,           // …and pays this much more
-  endless: 0,               // 1: past the last boss, each step up is stepHp/stepDmg/stepReward tougher and richer than the last
-  stepHp: 1.08, stepDmg: 1.03, stepReward: 1.04,
+  endless: 2,               // past the last boss the ladder keeps going; 2: each step adds a fixed share of the last boss
+  stepHp: 1.07, stepDmg: 1.02, stepReward: 1.015, // (1: compounds instead; 0: the old ×2 laps)
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
   raidBossDmg: 15,          // a swipe at level 1
-  raidRewardPerMember: 150, // Efforts per squad member per boss level, on a win
+  raidRewardPerMember: 70,  // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
   raidGoalPerDay: 5000,     // the squad's weekly goal before Sunday: this many steps a day for each player…
   raidGoalStep: 500,        // …plus this much more for each boss up the ladder (back to the start every lap)
@@ -71,6 +71,11 @@ const DEFAULT_RULES = {
   brewVuln: 0.2,            // Volatile Brew: the boss takes this much more for 10s
   prophecyCrit: 0.25,       // Pound-Shop Prophecy: extra crit chance for the squad
   grabShare: 0.012,         // The Kraken's Grab: damage that frees someone, as a share of its health
+  stepsPerMile: 600,        // the journey map: the squad moves a mile for every 600 steps its average walker takes
+  trackSteps: 30000,        // the season track: a tier for every 30,000 of your own steps…
+  trackTiers: 20,           // …up to 20
+  chapterReward: 30,        // Efforts for reading each story chapter
+  bountyReward: 25,         // Efforts each for every weekly squad bounty
   triviaSeconds: 25,
   triviaFailShare: 2 / 3,   // when someone dies everyone gets one question; 2/3 of the squad wrong = paralysed
   rarityBossDmg: 0.001,     // each rarity point in trivia knocks this share off the boss
@@ -210,6 +215,11 @@ function itemStats(item, up) {
 // Prices are always whole Endeavours (multiples of 100 Efforts) so the shop never shows fractions.
 const wholeE = (efforts) => Math.max(RULES.effortsPerEndeavour, Math.round(efforts / RULES.effortsPerEndeavour) * RULES.effortsPerEndeavour);
 const upgradeCost = (item, up) => wholeE(tierOf(item.tier).price * RULES.upgradeCostShare * (up + 1));
+// The sets someone has every piece of on.
+function setsWorn(equipped) {
+  const ids = Object.values(equipped || {}), sets = CAT().SETS || {};
+  return Object.entries(sets).filter(([id]) => CAT().ITEMS.filter((i) => i.set === id).every((i) => ids.includes(i.id))).map(([id, v]) => ({ id, ...v }));
+}
 function loadout(st, equipped, inv) {
   const g = { ...st }, perks = {};
   let points = 0;
@@ -223,12 +233,13 @@ function loadout(st, equipped, inv) {
       perks[type] = type === "secondWind" ? 1 : (perks[type] || 0) + val;
     }
   }
+  for (const set of setsWorn(equipped)) { const [type, val] = set.bonus; perks[type] = (perks[type] || 0) + val; }
   return { g, perks, points };
 }
 // Today's three deals: picked by date, leaning towards your class, at a discount.
 function dealsFor(day, cls, level) {
   const r = rng(hash("deals:" + day + ":" + cls));
-  const pool = CAT().ITEMS.filter((i) => (i.cls === cls || !i.cls) && tierOf(i.tier).lvl <= level);
+  const pool = CAT().ITEMS.filter((i) => (i.cls === cls || !i.cls) && !i.season && tierOf(i.tier).lvl <= level);
   const out = [];
   while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0].id);
   return out;
@@ -531,7 +542,7 @@ function makeMember(m, row) {
     cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
-function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false } = {}) {
+function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null } = {}) {
   const r = rng(seed);
   const table = weekTable(members);
   const ms = members.map((m) => makeMember(m, table.rows.find((x) => x.id === m.id)));
@@ -545,7 +556,7 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
     // Short test raids pay proportionally less.
     sizeDmg: 1, timeShare: Math.min(1, minutes / 15),
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
-    members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
+    members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: AFFIXES[affix] ? affix : null,
     // Squad-wide effects from specials (each is a time it lasts until, or a count of attacks).
     vulnUntil: 0, weakUntil: 0, prophecyUntil: 0, swarmUntil: 0, swarmBy: null, peckAcc: 0, blockNext: 0, feeble: 0, grab: null,
   };
@@ -576,7 +587,9 @@ function scheduleAttack(R) {
   B.last = type;
   const brains = Math.max(0, ...R.members.filter((m) => m.alive).map((m) => m.g.brains));
   const at = R.t + every;
-  B.next = { type, at, warnAt: at - RULES.raidTelegraph - (ATTACKS[type].tele || 0) - brains * 0.05, mid: 0, staggered: false, cancel: false };
+  // Fog: the warning comes later (never less than a moment before it lands).
+  const late = AFFIXES[R.affix]?.warnLate || 0, warn = RULES.raidTelegraph + (ATTACKS[type].tele || 0) + brains * 0.05;
+  B.next = { type, at, warnAt: at - Math.max(0.8, warn - late), mid: 0, staggered: false, cancel: false };
   B.warned = false;
 }
 function swipeTarget(R, skip = []) {
@@ -617,7 +630,7 @@ const attackName = (R, type) => R.boss.attacks?.[type] || ATTACKS[type]?.label |
 
 // One ordinary tap's damage before combo, crits and buffs.
 const tapBase = (m) => (20 + m.g.power * 4) * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos) ** 1.5;
-const charge = (m, n) => { m.sp = Math.min(RULES.spMax, (m.sp || 0) + n * (1 + m.g.brains * 0.015)); };
+const charge = (m, n) => { m.sp = Math.min(RULES.spMax, (m.sp || 0) + n * (1 + m.g.brains * 0.015) * (1 + (m.perks.spCharge || 0))); };
 // How much the middle row has to deal during a wind-up to stagger it.
 const interruptNeed = (R, type) => Math.round(RULES.interruptShare * R.boss.max * (ATTACKS[type]?.stop ? 2 : 1));
 // Every bit of damage to the boss goes through here.
@@ -1019,7 +1032,7 @@ function endRaid(R, how) {
   const n = R.members.length;
   const frac = 1 - R.boss.hp / R.boss.max;
   const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
-  const pool = how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0;
+  const pool = (how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0) * (1 + (AFFIXES[R.affix]?.loot || 0));
   // Split: half by steps walked this week, half by what you did in the fight (damage, healing, hits taken).
   const work = (m) => m.dmg + m.healed * 200 + m.taken * 100;
   const totalWork = R.members.reduce((s, m) => s + work(m), 0) || 1;
@@ -1039,6 +1052,60 @@ function endRaid(R, how) {
   };
   fx(R, { type: "end", how });
   say(R, how === "won" ? `${R.boss.name} is down!` : how === "timeout" ? "Time's up" : "Squad wiped", how === "won" ? "good" : "bad");
+}
+
+// ---------- seasons ----------
+// 13 weeks each. The squad walks a real route on the journey map; each landmark opens a story chapter
+// (no more than one new chapter a week). Every season has an affix that changes every boss, and a gear set.
+const AFFIXES = {
+  fog: { name: "Fog", what: "Warnings come 0.8s later. Raid rewards +10%", warnLate: 0.8, loot: 0.1 },
+};
+const SEASONS = [
+  { n: 1, id: "s1", name: "The Long Way Up", route: "Land's End to John o' Groats", start: "2026-11-02", weeks: 13, affix: "fog", set: "s1",
+    miles: [0, 110, 200, 270, 360, 450, 540, 610, 680, 760, 830, 900, 1000] },
+];
+const dayNo = (day) => Math.floor(Date.parse(day + "T12:00:00Z") / 86400000);
+const dayOf = (n) => new Date(n * 86400000).toISOString().slice(0, 10);
+// The season on a day: { season, week (1-13), day (0-90), start, end }, or the next one coming up (week 0).
+function seasonOn(day) {
+  const d = dayNo(day);
+  for (const S of SEASONS) {
+    const a = dayNo(S.start), b = a + S.weeks * 7 - 1;
+    if (d < a) return { season: S, week: 0, day: d - a, start: S.start, end: dayOf(b), upcoming: true };
+    if (d <= b) return { season: S, week: Math.floor((d - a) / 7) + 1, day: d - a, start: S.start, end: dayOf(b) };
+  }
+  return null;
+}
+const seasonById = (id) => SEASONS.find((S) => S.id === id) || null;
+// Season gear is only on sale during its season.
+const onSale = (item, day) => !item.season || (seasonOn(day)?.season.id === item.season && seasonOn(day).week > 0);
+// Miles along the route from the squad's daily average steps (each day only counts people who'd joined by then).
+const journeyMiles = (S, dailyAvgs) => Math.min(S.miles[S.miles.length - 1], dailyAvgs.reduce((a, x) => a + x, 0) / RULES.stepsPerMile);
+// Chapter k (1-based) opens once the squad reaches its landmark and the season has reached week k.
+const chapterOpen = (S, k, week, miles) => k >= 1 && k <= S.miles.length && week >= k && miles >= S.miles[k - 1];
+// The season track: a tier for every trackSteps of your own steps this season.
+const trackTier = (steps) => Math.min(RULES.trackTiers, Math.floor(steps / RULES.trackSteps));
+const TRACK_TITLES = { 5: "Rambler", 10: "Trailblazer", 15: "Long Hauler", 20: "End to Ender" };
+const trackReward = (k) => (k % 5 === 0 ? { efforts: 100, title: TRACK_TITLES[k] } : { efforts: 30 });
+
+// Weekly squad bounties: three a week, picked from the week and the squad's code.
+const BOUNTIES = {
+  steps: { label: (n) => `Walk ${(n * 45000).toLocaleString("en-GB")} steps between you this week`, need: (n) => n * 45000, of: (d) => d.ids.reduce((a, id) => a + d.days.reduce((b, day) => b + (d.steps[id]?.[day] || 0), 0), 0) },
+  sameDay: { label: () => "Everyone walks 8,000+ on the same day", need: () => 1, of: (d) => d.days.some((day) => d.ids.every((id) => (d.steps[id]?.[day] || 0) >= 8000)) ? 1 : 0 },
+  three10k: { label: () => "Three of you walk 10,000+ on the same day", need: () => 1, min: 3, of: (d) => d.days.some((day) => d.ids.filter((id) => (d.steps[id]?.[day] || 0) >= 10000).length >= 3) ? 1 : 0 },
+  weekend: { label: (n) => `Walk ${(n * 20000).toLocaleString("en-GB")} steps between you on Saturday and Sunday`, need: (n) => n * 20000, of: (d) => d.ids.reduce((a, id) => a + (d.steps[id]?.[d.days[5]] || 0) + (d.steps[id]?.[d.days[6]] || 0), 0) },
+  taxman: { label: (n) => `Fight the Taxman ${n * 4} times between you`, need: (n) => n * 4, of: (d) => d.taxFights || 0 },
+  goal: { label: () => "Make the step goal before Sunday's raid", need: () => 1, of: (d) => (d.goalMet ? 1 : 0) },
+  raid: { label: () => "Win Sunday's raid", need: () => 1, of: (d) => (d.raidWon ? 1 : 0) },
+};
+function bountiesFor(code, weekStart, n) {
+  const r = rng(hash(`${code}:${weekStart}`)), ids = Object.keys(BOUNTIES).filter((k) => !BOUNTIES[k].min || n >= BOUNTIES[k].min), out = [];
+  while (out.length < 3 && ids.length) out.push(ids.splice(Math.floor(r() * ids.length), 1)[0]);
+  return out.map((id, i) => ({ id, slot: i + 1, label: BOUNTIES[id].label(n), need: BOUNTIES[id].need(n) }));
+}
+// Progress on this week's bounties. d: { ids, days (Mon-Sun), steps {id: {day: n}}, taxFights, goalMet, raidWon }.
+function bountyProgress(code, weekStart, d) {
+  return bountiesFor(code, weekStart, d.ids.length).map((b) => { const have = BOUNTIES[b.id].of(d); return { ...b, have: Math.min(have, b.need), done: have >= b.need }; });
 }
 
 // ---------- live raids ----------
@@ -1081,6 +1148,7 @@ root.Game = {
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
-  SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase,
+  SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn,
+  AFFIXES, SEASONS, seasonOn, seasonById, onSale, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
 })(typeof window !== "undefined" ? window : globalThis);

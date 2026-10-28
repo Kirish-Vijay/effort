@@ -264,7 +264,7 @@ function tabRaid() {
         const t = (boss.lap - 1) * G.BOSSES.length + i + 1, state = t < L.tier ? "beaten" : t === L.tier ? "next" : "locked";
         return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
-      <p class="small muted" style="margin:10px 0 0">Win and next Sunday brings the next boss. After the last one the ladder loops, twice as tough and twice as rich.</p>
+      <p class="small muted" style="margin:10px 0 0">Win and next Sunday brings the next boss. After Vex the ladder keeps going, each step a little tougher and richer.</p>
       <div class="btn-row" style="margin-top:10px"><button class="btn xs" data-act="tier-down" ${L.tier <= 1 ? "disabled" : ""}>${ic("chevronLeft")} Easier</button><button class="btn xs" data-act="tier-up">Harder ${ic("arrowRight")}</button></div>
     </section>
     <section class="panel">
@@ -563,7 +563,9 @@ function finishTax() {
 function startRaid() {
   FX.unlock();
   const squad = botSquad();
-  V.raid = { R: G.raidCreate(squad, { minutes: L.raidMin, tier: L.tier }), last: performance.now(), q: null, bossPct: 1, taps: 0 };
+  // Playtests use this season's affix once the season is on.
+  const so = G.seasonOn(new Date().toISOString().slice(0, 10)), affix = so && !so.upcoming ? so.season.affix : null;
+  V.raid = { R: G.raidCreate(squad, { minutes: L.raidMin, tier: L.tier, affix }), last: performance.now(), q: null, bossPct: 1, taps: 0 };
   V.view = "raid";
   render();
   V.raid.timer = setInterval(raidTick, 50);

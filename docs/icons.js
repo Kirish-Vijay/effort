@@ -936,6 +936,11 @@ const ITEM_ART = {
   "pound-shop-wand": "wand pink", "scratchcard-shuriken": "shuriken purple", "corner-shop-staff": "staff green",
   "shower-curtain-robe": "cloak teal drops", "muttering-hood": "wizhat purple", "crystal-bin-bag": "cloak black gems",
   "incomplete-tarot": "cards purple", "free-paper-horoscope": "scroll blue", "all-knowing-8-ball": "orb black eight",
+
+  // relic
+  "guest-list-damned": "clipboard black", "nightclub-door-plate": "plate black", "ancient-earpiece": "radio black", "bypass-jousting-scooter": "scooter purple", "thousand-skid-leathers": "coat red zap", "fourteen-point-licence": "card red", "particle-whisk": "raygun purple", "hazmat-dressing-gown": "coat lime scorch", "sentient-petri-dish": "jar purple", "shoelace-wrecking-ball": "hammer black", "fever-dream-pyjamas": "hoodie pink", "screaming-gnome": "duck red cursed", "rainbow-crossing-pike": "sign purple swirl", "lighthouse-hivis": "vest orange", "whistle-of-ages": "badge gold", "card-catalogue-cannon": "book purple stack", "silent-reading-robes": "cloak blue", "never-returned-first-edition": "book red ledger", "trafalgar-flock": "pigeon black angry", "monument-mantle": "cloak stone crumbs", "the-golden-chip": "chips gold", "midnight-surge-pricing": "receipt gold", "thermal-cube-armour": "plate teal grid", "lost-in-transit": "sack brown", "hundred-heist-glove": "glove purple", "invisible-raincoat": "coat cream", "bank-of-england-key": "keys gold", "ley-line-rod": "wand gold", "stone-circle-cloak": "cloak green gems", "certain-tea-leaves": "jar brown",
+  // season 1 set
+  "s1-trekking-pole": "staff tan", "s1-waxed-jacket": "coat brown", "s1-os-map": "map green",
 };
 const SLOT_MOTIF = { weapon: "blade", armour: "plate", trinket: "gem" };
 const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };

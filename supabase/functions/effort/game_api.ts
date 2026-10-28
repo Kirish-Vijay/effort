@@ -8,6 +8,7 @@
 //   POST /raid_sync    the host phone saves the fight so anyone can pick it up
 //   POST /raid_finish  pay out the raid, climb the ladder, settle the week
 //   POST /buy | /upgrade | /equip
+//   POST /season_claim claim a season reward: a story chapter, a track tier or a weekly bounty
 //   POST /squad_create make a squad and join it
 import { rules } from "./rules.ts";
 
@@ -215,6 +216,47 @@ async function rosterFor(db: Any, squad: Any, weekStart: string, to: string) {
   });
 }
 
+// ---------- the season ----------
+// Where the squad is on the journey, this player's track, the chapters that are open, the week's bounties
+// (this week's and last week's, so a Sunday bounty can be claimed on Monday) and what's been claimed.
+async function seasonState(db: Any, player: Any, squad: Any, L: Any, now: number) {
+  // groups.season_day (set only in the database, for test squads) pretends it's that day for the season.
+  const today = squad?.group.season_day || localDate(now, SQUAD_TZ), so = G.seasonOn(today);
+  if (!so) return null;
+  const S = so.season;
+  const claimed = L.rows.filter((r: Any) => r.kind === "season" && r.ref.startsWith(S.id + ":")).map((r: Any) => r.ref);
+  const base = { id: S.id, n: S.n, name: S.name, route: S.route, start: S.start, end: so.end, week: so.week, upcoming: !!so.upcoming, affix: S.affix, set: S.set,
+    miles: 0, total: S.miles[S.miles.length - 1], mySteps: 0, track: 0, chapters: [] as number[], claimed, bounties: [] as Any[] };
+  if (so.upcoming) return base;
+  const ids = squad ? squad.members.map((m: Any) => m.id) : [player.id];
+  const steps = await stepsFor(db, ids, S.start, today);
+  const joined = (m: Any) => localDate(Date.parse(m.joined_at || m.created_at), SQUAD_TZ);
+  const members = squad ? squad.members : [{ ...player, joined_at: player.created_at }];
+  // Each day the squad moves by its average walker, counting only people who'd joined by then.
+  const avgs = daysFrom(S.start, today).map((day) => avgOf(members.filter((m: Any) => joined(m) <= day).map((m: Any) => steps[m.id][day] ?? 0)));
+  const miles = G.journeyMiles(S, avgs);
+  const mySteps = Object.values(steps[player.id] ?? {}).reduce((a: number, n: Any) => a + Number(n), 0);
+  const chapters = S.miles.map((_: number, i: number) => i + 1).filter((k: number) => G.chapterOpen(S, k, so.week, miles));
+  const bounties: Any[] = [];
+  if (squad) {
+    const thisMonday = mondayOf(today);
+    for (const weekStart of [thisMonday, addDays(thisMonday, -7)]) {
+      if (weekStart < S.start) continue;
+      const days = daysFrom(weekStart, addDays(weekStart, 6));
+      const [fights, raid, rows] = await Promise.all([
+        db.from("tax_fights").select("player_id", { count: "exact", head: true }).in("player_id", ids).gte("day", weekStart).lte("day", days[6]).not("finished_at", "is", null),
+        db.from("raids").select("status,result,goal").eq("group_id", squad.group.id).eq("slot", days[6]).maybeSingle(),
+        weekRows(db, squad, weekStart, today < days[6] ? today : days[6]),
+      ]);
+      const goalMet = raid.data?.goal ? !!raid.data.goal.met : G.squadGoal(Number(squad.group.tier) || 1, rows).met;
+      const wsteps = Object.fromEntries(ids.map((id: string) => [id, Object.fromEntries(days.map((d) => [d, steps[id]?.[d] ?? 0]))]));
+      const list = G.bountyProgress(squad.group.code, weekStart, { ids, days, steps: wsteps, taxFights: fights.count ?? 0, goalMet, raidWon: raid.data?.status === "done" && raid.data.result?.how === "won" });
+      for (const b of list) bounties.push({ ...b, weekStart, current: weekStart === thisMonday, ref: `${S.id}:b:${weekStart}:${b.slot}` });
+    }
+  }
+  return { ...base, miles, mySteps, track: G.trackTier(mySteps), chapters, bounties };
+}
+
 // ---------- this week's boss ----------
 function bossChoice(group: Any) {
   const last = group.last_tier ? Number(group.last_tier) : null;
@@ -226,7 +268,7 @@ function bossChoice(group: Any) {
 const LOBBY_STALE_MS = 20000;
 
 // ---------- the routes ----------
-const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip"]);
+const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim"]);
 export async function gameRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; playerByToken: Any }) {
   const { db, json, fail } = ctx;
   if (!GAME_ROUTES.has(action)) return null;
@@ -284,7 +326,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         wallet: L.wallet, xp: L.xp, inv: L.inv,
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
           scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, noScrollMin: NO_SCROLL_MIN },
-        fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid,
+        fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now),
         ledger: L.rows.slice(0, 25).map((r: Any) => ({ kind: r.kind, ref: r.ref, amount: r.amount, note: r.note, at: r.at })),
       });
     }
@@ -360,9 +402,10 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         if (here.length >= G.RULES.raidSquadSize && here.every((r: Any) => r.ready)) {
           const { data: fresh } = await sel();
           const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
-          const g = G.squadGoal(fresh.tier, roster);
+          const g = G.squadGoal(fresh.tier, roster), so = G.seasonOn(localDate(now, SQUAD_TZ));
+          const affix = so && !so.upcoming ? so.season.affix : null;
           await db.from("raids").update({ status: "live", started_at: new Date(now).toISOString(), ends_at: new Date(now + G.RULES.raidMin * 60000).toISOString(),
-            goal: { ...g, enraged: !g.met }, fighters: here.map((r: Any) => r.player_id) }).eq("id", raid.id).eq("status", "lobby");
+            goal: { ...g, enraged: !g.met, affix }, fighters: here.map((r: Any) => r.player_id) }).eq("id", raid.id).eq("status", "lobby");
         }
         ({ data: raid } = await sel());
         const lobby = (rows ?? []).map((r: Any) => ({ id: r.player_id, ready: r.ready, here: Date.parse(r.seen) > now - LOBBY_STALE_MS }));
@@ -420,6 +463,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const cls = G.classOf(statsOf(player)).id, lvl = level(L);
       if (item.cls && item.cls !== cls) return fail("That's for another class");
       if (G.tierOf(item.tier).lvl > lvl) return fail(`Unlocks at level ${G.tierOf(item.tier).lvl}`);
+      if (!G.onSale(item, localDate(now, SQUAD_TZ))) return fail("That's not in the shop right now");
       const deal = body.deal === true && G.dealsFor(localDate(now, tz), cls, lvl).includes(item.id);
       const price = G.priceOf(item, deal);
       const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "buy", p_ref: item.id, p_amount: price, p_note: `Bought ${item.name}${deal ? " (deal)" : ""}` });
@@ -442,6 +486,30 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (bal === -1) return fail("Not enough Endeavours");
       if (bal === -2) return fail("Already upgraded");
       return json({ ok: true, wallet: bal });
+    }
+
+    case "season_claim": {
+      const L = (await ledgerFor(db, [player.id]))[player.id];
+      const st = await seasonState(db, player, squad, L, now);
+      if (!st || st.upcoming) return fail("The season hasn't started");
+      const what = String(body.what), k = Math.floor(Number(body.k));
+      let ref = "", amount = 0, note = "";
+      if (what === "chapter") {
+        if (!st.chapters.includes(k)) return fail("That chapter isn't open yet");
+        ref = `${st.id}:ch:${k}`; amount = G.RULES.chapterReward; note = `Season ${st.n}, chapter ${k}`;
+      } else if (what === "track") {
+        if (!(k >= 1 && k <= st.track)) return fail("Walk a bit further first");
+        const r = G.trackReward(k);
+        ref = `${st.id}:tr:${k}`; amount = r.efforts; note = `Season ${st.n} track, tier ${k}${r.title ? `: ${r.title}` : ""}`;
+      } else if (what === "bounty") {
+        const b = st.bounties.find((x: Any) => x.ref === String(body.ref));
+        if (!b) return fail("No such bounty");
+        if (!b.done) return fail("Not done yet");
+        ref = b.ref; amount = G.RULES.bountyReward; note = `Bounty: ${b.label}`;
+      } else return fail("Nothing to claim");
+      const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "season", ref, amount, xp: amount, note });
+      if (error) return fail(error.code === "23505" ? "Already claimed" : "Couldn't claim that");
+      return json({ ok: true, amount, ref, wallet: L.wallet + amount });
     }
 
     case "equip": {
@@ -516,7 +584,7 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
   const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
   let result: Any = { how, frac: 0, pool: 0, shares: [], boss: G.bossFor(raid.tier).name, tier: raid.tier, settle: null };
   if (fighters.length) {
-    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged });
+    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged, affix: raid.goal?.affix || null });
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
     for (const m of R.members) { const r = report[m.id]; m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7); }
     // Nobody can have dealt more than the boss had.
