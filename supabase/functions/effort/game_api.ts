@@ -9,8 +9,13 @@
 //   POST /raid_finish  pay out the raid, climb the ladder, settle the week
 //   POST /buy | /upgrade | /equip
 //   POST /season_claim claim a season reward: a story chapter, a track tier or a weekly bounty
+//   POST /den_give     put Efforts into a room of the squad's Den
+//   POST /wardrobe     buy or wear cosmetics
+//   POST /hunt_finish  Wednesday's Midweek Hunt: report the fight, get your share
+//   POST /chat_list | /chat_around | /chat_send | /chat_edit | /chat_delete | /chat_search   squad chat (see chat.ts)
 //   POST /squad_create make a squad and join it
 import { rules } from "./rules.ts";
+import { chatLatest, chatRoute } from "./chat.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -76,7 +81,7 @@ function raidWindow(now: number, test: number | null) {
 }
 
 // ---------- reading data ----------
-const MEMBER_COLS = "id,name,character,gear,raid_pos,tz,created_at,steps_synced_at,steps_source,scroll_synced_at";
+const MEMBER_COLS = "id,name,character,gear,raid_pos,tz,created_at,steps_synced_at,steps_source,scroll_synced_at,cosmetics";
 async function squadOf(db: Any, playerId: string) {
   const { data: mine } = await db.from("memberships").select("group_id, groups(*)").eq("player_id", playerId).order("joined_at").limit(1);
   const g = mine?.[0]?.groups;
@@ -210,22 +215,38 @@ async function rosterFor(db: Any, squad: Any, weekStart: string, to: string) {
   return squad.members.map((m: Any) => {
     const row = T.rows.find((r: Any) => r.id === m.id), L = ledgers[m.id];
     return {
-      id: m.id, name: m.name, answers: m.character || null, stats: statsOf(m), equipped: cleanGear(m.gear, L.inv), inv: L.inv,
+      id: m.id, name: m.name, answers: m.character || null, wear: m.cosmetics || {}, stats: statsOf(m), equipped: cleanGear(m.gear, L.inv), inv: L.inv,
       pos: m.raid_pos || null, weekSteps: row.weekSteps, stride: row.stride, title: row.title, fresh: row.fresh, goalDays: rows.find((r: Any) => r.id === m.id)?.goalDays ?? 6, level: level(L),
     };
   });
 }
 
+// The day the calendar uses for this squad: today in the UK, or (test squads only) groups.season_day.
+const gameDay = (squad: Any, now: number) => squad?.group.season_day || localDate(now, SQUAD_TZ);
+
+// ---------- the Den ----------
+// Contributions are ledger rows of kind "den", ref "groupId:room:time". Totals and levels per room.
+async function denFor(db: Any, squad: Any) {
+  const totals: Record<string, number> = Object.fromEntries(G.DEN_ROOMS.map((r: Any) => [r.id, 0]));
+  if (!squad) return { totals, levels: {} as Record<string, number> };
+  const { data } = await db.from("ledger").select("amount,ref").eq("kind", "den").like("ref", `${squad.group.id}:%`).limit(50000);
+  for (const r of data ?? []) { const room = r.ref.split(":")[1]; if (room in totals) totals[room] += -r.amount; }
+  const levels = Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, G.denLevel(v)]));
+  return { totals, levels };
+}
+// Cosmetics someone owns: ledger rows of kind "cosmetic".
+const ownedCosmetics = (L: Any) => L.rows.filter((r: Any) => r.kind === "cosmetic").map((r: Any) => r.ref);
+
 // ---------- the season ----------
 // Where the squad is on the journey, this player's track, the chapters that are open, the week's bounties
 // (this week's and last week's, so a Sunday bounty can be claimed on Monday) and what's been claimed.
-async function seasonState(db: Any, player: Any, squad: Any, L: Any, now: number) {
+async function seasonState(db: Any, player: Any, squad: Any, L: Any, now: number, den: Any = null) {
   // groups.season_day (set only in the database, for test squads) pretends it's that day for the season.
   const today = squad?.group.season_day || localDate(now, SQUAD_TZ), so = G.seasonOn(today);
   if (!so) return null;
   const S = so.season;
   const claimed = L.rows.filter((r: Any) => r.kind === "season" && r.ref.startsWith(S.id + ":")).map((r: Any) => r.ref);
-  const base = { id: S.id, n: S.n, name: S.name, route: S.route, start: S.start, end: so.end, week: so.week, upcoming: !!so.upcoming, affix: S.affix, set: S.set,
+  const base = { id: S.id, n: S.n, name: S.name, route: S.route, start: S.start, end: so.end, week: so.week, upcoming: !!so.upcoming, affix: S.affix, set: S.set, written: !!S.written,
     miles: 0, total: S.miles[S.miles.length - 1], mySteps: 0, track: 0, chapters: [] as number[], claimed, bounties: [] as Any[] };
   if (so.upcoming) return base;
   const ids = squad ? squad.members.map((m: Any) => m.id) : [player.id];
@@ -234,7 +255,7 @@ async function seasonState(db: Any, player: Any, squad: Any, L: Any, now: number
   const members = squad ? squad.members : [{ ...player, joined_at: player.created_at }];
   // Each day the squad moves by its average walker, counting only people who'd joined by then.
   const avgs = daysFrom(S.start, today).map((day) => avgOf(members.filter((m: Any) => joined(m) <= day).map((m: Any) => steps[m.id][day] ?? 0)));
-  const miles = G.journeyMiles(S, avgs);
+  const miles = G.journeyMiles(S, avgs, G.denMods(den?.levels).miles || 0);
   const mySteps = Object.values(steps[player.id] ?? {}).reduce((a: number, n: Any) => a + Number(n), 0);
   const chapters = S.miles.map((_: number, i: number) => i + 1).filter((k: number) => G.chapterOpen(S, k, so.week, miles));
   const bounties: Any[] = [];
@@ -258,17 +279,21 @@ async function seasonState(db: Any, player: Any, squad: Any, L: Any, now: number
 }
 
 // ---------- this week's boss ----------
-function bossChoice(group: Any) {
+// The lobby's choice: last week's boss, one up or one down, plus the event boss while an event is on.
+function bossChoice(group: Any, day: string) {
   const last = group.last_tier ? Number(group.last_tier) : null;
   const list = last ? [...new Set([Math.max(1, last - 1), last, last + 1])] : [1];
   const want = Number(group.tier) || 1;
-  return { list, last, pick: list.includes(want) ? want : list[list.length - 1] };
+  const ev = G.eventOn(day), event = ev ? G.eventTier(ev.id, last || 1) : null;
+  if (event) list.push(event);
+  return { list, last, pick: list.includes(want) && !G.isEventTier(want) ? want : list.filter((t) => !G.isEventTier(t)).pop(), event: ev ? { ...ev, tier: event } : null };
 }
 // How long a player can go without checking in before they count as having left the lobby.
 const LOBBY_STALE_MS = 20000;
 
 // ---------- the routes ----------
-const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim"]);
+const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim", "den_give", "wardrobe", "hunt_finish",
+  "chat_list", "chat_around", "chat_send", "chat_edit", "chat_delete", "chat_search"]);
 export async function gameRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; playerByToken: Any }) {
   const { db, json, fail } = ctx;
   if (!GAME_ROUTES.has(action)) return null;
@@ -279,6 +304,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
   const tz = goodTz(player.tz);
   const squad = await squadOf(db, player.id);
   const test = squad?.group.test_until ? Date.parse(squad.group.test_until) : null;
+  if (action.startsWith("chat_")) return chatRoute(action, body, { db, json, fail, player, squad });
 
   switch (action) {
     case "game": {
@@ -296,16 +322,17 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         db.from("daily_scroll").select("minutes,auto_minutes").eq("player_id", player.id).eq("day", today).maybeSingle(),
       ]);
       const { data: raw } = await db.from("daily_steps").select("steps").eq("player_id", player.id).eq("day", today).maybeSingle();
-      let squadOut = null, raid = null, lastRaid = null;
+      let squadOut = null, raid = null, lastRaid = null, hunt = null;
+      const den = squad ? await denFor(db, squad) : null;
       if (squad) {
         await finishStale(db, squad, now);
         const week = await weekRows(db, squad, mondayOf(localDate(now, SQUAD_TZ)), localDate(now, SQUAD_TZ));
         const ledgers = await ledgerFor(db, squad.members.map((m: Any) => m.id));
         squadOut = {
-          code: squad.group.code, name: squad.group.name, tier: squad.group.tier, test_until: squad.group.test_until, bosses: bossChoice(squad.group),
+          code: squad.group.code, name: squad.group.name, tier: squad.group.tier, test_until: squad.group.test_until, bosses: bossChoice(squad.group, gameDay(squad, now)), den,
           members: squad.members.map((m: Any) => {
             const w = week.find((x: Any) => x.id === m.id), Lm = ledgers[m.id];
-            return { id: m.id, name: m.name, character: m.character, gear: cleanGear(m.gear, Lm.inv), pos: m.raid_pos, level: level(Lm),
+            return { id: m.id, name: m.name, character: m.character, wear: m.cosmetics || {}, gear: cleanGear(m.gear, Lm.inv), pos: m.raid_pos, level: level(Lm),
               weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, goalDays: w.goalDays, synced: m.steps_synced_at, joined_at: m.joined_at };
           }),
         };
@@ -314,6 +341,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
           db.from("raids").select("slot,tier,result,ends_at").eq("group_id", squad.group.id).eq("status", "done").order("ends_at", { ascending: false }).limit(1),
         ]);
         raid = cur; lastRaid = last?.[0] ?? null;
+        hunt = await huntState(db, player, squad, L, now, den);
         if (raid?.status === "lobby") {
           const { data: lob } = await db.from("raid_lobby").select("player_id,ready,seen").eq("raid_id", raid.id);
           raid.lobby = (lob ?? []).filter((r: Any) => Date.parse(r.seen) > now - LOBBY_STALE_MS).map((r: Any) => ({ id: r.player_id, ready: r.ready }));
@@ -321,12 +349,13 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       }
       return json({
         ok: true, now,
-        me: { id: player.id, name: player.name, platform: player.platform, tz, character: player.character, gear: cleanGear(player.gear, L.inv), pos: player.raid_pos,
+        me: { id: player.id, name: player.name, platform: player.platform, tz, character: player.character, wear: player.cosmetics || {}, owned: ownedCosmetics(L), gear: cleanGear(player.gear, L.inv), pos: player.raid_pos,
           created_at: player.created_at, steps_synced_at: player.steps_synced_at, steps_source: player.steps_source, scroll_synced_at: player.scroll_synced_at, scroll_source: player.scroll_source },
         wallet: L.wallet, xp: L.xp, inv: L.inv,
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
           scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, noScrollMin: NO_SCROLL_MIN },
-        fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now),
+        fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now, den), hunt, chat: { latest: await chatLatest(db, squad) },
+        features: Object.fromEntries(Object.keys(G.FEATURES).map((f) => [f, G.featureOn(f, gameDay(squad, now))])), gameDay: gameDay(squad, now),
         ledger: L.rows.slice(0, 25).map((r: Any) => ({ kind: r.kind, ref: r.ref, amount: r.amount, note: r.note, at: r.at })),
       });
     }
@@ -371,7 +400,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
 
     case "raid_lobby": {
       if (!squad) return fail("Join a squad first");
-      const w = raidWindow(now, test), choice = bossChoice(squad.group);
+      const w = raidWindow(now, test), choice = bossChoice(squad.group, gameDay(squad, now));
       const sel = () => db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).maybeSingle();
       let { data: raid } = await sel();
       if (!raid) {
@@ -402,10 +431,10 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         if (here.length >= G.RULES.raidSquadSize && here.every((r: Any) => r.ready)) {
           const { data: fresh } = await sel();
           const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
-          const g = G.squadGoal(fresh.tier, roster), so = G.seasonOn(localDate(now, SQUAD_TZ));
-          const affix = so && !so.upcoming ? so.season.affix : null;
+          const g = G.squadGoal(fresh.tier, roster), so = G.seasonOn(gameDay(squad, now));
+          const affix = so && !so.upcoming ? so.season.affix : null, den = (await denFor(db, squad)).levels;
           await db.from("raids").update({ status: "live", started_at: new Date(now).toISOString(), ends_at: new Date(now + G.RULES.raidMin * 60000).toISOString(),
-            goal: { ...g, enraged: !g.met, affix }, fighters: here.map((r: Any) => r.player_id) }).eq("id", raid.id).eq("status", "lobby");
+            goal: { ...g, enraged: !g.met, affix, den }, fighters: here.map((r: Any) => r.player_id) }).eq("id", raid.id).eq("status", "lobby");
         }
         ({ data: raid } = await sel());
         const lobby = (rows ?? []).map((r: Any) => ({ id: r.player_id, ready: r.ready, here: Date.parse(r.seen) > now - LOBBY_STALE_MS }));
@@ -480,7 +509,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (!item || !(item.id in L.inv)) return fail("You don't own that");
       const up = L.inv[item.id];
       if (up >= G.RULES.upgradeMax) return fail("Already maxed");
-      const cost = G.upgradeCost(item, up);
+      const cost = G.upgradeCost(item, up, (await denFor(db, squad)).levels);
       const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "upgrade", p_ref: `${item.id}:${up + 1}`, p_amount: cost, p_note: `Upgraded ${item.name} to +${up + 1}` });
       if (error) throw error;
       if (bal === -1) return fail("Not enough Endeavours");
@@ -490,7 +519,8 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
 
     case "season_claim": {
       const L = (await ledgerFor(db, [player.id]))[player.id];
-      const st = await seasonState(db, player, squad, L, now);
+      const den = await denFor(db, squad);
+      const st = await seasonState(db, player, squad, L, now, den);
       if (!st || st.upcoming) return fail("The season hasn't started");
       const what = String(body.what), k = Math.floor(Number(body.k));
       let ref = "", amount = 0, note = "";
@@ -507,9 +537,76 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         if (!b.done) return fail("Not done yet");
         ref = b.ref; amount = G.RULES.bountyReward; note = `Bounty: ${b.label}`;
       } else return fail("Nothing to claim");
+      amount = Math.round(amount * (1 + (G.denMods(den.levels).season || 0)));
       const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "season", ref, amount, xp: amount, note });
       if (error) return fail(error.code === "23505" ? "Already claimed" : "Couldn't claim that");
       return json({ ok: true, amount, ref, wallet: L.wallet + amount });
+    }
+
+    case "den_give": {
+      if (!squad) return fail("Join a squad first");
+      if (!G.featureOn("den", gameDay(squad, now))) return fail("The Den opens soon");
+      const room = G.DEN_ROOMS.find((r: Any) => r.id === body.room);
+      if (!room) return fail("No such room");
+      const amount = Math.floor(Number(body.amount));
+      if (!(amount >= 100 && amount <= 1000000)) return fail("Put in at least 1 Endeavour");
+      const den = await denFor(db, squad), next = G.denNext(den.totals[room.id]);
+      if (!next) return fail(`The ${room.name} is already at level ${G.DEN_MAX}`);
+      const give = Math.min(amount, next.need + (() => { let more = 0; for (let L = next.level + 1; L <= G.DEN_MAX; L++) more += G.denCost(L); return more; })());
+      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "den", p_ref: `${squad.group.id}:${room.id}:${now}`, p_amount: give, p_note: `Put ${give} into the ${room.name}` });
+      if (error) throw error;
+      if (bal === -1) return fail("Not enough Endeavours");
+      if (bal === -2) return fail("Try again");
+      const after = await denFor(db, squad);
+      return json({ ok: true, wallet: bal, den: after, gave: give, level: after.levels[room.id] });
+    }
+
+    case "wardrobe": {
+      const L = (await ledgerFor(db, [player.id]))[player.id], owned = ownedCosmetics(L), day = gameDay(squad, now);
+      if (!G.featureOn("wardrobe", day)) return fail("The wardrobe opens soon");
+      if (body.buy) {
+        const w = G.wardrobeById(body.buy);
+        if (!w) return fail("No such item");
+        if (w.event) return fail("That one's won at an event");
+        if (owned.includes(w.id)) return fail("You already have it");
+        const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "cosmetic", p_ref: w.id, p_amount: w.price, p_note: `Bought ${w.name}` });
+        if (error) throw error;
+        if (bal === -1) return fail("Not enough Endeavours");
+        if (bal === -2) return fail("You already have it");
+        return json({ ok: true, wallet: bal, owned: [...owned, w.id] });
+      }
+      const wear: Any = { ...(player.cosmetics || {}) };
+      for (const kind of ["suit", "band", "title"]) {
+        if (!(kind in body)) continue;
+        const id = body[kind];
+        if (id === null) { delete wear[kind]; continue; }
+        const w = G.wardrobeById(id);
+        if (!w || w.kind !== kind || !owned.includes(id)) return fail("You don't have that");
+        wear[kind] = id;
+      }
+      await db.from("players").update({ cosmetics: wear }).eq("id", player.id);
+      return json({ ok: true, wear });
+    }
+
+    case "hunt_finish": {
+      const L = (await ledgerFor(db, [player.id]))[player.id];
+      const den = await denFor(db, squad), st = await huntState(db, player, squad, L, now, den);
+      if (!st?.open) return fail("The Hunt is on Wednesdays, noon to 11pm");
+      if (st.done) return fail("You've hunted this week");
+      const report: Record<string, Any> = Object.fromEntries((Array.isArray(body.members) ? body.members : []).filter((m: Any) => m && typeof m.id === "string").map((m: Any) => [m.id, m]));
+      const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
+      const R = G.raidCreate(st.roster, { seed: st.seed, tier: st.tier, minutes: G.HUNT.minutes, affix: st.affix, den: den.levels });
+      const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
+      for (const m of R.members) { const r = report[m.id] || {}; m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7); }
+      const dealt = R.members.reduce((a: number, m: Any) => a + m.dmg, 0);
+      if (dealt > R.boss.max) for (const m of R.members) m.dmg *= R.boss.max / dealt;
+      R.boss.hp = R.boss.max * (1 - (how === "won" ? 1 : Math.min(0.999, n(body.frac, 1), dealt / R.boss.max)));
+      G.raidEnd(R, how);
+      const mine = R.result.shares.find((x: Any) => x.id === player.id), amount = Math.max(0, mine?.reward ?? 0);
+      const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "hunt", ref: st.day, amount, xp: amount + Math.round((mine?.dmg ?? 0) / 1000),
+        note: `Midweek Hunt: ${R.boss.name}, ${{ won: "won", timeout: "out of time", wiped: "wiped" }[how as "won"]}` });
+      if (error) return fail(error.code === "23505" ? "You've hunted this week" : "Couldn't save the Hunt");
+      return json({ ok: true, amount, how, boss: R.boss.name, wallet: L.wallet + amount });
     }
 
     case "equip": {
@@ -535,6 +632,22 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
   }
 }
 
+// Wednesdays, noon to 11pm UK: you and up to three squad-mates (as bots) against the squad's ladder boss.
+async function huntState(db: Any, player: Any, squad: Any, L: Any, now: number, den: Any): Promise<Any> {
+  const day = gameDay(squad, now);
+  if (!squad || !G.featureOn("hunt", day)) return null;
+  const hour = squad.group.season_day ? G.HUNT.from : Number(new Intl.DateTimeFormat("en-GB", { timeZone: SQUAD_TZ, hour: "2-digit", hourCycle: "h23" }).format(new Date(now)));
+  const open = dow(day) === G.HUNT.weekday && hour >= G.HUNT.from && hour < G.HUNT.to;
+  const done = L.rows.some((r: Any) => r.kind === "hunt" && r.ref === day);
+  const next = addDays(day, (G.HUNT.weekday - dow(day) + 7) % 7 || (open || done ? 7 : 0));
+  const base = { open, done, day, next, minutes: G.HUNT.minutes };
+  if (!open) return base;
+  const tier = Math.max(1, Number(squad.group.last_tier) || 1), so = G.seasonOn(day);
+  const roster = (await rosterFor(db, squad, mondayOf(day), day));
+  const me = roster.find((m: Any) => m.id === player.id), mates = roster.filter((m: Any) => m.id !== player.id).slice(0, 3).map((m: Any) => ({ ...m, bot: true }));
+  return { ...base, tier, boss: G.bossFor(tier).name, seed: G.hash(`${player.id}:${day}`), affix: so && !so.upcoming ? so.season.affix : null, roster: [me, ...mates], den: den?.levels || {} };
+}
+
 async function taxInputs(db: Any, player: Any, squad: Any, day: string) {
   const ids = squad ? squad.members.map((m: Any) => m.id) : [player.id];
   const [steps, scroll, L] = await Promise.all([stepsFor(db, ids, day, day), scrollFor(db, player.id, day, day), ledgerFor(db, [player.id])]);
@@ -542,7 +655,7 @@ async function taxInputs(db: Any, player: Any, squad: Any, day: string) {
   return {
     steps: steps[player.id][day] ?? 0, scrollMin: scroll[day] ?? NO_SCROLL_MIN,
     squadAvg: squad && ids.length > 1 ? avgOf(ids.map((id: string) => steps[id][day] ?? 0)) : 0,
-    stats: statsOf(player), equipped: cleanGear(player.gear, inv), inv, level: level(L[player.id]),
+    stats: statsOf(player), equipped: cleanGear(player.gear, inv), inv, level: level(L[player.id]), den: (await denFor(db, squad)).levels,
   };
 }
 
@@ -584,7 +697,7 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
   const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
   let result: Any = { how, frac: 0, pool: 0, shares: [], boss: G.bossFor(raid.tier).name, tier: raid.tier, settle: null };
   if (fighters.length) {
-    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged, affix: raid.goal?.affix || null });
+    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged, affix: raid.goal?.affix || null, den: raid.goal?.den || null });
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
     for (const m of R.members) { const r = report[m.id]; m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7); }
     // Nobody can have dealt more than the boss had.
@@ -606,8 +719,18 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
         { onConflict: "player_id,day,reason", ignoreDuplicates: true });
     }
   }
-  // Next week: this boss again, one up or one down (one up is suggested after a win).
-  await db.from("groups").update({ last_tier: raid.tier, tier: how === "won" ? raid.tier + 1 : raid.tier }).eq("id", squad.group.id);
+  if (G.isEventTier(raid.tier)) {
+    // Event bosses don't move the ladder. Beating one wins its cosmetic (once).
+    const ev = G.EVENTS[Math.floor((raid.tier - 100000) / 1000)], prize = G.WARDROBE.find((w: Any) => w.event === ev?.id);
+    if (how === "won" && prize && result.shares?.length) {
+      await db.from("ledger").upsert(result.shares.map((x: Any) => ({ player_id: x.id, kind: "cosmetic", ref: prize.id, amount: 0, xp: 0, note: `Won the ${prize.name} (${ev.name})` })),
+        { onConflict: "player_id,kind,ref", ignoreDuplicates: true });
+      result.prize = prize.id;
+    }
+  } else {
+    // Next week: this boss again, one up or one down (one up is suggested after a win).
+    await db.from("groups").update({ last_tier: raid.tier, tier: how === "won" ? raid.tier + 1 : raid.tier }).eq("id", squad.group.id);
+  }
   // Sunday's raid closes the week: settle the walking table for the whole squad (test raids don't).
   if (!raid.slot.startsWith("test:") && squad.members.length >= 2) result.settle = await settleWeek(db, squad, weekStart);
   const s = result.settle;

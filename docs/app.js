@@ -227,7 +227,9 @@ function signOut(msg) {
 
 // ---------- derived ----------
 const ANS = {}; // player id -> walker answers (for portraits and the 3D team)
-const answersOf = (p) => (p?.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x"));
+// A player's walker answers, plus any wardrobe colours they wear (_suit, _band).
+const wearOf = (w) => { const s = G.wardrobeById(w?.suit), b = G.wardrobeById(w?.band); return { ...(s ? { _suit: s.color } : {}), ...(b ? { _band: b.color } : {}) }; };
+const answersOf = (p) => ({ ...(p?.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x")), ...wearOf(p?.wear) });
 const me = () => S.D.me;
 const myStats = () => G.stats(me().character || {});
 const myClass = () => G.classOf(myStats());
@@ -367,7 +369,7 @@ function morph(el, html, depth) {
 // main screens only, never a fight, and never under an open sheet.
 const softRender = () => { if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render(); };
 function render() {
-  const views = { boot: viewBoot, welcome: viewWelcome, signin: viewSignin, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, lobby: viewLobby, tax: renderTax, raid: renderRaid, result: renderResult };
+  const views = { boot: viewBoot, welcome: viewWelcome, signin: viewSignin, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, lobby: viewLobby, tax: renderTax, raid: renderRaid, result: renderResult, chat: viewChat };
   (views[S.view] || viewBoot)();
   hydratePortraits();
 }
@@ -384,7 +386,7 @@ function viewMain() {
       ${walletHtml()}
     </header>
     <div class="stack">${tabs[S.tab]()}</div>
-    <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["journey", "Journey", "flag"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
+    <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["journey", "Journey", "flag"], ["chat", "Chat", "chat"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
       `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${ic(i)}${l}${dockDot(k)}</button>`).join("")}</div></nav>`;
   // Already on the main screens: change only what's different. Coming from anywhere else: draw it fresh.
   const app = $("#app");
@@ -405,12 +407,237 @@ function dockDot(tab) {
   if (tab === "today" && ["open", "live"].includes(taxState())) return '<i class="ping"></i>';
   if (tab === "raid" && ["open", "live"].includes(raidState())) return '<i class="ping"></i>';
   if (tab === "journey" && toClaim().length) return '<i class="ping"></i>';
+  if (tab === "chat" && squad() && chatUnread()) return '<i class="ping"></i>';
   return "";
+}
+
+// ---------- squad chat ----------
+// Its own full-screen view, built once and then changed in place (so typing and scrolling are never reset).
+// Live: a ping on the squad's channel says "there's a new message"; the words themselves only travel through
+// the server, which keeps them encrypted at rest.
+const CH = { msgs: new Map(), order: [], more: true, loadingOld: false, ch: null, reply: null, edit: null, live: true, poll: 0, searchT: 0 };
+const chatRead = () => Number(store.get("chatRead") || 0);
+const chatUnread = () => (S.D?.chat?.latest || 0) > chatRead();
+const nameOf = (id) => (id === me().id ? "You" : squad()?.members.find((m) => m.id === id)?.name || "Someone");
+const dayKey = (ts) => new Date(ts).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+const timeOf = (ts) => new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+// Text to safe HTML: links, @mentions, line breaks.
+function richText(t) {
+  const names = (squad()?.members || []).map((m) => m.name).sort((a, b) => b.length - a.length);
+  let h = esc(t).replace(/(https?:\/\/[^\s<]+[^\s<.,!?)])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  for (const n of names) h = h.split(`@${esc(n)}`).join(`<span class="mention ${n === me().name ? "me" : ""}">@${esc(n)}</span>`);
+  return h.replace(/\n/g, "<br>");
+}
+function msgHtml(m, prev) {
+  const sameDay = prev && dayKey(prev.at) === dayKey(m.at);
+  const grouped = sameDay && prev.by === m.by && Date.parse(m.at) - Date.parse(prev.at) < 7 * 60000 && !m.reply;
+  const r = m.reply && CH.msgs.get(m.reply);
+  return `${sameDay ? "" : `<div class="cday"><span>${esc(dayKey(m.at))}</span></div>`}
+    <div class="cmsg ${grouped ? "grouped" : ""} ${m.by === me().id ? "mine" : ""}" id="cm-${m.id}" data-cm="${m.id}">
+      ${grouped ? `<span class="ctime-side">${timeOf(m.at)}</span>` : `<span class="cav">${face(m.by, 38)}</span>`}
+      <div class="cbody">
+        ${m.reply ? `<button class="creply" data-jump="${m.reply}">${ic("back")} <b>${esc(r ? nameOf(r.by) : "")}</b> ${esc(r?.text ? r.text.slice(0, 80) : r ? "(message deleted)" : "an earlier message")}</button>` : ""}
+        ${grouped ? "" : `<div class="chead"><b>${esc(nameOf(m.by))}</b><span>${dayKey(m.at) === dayKey(Date.now()) ? "Today" : ""} ${timeOf(m.at)}</span></div>`}
+        <div class="ctext">${m.deleted ? `<i class="faint">Message deleted</i>` : richText(m.text ?? "")}${m.edited && !m.deleted ? `<span class="cedited">(edited)</span>` : ""}</div>
+      </div>
+      ${m.deleted ? "" : `<div class="cacts"><button data-cact="reply" data-id="${m.id}" aria-label="Reply">${ic("back")}</button>${m.by === me().id ? `<button data-cact="edit" data-id="${m.id}" aria-label="Edit">${ic("edit")}</button><button data-cact="del" data-id="${m.id}" aria-label="Delete">${ic("close")}</button>` : ""}</div>`}
+    </div>`;
+}
+function chatPaint({ keep = false, toBottom = false } = {}) {
+  const list = $("#clist"); if (!list) return;
+  const h0 = list.scrollHeight, t0 = list.scrollTop;
+  const items = CH.order.map((id) => CH.msgs.get(id));
+  list.innerHTML = `${CH.more ? `<div class="cmore">${CH.loadingOld ? "Loading…" : "Scroll up for older messages"}</div>` : `<div class="cstart"><b>This is the start of ${esc(squad()?.name || "your squad")}'s chat.</b><span>${ic("lock")} Messages are encrypted before they're stored, and only your squad can read them.</span></div>`}
+    ${items.map((m, i) => msgHtml(m, items[i - 1])).join("")}`;
+  for (const img of list.querySelectorAll("img[data-portrait]")) void img;
+  hydratePortraits();
+  if (toBottom) list.scrollTop = list.scrollHeight;
+  else if (keep) list.scrollTop = t0 + (list.scrollHeight - h0);
+  $("#cjump").hidden = CH.live && list.scrollHeight - list.scrollTop - list.clientHeight < 200;
+}
+function chatAdd(msgs, { replace = false } = {}) {
+  if (replace) { CH.msgs.clear(); CH.order = []; }
+  for (const m of msgs) { if (!CH.msgs.has(m.id)) CH.order.push(m.id); CH.msgs.set(m.id, m); }
+  CH.order.sort((a, b) => a - b);
+  const newest = CH.order[CH.order.length - 1];
+  if (CH.live && newest && newest > chatRead()) { store.set("chatRead", newest); if (S.D.chat) S.D.chat.latest = Math.max(S.D.chat.latest, newest); }
+}
+const nearBottom = () => { const l = $("#clist"); return !l || l.scrollHeight - l.scrollTop - l.clientHeight < 120; };
+async function chatNewer() {
+  if (!CH.live || !CH.order.length) return chatLoad();
+  try {
+    const r = await call("chat_list", { token: S.token, after: CH.order[CH.order.length - 1] });
+    if (!r.messages.length) return;
+    const stick = nearBottom();
+    chatAdd(r.messages);
+    chatPaint({ keep: !stick, toBottom: stick });
+    if (!stick) $("#cjump").hidden = false;
+    else if (r.messages.some((m) => m.by !== me().id)) FX.play("tap");
+  } catch { /* try again on the next ping */ }
+}
+async function chatLoad() {
+  try {
+    const r = await call("chat_list", { token: S.token });
+    CH.more = r.more; CH.live = true;
+    chatAdd(r.messages, { replace: true });
+    chatPaint({ toBottom: true });
+  } catch (e) { toast(e.message); }
+}
+async function chatOlder() {
+  if (CH.loadingOld || !CH.more || !CH.order.length) return;
+  CH.loadingOld = true;
+  try {
+    const r = await call("chat_list", { token: S.token, before: CH.order[0] });
+    CH.more = r.more;
+    chatAdd(r.messages);
+  } catch (e) { toast(e.message); }
+  CH.loadingOld = false;
+  chatPaint({ keep: true });
+}
+async function chatJump(id) {
+  if (!CH.msgs.has(id)) {
+    try {
+      const r = await call("chat_around", { token: S.token, id });
+      CH.live = false; CH.more = r.more;
+      chatAdd(r.messages, { replace: true });
+      chatPaint();
+    } catch (e) { return toast(e.message); }
+  }
+  closeChatSearch();
+  const el = $(`#cm-${id}`); if (!el) return;
+  el.scrollIntoView({ block: "center" });
+  el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600);
+  $("#cjump").hidden = CH.live && nearBottom();
+}
+function chatComposerState() {
+  const box = $("#cctx"); if (!box) return;
+  const m = CH.reply ? CH.msgs.get(CH.reply) : CH.edit ? CH.msgs.get(CH.edit) : null;
+  box.hidden = !m;
+  box.innerHTML = m ? `<span>${CH.edit ? "Editing your message" : `Replying to <b>${esc(nameOf(m.by))}</b>`}</span><button data-cact="cancel" aria-label="Cancel">${ic("close")}</button>` : "";
+}
+async function chatSend() {
+  const ta = $("#cinput"), text = ta.value.trim();
+  if (!text || CH.sending) return;
+  CH.sending = true;
+  try {
+    if (CH.edit) {
+      const r = await call("chat_edit", { token: S.token, id: CH.edit, text });
+      CH.msgs.set(r.message.id, r.message); CH.edit = null;
+      CH.ch?.send({ type: "broadcast", event: "upd", payload: { id: r.message.id } });
+      chatPaint({ keep: true });
+    } else {
+      const r = await call("chat_send", { token: S.token, text, reply: CH.reply });
+      CH.reply = null;
+      if (!CH.live) await chatLoad(); else { chatAdd([r.message]); chatPaint({ toBottom: true }); }
+      CH.ch?.send({ type: "broadcast", event: "new", payload: { id: r.message.id } });
+    }
+    ta.value = ""; chatGrow();
+    chatComposerState();
+  } catch (e) { toast(e.message); }
+  CH.sending = false;
+  ta.focus();
+}
+function chatGrow() { const ta = $("#cinput"); if (!ta) return; ta.style.height = "auto"; ta.style.height = `${Math.min(140, ta.scrollHeight)}px`; }
+function closeChatSearch() { const s = $("#csearch"); if (s) { s.hidden = true; $("#cresults").innerHTML = ""; } }
+async function chatSearch(q) {
+  const box = $("#cresults"); if (!box) return;
+  if (q.trim().length < 2) { box.innerHTML = ""; return; }
+  box.innerHTML = `<p class="small muted cpad">Searching…</p>`;
+  try {
+    const r = await call("chat_search", { token: S.token, q });
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const mark = (t) => { let h = esc(t.length > 160 ? t.slice(0, 160) + "…" : t); for (const w of words) h = h.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (x) => `<mark>${x}</mark>`); return h; };
+    box.innerHTML = r.results.length ? r.results.map((m) => `<button class="cres" data-jump="${m.id}"><span class="chead"><b>${esc(nameOf(m.by))}</b><span>${esc(dayKey(m.at))} ${timeOf(m.at)}</span></span><span class="ctext">${mark(m.text)}</span></button>`).join("")
+      : `<p class="small muted cpad">Nothing matches “${esc(q)}”.</p>`;
+  } catch (e) { box.innerHTML = `<p class="small muted cpad">${esc(e.message)}</p>`; }
+}
+function viewChat() {
+  if ($("#chatview")) return; // already built: it updates itself
+  $("#app").innerHTML = `<section class="chatview" id="chatview">
+    <header class="chathead">
+      <button class="iconbtn" data-act="chat-close" aria-label="Back">${ic("back")}</button>
+      <div class="grow"><b>${esc(squad()?.name || "Squad")}</b><small>${ic("lock")} Encrypted · ${squad()?.members.length || 0} members</small></div>
+      <button class="iconbtn" data-act="chat-search" aria-label="Search messages">${ic("target")}</button>
+    </header>
+    <div class="csearch" id="csearch" hidden><input id="cq" type="search" placeholder="Search messages" autocomplete="off" aria-label="Search messages"><div class="cresults" id="cresults"></div></div>
+    <div class="clist" id="clist" role="log" aria-live="polite"></div>
+    <button class="cjump" id="cjump" data-act="chat-latest" hidden>${ic("arrowRight")} Jump to latest</button>
+    <form class="ccomposer" data-form="chat">
+      <div class="cctx" id="cctx" hidden></div>
+      <div class="crow"><textarea id="cinput" rows="1" maxlength="2000" placeholder="Message ${esc(squad()?.name || "your squad")}" aria-label="Message"></textarea>
+        <button class="btn gold csend" aria-label="Send">${ic("arrowRight")}</button></div>
+    </form>
+  </section>`;
+  const list = $("#clist");
+  list.addEventListener("scroll", () => {
+    if (list.scrollTop < 160) chatOlder();
+    $("#cjump").hidden = CH.live && nearBottom();
+  }, { passive: true });
+  const ta = $("#cinput");
+  ta.addEventListener("input", chatGrow);
+  ta.addEventListener("keydown", (e) => {
+    // Enter sends on a keyboard; on phones it's a new line and the button sends.
+    if (e.key === "Enter" && !e.shiftKey && matchMedia("(pointer: fine)").matches) { e.preventDefault(); chatSend(); }
+    if (e.key === "Escape") { CH.reply = CH.edit = null; chatComposerState(); }
+  });
+  $("#cq").addEventListener("input", (e) => { clearTimeout(CH.searchT); CH.searchT = setTimeout(() => chatSearch(e.target.value), 350); });
+  list.addEventListener("click", (e) => {
+    const m = e.target.closest(".cmsg");
+    for (const x of list.querySelectorAll(".cmsg.sel")) if (x !== m) x.classList.remove("sel");
+    if (m && !e.target.closest("button, a")) m.classList.toggle("sel");
+  });
+  chatLoad();
+}
+function openChat() {
+  if (!squad()) return toast("Join a squad to chat");
+  S.view = "chat";
+  render();
+  if (!CH.ch && window.supabase) {
+    CH.ch = realtime().channel(`chat-${squad().code}`, { config: { broadcast: { self: false } } });
+    CH.ch.on("broadcast", { event: "new" }, () => chatNewer())
+      .on("broadcast", { event: "upd" }, async ({ payload }) => {
+        try { const r = await call("chat_around", { token: S.token, id: payload.id }); const m = r.messages.find((x) => x.id === payload.id); if (m && CH.msgs.has(m.id)) { CH.msgs.set(m.id, m); chatPaint({ keep: true }); } } catch { /* ignore */ }
+      }).subscribe();
+  }
+  clearInterval(CH.poll); CH.poll = setInterval(() => { if (S.view === "chat" && !document.hidden) chatNewer(); }, 15000);
+}
+function closeChat() {
+  clearInterval(CH.poll);
+  try { CH.ch?.unsubscribe(); } catch { /* gone */ }
+  CH.ch = null;
+  S.view = "main";
+  render();
+}
+async function chatAction(act, id) {
+  const m = CH.msgs.get(id);
+  if (act === "reply") { CH.reply = id; CH.edit = null; chatComposerState(); $("#cinput").focus(); }
+  if (act === "edit" && m) { CH.edit = id; CH.reply = null; $("#cinput").value = m.text || ""; chatGrow(); chatComposerState(); $("#cinput").focus(); }
+  if (act === "cancel") { if (CH.edit) $("#cinput").value = ""; CH.reply = CH.edit = null; chatComposerState(); chatGrow(); }
+  if (act === "del" && m) {
+    if (!CH.confirmDel || CH.confirmDel !== id) { CH.confirmDel = id; toast("Tap delete again to remove it"); setTimeout(() => { if (CH.confirmDel === id) CH.confirmDel = null; }, 3000); return; }
+    CH.confirmDel = null;
+    try { const r = await call("chat_delete", { token: S.token, id }); CH.msgs.set(id, r.message); chatPaint({ keep: true }); CH.ch?.send({ type: "broadcast", event: "upd", payload: { id } }); }
+    catch (e) { toast(e.message); }
+  }
 }
 
 // ---------- Journey: the season ----------
 const season = () => S.D.season || null;
-const seasonContent = () => (season() ? window.EffortSeasons?.[season().id] : null);
+const seasonContent = () => (season() ? window.EffortSeasons?.[season().id] || generatedSeason(season()) : null);
+// Seasons after the written ones: the route comes from world.js, the chapters from its story beats.
+function generatedSeason(Z) {
+  const W = window.EffortWorld, leg = W?.legs?.[(Z.n - 5) % (W?.legs?.length || 1)];
+  if (!leg || !W.beats) return null;
+  const r = G.rng(G.hash(Z.id)), from = (k) => W.beats[k][Math.floor(r() * W.beats[k].length)];
+  const twist = G.affixInfo(Z.affix)?.name || "the weather", L = leg.landmarks;
+  const fill = (t, k) => t.replaceAll("{place}", L[k].name).replaceAll("{next}", L[Math.min(L.length - 1, k + 1)].name).replaceAll("{route}", leg.route)
+    .replaceAll("{boss}", G.BOSSES[(Z.n + k) % G.BOSSES.length].name).replaceAll("{twist}", twist).replaceAll("{count}", "the Long Count");
+  const chapters = L.map((l, k) => {
+    const kinds = k === 0 ? ["opening", "landmark", "squad"] : k === L.length - 1 ? ["landmark", "finale", "squad"] : ["landmark", k % 3 === 0 ? "boss" : k % 4 === 1 ? "taxman" : "squad", "landmark"];
+    return { title: l.name, text: kinds.map((kd) => fill(from(kd), k)) };
+  });
+  return { id: Z.id, blurb: leg.blurb, coast: leg.coast || null, landmarks: L, chapters };
+}
 const claimedSet = () => new Set(season()?.claimed || []);
 // Everything there is to claim right now: open chapters not read, track tiers reached, bounties done.
 function toClaim() {
@@ -421,8 +648,17 @@ function toClaim() {
   for (const b of Z.bounties) if (b.done && !got.has(b.ref)) out.push({ what: "bounty", ref: b.ref });
   return out;
 }
-const affixLine = (Z) => { const A = G.AFFIXES[Z.affix]; return A ? `<span class="chip fogchip">${ic("eye")} ${esc(A.name)}: ${esc(A.what)}</span>` : ""; };
+const affixLine = (Z) => { const A = G.affixInfo(Z.affix); return A ? `<span class="chip fogchip">${ic("eye")} ${esc(A.name)}: ${esc(A.what)}</span>` : ""; };
 const longDate = (day) => new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+// While a yearly event is on: its boss waits in Sunday's lobby.
+function eventCard() {
+  const day = S.D.gameDay || S.D.today.day, ev = G.eventOn(day); if (!ev || !squad()) return "";
+  const B = G.EVENT_BOSSES[ev.id], prize = G.WARDROBE.find((w) => w.event === ev.id), won = prize && (me().owned || []).includes(prize.id);
+  const ends = new Date(`${day.slice(0, 4)}-${ev.to}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+  return `<section class="panel eventcard"><div class="caps">Event · until ${ends}</div><h2 class="ol disp">${esc(ev.name)}</h2>
+      <p class="small" style="margin:0">${esc(B.blurb)}</p>
+      <p class="small muted" style="margin:8px 0 0"><b>${esc(B.name)}</b> is a choice in Sunday's lobby: as tough as your ladder boss, 25% more loot, and the ladder doesn't move.${prize ? ` ${won ? `You've won the ${esc(prize.name)}.` : `Beat it to win the <b>${esc(prize.name)}</b>.`}` : ""}</p></section>`;
+}
 function journeyTeaser() {
   const Z = season(), C = seasonContent(); if (!Z || !C) return "";
   const n = toClaim().length;
@@ -432,24 +668,26 @@ function journeyTeaser() {
         <span class="tiny muted">${Z.upcoming ? esc(Z.route) : `${fmt(Z.miles)} of ${fmt(Z.total)} miles`}${n ? ` · <span class="gold-t">${n} to claim</span>` : ""}</span></span>
       ${ic("arrowRight")}</button>`;
 }
-// Lon/lat to map units, squashed for latitude so Britain looks like Britain.
-const proj = ([lon, lat]) => [(lon + 6.5) * 0.58 * 100, (58.9 - lat) * 100];
 function journeyMap(Z, C) {
-  const pts = C.landmarks.map((l) => proj(l.at)), coast = C.coast.map(proj);
-  const xs = coast.map((p) => p[0]), ys = coast.map((p) => p[1]);
-  const pad = 30, x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad, w = Math.max(...xs) - x0 + pad, h = Math.max(...ys) - y0 + pad;
+  // Squash longitude by the route's middle latitude, so any part of the world keeps its shape.
+  const lats = C.landmarks.map((l) => l.at[1]), k = Math.cos((((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI) / 180);
+  const fit = ([lon, lat]) => [(lon + 180) * k * 100, (90 - lat) * 100];
+  const coast = (C.coast || []).map(fit), P = C.landmarks.map((l) => fit(l.at));
+  const frame = C.coast ? coast : P;
+  const xs = frame.map((p) => p[0]), ys = frame.map((p) => p[1]);
+  const pad = C.coast ? 30 : 80, x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad, w = Math.max(...xs) - x0 + pad, h = Math.max(...ys) - y0 + pad;
   const S1 = G.seasonById(Z.id), m = Z.miles, M = S1.miles;
   let i = 0; while (i < M.length - 2 && m >= M[i + 1]) i++;
-  const f = Math.max(0, Math.min(1, (m - M[i]) / (M[i + 1] - M[i]))), at = [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f];
-  const done = [...pts.slice(0, i + 1), at], line = (ps) => ps.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
+  const f = Math.max(0, Math.min(1, (m - M[i]) / (M[i + 1] - M[i]))), at = [P[i][0] + (P[i + 1][0] - P[i][0]) * f, P[i][1] + (P[i + 1][1] - P[i][1]) * f];
+  const done = [...P.slice(0, i + 1), at], line = (ps) => ps.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
   const next = C.landmarks.findIndex((_, k) => M[k] > m);
   return `<div class="jmap"><svg viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Map of the route, ${fmt(m)} of ${fmt(Z.total)} miles walked">
-      <path d="M${line(coast)}Z" class="land"/>
-      <polyline points="${line(pts)}" class="route"/>
+      ${C.coast ? `<path d="M${line(coast)}Z" class="land"/>` : Array.from({ length: 9 }, (_, g) => `<line x1="${x0}" x2="${x0 + w}" y1="${y0 + (h * (g + 1)) / 10}" y2="${y0 + (h * (g + 1)) / 10}" class="grid"/><line y1="${y0}" y2="${y0 + h}" x1="${x0 + (w * (g + 1)) / 10}" x2="${x0 + (w * (g + 1)) / 10}" class="grid"/>`).join("")}
+      <polyline points="${line(P)}" class="route"/>
       <polyline points="${line(done)}" class="walked"/>
-      ${pts.map((p, k) => `<circle cx="${p[0]}" cy="${p[1]}" r="${k === next ? 9 : 7}" class="lm ${M[k] <= m ? "reached" : ""} ${k === next ? "next" : ""}"/>`).join("")}
+      ${P.map((p, k) => `<circle cx="${p[0]}" cy="${p[1]}" r="${k === next ? 9 : 7}" class="lm ${M[k] <= m ? "reached" : ""} ${k === next ? "next" : ""}"/>`).join("")}
       <circle cx="${at[0]}" cy="${at[1]}" r="22" class="you-glow"/><circle cx="${at[0]}" cy="${at[1]}" r="11" class="you"/>
-      ${next >= 0 ? `<text x="${pts[next][0] + 16}" y="${pts[next][1] + 6}" class="lmt">${esc(C.landmarks[next].name)}</text>` : ""}
+      ${next >= 0 ? `<text x="${P[next][0] + 16}" y="${P[next][1] + 6}" class="lmt">${esc(C.landmarks[next].name)}</text>` : ""}
     </svg></div>
     <div class="jstats"><div><b>${fmt(m)}</b><small>of ${fmt(Z.total)} miles</small></div>
       ${next >= 0 ? `<div><b>${fmt(M[next] - m)}</b><small>miles to ${esc(C.landmarks[next].name)}</small></div>` : `<div><b>${ic("check")}</b><small>Route walked</small></div>`}
@@ -465,7 +703,7 @@ function tabJourney() {
       <p class="small muted" style="margin:0">${esc(C.blurb)}</p>
       <div class="chips" style="margin-top:8px"><span class="chip">${ic("flag")} ${esc(Z.route)}</span>${affixLine(Z)}</div>
     </section>`;
-  if (Z.upcoming) return `${updateBanner()}${hero}<section class="panel">${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">On ${longDate(Z.start)} your squad sets off from Land's End. A new chapter of the story opens each week as you reach each landmark. Every boss fights in fog this season, and three bounties land every Monday.</p></section>`;
+  if (Z.upcoming) return `${updateBanner()}${hero}<section class="panel">${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">On ${longDate(Z.start)} your squad sets off from ${esc(C.landmarks[0].name)}. A new chapter of the story opens each week as you reach each landmark. Every boss fights in fog this season, and three bounties land every Monday.</p></section>`;
   const firstLocked = C.chapters.findIndex((_, i) => !Z.chapters.includes(i + 1));
   const hidden = firstLocked < 0 ? 0 : C.chapters.length - firstLocked - 1;
   const chapters = C.chapters.slice(0, firstLocked < 0 ? undefined : firstLocked + 1).map((ch, i) => {
@@ -551,6 +789,95 @@ async function claimTrack() {
   finally { S.busy = false; }
   if (total) { FX.play("levelup"); toast(`+${fmt(total)} Efforts`); }
   render();
+}
+
+// ---------- the Den ----------
+const denFmt = (r, v) => (r.fmt === "s" ? `+${(Math.round(v * 100) / 100).toString()}s` : `${r.mod === "upgrade" ? "−" : "+"}${Math.round(v * 100)}%`);
+function denPanel() {
+  if (!squad()) return "";
+  const F = S.D.features || {}, D = S.D.squad.den;
+  if (!F.den || !D) return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">Opens ${G.FEATURES.den ? new Date(G.FEATURES.den + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : "soon"}</span></div>
+      <p class="small muted" style="margin:0">A base your squad builds together. Ten rooms, ten levels each, every one a small bonus for the whole squad: more loot, harder hits, earlier warnings, cheaper upgrades.</p></section>`;
+  const rows = G.DEN_ROOMS.map((r) => {
+    const L = D.levels[r.id] || 0, nx = G.denNext(D.totals[r.id] || 0), got = D.totals[r.id] || 0;
+    const pct = nx ? Math.max(0, Math.min(1, 1 - nx.need / G.denCost(nx.level))) : 1;
+    return `<button class="denroom" data-act="den-room" data-room="${r.id}"><span class="lv">${L}</span><span class="grow"><b>${esc(r.name)}</b><small>${esc(r.what)}${L ? ` ${denFmt(r, L * r.per)}` : ""}${nx ? ` · ${G.money(nx.need)} to level ${nx.level}` : " · maxed"}</small><span class="bar"><i style="width:${pct * 100}%"></i></span></span></button>`;
+  }).join("");
+  const total = Object.values(D.levels).reduce((s, v) => s + v, 0);
+  return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">${total} of ${G.DEN_ROOMS.length * G.DEN_MAX}</span></div>
+    <p class="small muted" style="margin:-4px 0 10px">Everyone chips in. Each level helps the whole squad.</p><div class="denrooms">${rows}</div></section>`;
+}
+function denSheet(id) {
+  const r = G.DEN_ROOMS.find((x) => x.id === id), D = S.D.squad?.den; if (!r || !D) return;
+  const L = D.levels[id] || 0, nx = G.denNext(D.totals[id] || 0), w = S.D.wallet;
+  openSheet(`${sheetHead(esc(r.name))}
+    <p class="small muted" style="margin-top:0">${esc(r.what)} for the whole squad: ${denFmt(r, r.per)} a level, up to ${denFmt(r, r.per * G.DEN_MAX)}. Level ${L} now.</p>
+    ${nx ? `<p class="small">${G.money(nx.need)} to level ${nx.level}. You have ${G.money(w)}.</p>
+      <div class="btn-row">${[100, 500, 2000, nx.need].filter((v, i, arr) => v <= w && arr.indexOf(v) === i).map((v) => `<button class="btn ${v === nx.need ? "gold" : ""}" data-act="den-give" data-room="${id}" data-amount="${v}">${v === nx.need ? "Finish the level " : "+"}${priceTag(v)}</button>`).join("") || `<p class="small muted">Walk a bit more first.</p>`}</div>`
+      : `<p class="small">Maxed out. Nice work.</p>`}`);
+}
+async function denGive(room, amount) {
+  if (S.busy) return; S.busy = true;
+  try {
+    const r = await call("den_give", { token: S.token, room, amount });
+    S.D.wallet = r.wallet; S.D.squad.den = r.den; FX.play("buy"); toast(`Put ${G.money(r.gave)} into the ${G.DEN_ROOMS.find((x) => x.id === room).name} · level ${r.level}`);
+    closeSheet(); render();
+  } catch (e) { toast(e.message); } finally { S.busy = false; }
+}
+
+// ---------- the wardrobe (Me tab) ----------
+function wardrobePanel() {
+  const F = S.D.features || {};
+  if (!F.wardrobe) return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("star")}</span><h2 class="ol-sm">Wardrobe</h2><span class="side chip">Opens ${new Date(G.FEATURES.wardrobe + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long" })}</span></div>
+      <p class="small muted" style="margin:0">Suit and headband colours for your ninja, and titles. Some only come from beating event bosses.</p></section>`;
+  const owned = new Set(me().owned || []), wear = me().wear || {};
+  const card = (w) => {
+    const on = wear[w.kind] === w.id, have = owned.has(w.id);
+    const sw = w.color ? `<span class="sw" style="background:${w.color}"></span>` : `<span class="sw title">${ic("crown")}</span>`;
+    const act = on ? `<span class="chip green">Wearing</span>` : have ? `<button class="btn xs blue" data-act="wear" data-kind="${w.kind}" data-id="${w.id}">Wear</button>`
+      : w.event ? `<span class="chip">${esc(G.EVENTS.find((e) => e.id === w.event)?.name || "Event")}</span>` : `<button class="btn xs gold" data-act="wear-buy" data-id="${w.id}" ${S.D.wallet < w.price ? "disabled" : ""}>${priceTag(w.price)}</button>`;
+    return `<div class="wcard">${sw}<span class="grow"><b>${esc(w.name)}</b></span>${act}</div>`;
+  };
+  const group = (kind, label) => `<span class="field-label">${label}${wear[kind] ? ` · <button class="linkbtn" data-act="wear" data-kind="${kind}" data-id="">take off</button>` : ""}</span><div class="wgrid">${G.WARDROBE.filter((w) => w.kind === kind).map(card).join("")}</div>`;
+  return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("star")}</span><h2 class="ol-sm">Wardrobe</h2></div>
+    ${group("suit", "Suits")}${group("band", "Headbands")}${group("title", "Titles")}</section>`;
+}
+async function wardrobe(body, msg) {
+  if (S.busy) return; S.busy = true;
+  try {
+    const r = await call("wardrobe", { token: S.token, ...body });
+    if (r.owned) me().owned = r.owned;
+    if (r.wear) me().wear = r.wear;
+    if (r.wallet != null) S.D.wallet = r.wallet;
+    ANS[me().id] = answersOf(me());
+    FX.play(body.buy ? "buy" : "tap"); if (msg) toast(msg);
+    render();
+  } catch (e) { toast(e.message); } finally { S.busy = false; }
+}
+const titleOf = (p) => G.wardrobeById(p?.wear?.title)?.name || null;
+
+// ---------- the Midweek Hunt ----------
+function huntCard() {
+  const H = S.D.hunt; if (!H) return "";
+  if (!H.open) return H.done ? "" : `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Next one ${new Date(H.next + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}, noon to 11pm: five minutes against your squad's boss, with your squad-mates' gear fighting beside you.</p></section>`;
+  if (H.done) return `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Done for this week. Next Wednesday.</p></section>`;
+  return `<section class="panel huntcard"><div class="caps">Midweek Hunt · today until 11pm</div><h2 class="ol disp">${esc(H.boss)}</h2>
+    <p class="small" style="margin:0">Five minutes. You and ${H.roster.length - 1} squad-mate${H.roster.length === 2 ? "" : "s"} (their gear, fighting as bots) against your squad's ladder boss. You keep your share.</p>
+    <button class="btn gold block" style="margin-top:10px" data-act="hunt">${ic("target")} Start the Hunt</button></section>`;
+}
+function startHunt() {
+  const H = S.D.hunt; if (!H?.open || H.done) return;
+  FX.unlock();
+  for (const m of H.roster) ANS[m.id] = { ...(m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id)), ...wearOf(m.wear) };
+  const R = G.raidCreate(H.roster, { seed: H.seed, tier: H.tier, minutes: H.minutes, affix: H.affix, den: H.den });
+  V.raid = {
+    hunt: true, raid: { id: "hunt", goal: { affix: H.affix, den: H.den } }, roster: Object.fromEntries(H.roster.map((m) => [m.id, m])), my: me().id, R, host: true, A: null,
+    present: Object.fromEntries(H.roster.map((m) => [m.id, 0])), heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
+    lastSent: 0, lastSave: Infinity, q: null, taps: 0, lvlBefore: level(), rosterKey: "", hostLast: performance.now(),
+  };
+  S.view = "raid";
+  render();
+  V.raid.timer = setInterval(raidTick, 50);
 }
 
 // ---------- This week: the table everything hangs off ----------
@@ -639,7 +966,7 @@ function ledgerPanel() {
     <div class="feedlist">${rows.map((r) => `<div class="it"><span class="grow">${esc(label(r))}</span><span class="amt ${r.amount >= 0 ? "plus" : "minus"}">${signedEfforts(r.amount)}</span></div>`).join("")}</div></section>`;
 }
 function tabToday() {
-  return `${updateBanner()}${authNudge()}${taxHero()}${journeyTeaser()}${weekPanel()}${ledgerPanel()}
+  return `${updateBanner()}${authNudge()}${taxHero()}${huntCard()}${eventCard()}${journeyTeaser()}${weekPanel()}${ledgerPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How a day works</h2></div>
       <div class="how">
@@ -729,7 +1056,7 @@ function tabRaid() {
   if (!squad()) return `${noSquadPanel()}${howRaids()}`;
   const st = myStats(), cls = myClass(), sug = G.suggestedPosition(st), pos = me().pos || sug, tier = squad().tier;
   const lap = Math.floor((tier - 1) / G.BOSSES.length) + 1;
-  return `${raidHero()}${goalPanel()}${weekPanel()}
+  return `${raidHero()}${eventCard()}${goalPanel()}${weekPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${lap}</span></div>
       <div class="ladder">${G.BOSSES.map((b, i) => {
@@ -747,6 +1074,7 @@ function tabRaid() {
       <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
       <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. ${pos === sug ? "That's your best spot." : `Out of your best spot you hit ${Math.round((1 - G.posFit(G.loadout(st, me().gear, S.D.inv).g, pos) ** 1.5) * 100)}% weaker and take more damage.`} You can move rows during the fight.</p>
     </section>
+    ${denPanel()}
     ${S.D.lastRaid && S.D.raid?.status !== "done" ? lastRaidPanel(S.D.lastRaid) : ""}
     ${howRaids()}`;
 }
@@ -759,7 +1087,7 @@ function howRaids() {
   return `<section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
       <div class="how">
-        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad average set how hard you hit. Half the loot is split by steps, half by what you did in the fight. The lowest walker gets hunted by the boss and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad average set how hard you hit, and how big your ninja stands in the fight, so everyone can see who walked. Half the loot is split by steps, half by what you did in the fight. The lowest walker gets hunted by the boss and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
         <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, ${p.ability}`).join(". ")}. Out of your best row you hit weaker, take more and heal less; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder. Moving takes a few seconds.</span></div></div>
         <div class="hrow"><span class="hic">${ic("guard")}</span><div><b>Each row has a job</b><span>${G.POSITIONS.map((p) => `${p.label}, ${p.passive}: ${p.passiveWhat.charAt(0).toLowerCase() + p.passiveWhat.slice(1)}`).join(". ")}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>Every class has its own. It charges as you tap, use your ability and take hits; when the button glows, fire it. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
@@ -820,7 +1148,7 @@ function itemSheet(id, deal) {
   const item = G.itemById(id); if (!item) return;
   const inv = S.D.inv, t = G.tierOf(item.tier), up = inv[id] || 0, own = id in inv, on = me().gear[item.slot] === id, wallet = S.D.wallet;
   const locked = !own && t.lvl > level(), price = G.priceOf(item, deal), cls = item.cls ? I.CLASSES.find((c) => c.id === item.cls) : null;
-  const st = G.itemStats(item, up), next = G.itemStats(item, up + 1), cost = G.upgradeCost(item, up), maxed = up >= G.RULES.upgradeMax;
+  const st = G.itemStats(item, up), next = G.itemStats(item, up + 1), cost = G.upgradeCost(item, up, S.D.squad?.den?.levels), maxed = up >= G.RULES.upgradeMax;
   openSheet(`<div class="row spread" style="margin-bottom:10px"><span class="chip" style="background:color-mix(in srgb, ${t.color} 30%, transparent);border-color:${t.color};color:#fff">${t.label}${cls ? ` · ${esc(cls.name)}` : " · Any class"} · ${esc(item.slot)}</span><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>
     <div class="bigart"><div class="art">${itemArt(item)}</div>${up ? `<span class="upb">+${up}</span>` : ""}</div>
     <h2 class="ol-sm">${esc(item.name)}</h2>
@@ -851,7 +1179,7 @@ function tabMe() {
     <section class="panel">
       <div class="row" style="align-items:flex-start;gap:14px">
         <div class="bigface has-fallback"><span class="fb">${Walker.svg(ANS[m.id], { mood: "fresh" })}</span>${portraitImg("walker", m.id, { w: 220, h: 260 })}</div>
-        <div class="grow"><h2 class="ol-sm disp" style="margin:4px 0 2px;font-size:24px">${esc(m.name)}</h2><div class="small muted">${esc(cls.name)} · Level ${level()}</div>
+        <div class="grow"><h2 class="ol-sm disp" style="margin:4px 0 2px;font-size:24px">${esc(m.name)}</h2><div class="small muted">${esc(cls.name)} · Level ${level()}${titleOf(me()) ? ` · ${esc(titleOf(me()))}` : ""}</div>
           <p class="tiny faint" style="margin:8px 0 10px">${esc(cls.blurb)}</p>
           <button class="btn xs" data-act="retake">${ic("edit")} Change my look</button></div>
       </div>
@@ -866,6 +1194,7 @@ function tabMe() {
       <p class="small muted" style="margin:0 0 10px">Short-video scrolling over your budget (${G.RULES.scrollMinPer1kSteps} min per 1,000 steps) adds to the Taxman's cut. No data means we assume ${S.D.today.noScrollMin} min.</p>
       <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} Track it</button><button class="btn sm" data-act="log-scroll">${ic("edit")} Type it in</button></div>
     </section>
+    ${wardrobePanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("bell")}</span><h2 class="ol-sm">Reminders</h2></div>
       <p class="small muted" style="margin:0 0 10px">The Taxman is only around 7pm to 7:05pm, and the raid is Sunday 7pm to 7:15pm. Get a ping at 6:45pm so you don't miss them.</p>
@@ -1004,7 +1333,7 @@ function profileSheet(id) {
   openSheet(`${sheetHead(esc(you ? "You" : x.name))}
     <div class="profile">
       <div class="walker-big has-fallback"><span class="fb">${Walker.svg(ANS[id], { mood: "fresh", label: `${x.name}'s walker` })}</span>${portraitImg("walker", id, { w: 340, h: 400 })}</div>
-      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span><span class="chip">Level ${x.level}</span><span class="chip">${best.e} Best at the ${best.label.toLowerCase()}</span>${picked && picked !== best.id ? `<span class="chip">Plays ${G.posOf(picked).label.toLowerCase()}</span>` : ""}</div>
+      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span>${titleOf(you ? me() : x) ? `<span class="chip">${ic("crown")} ${esc(titleOf(you ? me() : x))}</span>` : ""}<span class="chip">Level ${x.level}</span><span class="chip">${best.e} Best at the ${best.label.toLowerCase()}</span>${picked && picked !== best.id ? `<span class="chip">Plays ${G.posOf(picked).label.toLowerCase()}</span>` : ""}</div>
       <p class="tiny faint" style="text-align:center;margin:8px 0 12px">${esc(cls.blurb)}</p>
       <div class="special-card" style="--sc:${SPECIAL_COL[cls.id] || "#ffd166"};margin-bottom:12px"><span class="si">${ic(G.specialOf({ cls: cls.id }).icon)}</span><span><small>Class special</small><b>${esc(G.specialOf({ cls: cls.id }).name)}</b><span>${esc(G.specialOf({ cls: cls.id }).what)}</span></span></div>
     </div>
@@ -1591,7 +1920,7 @@ function viewLobby() {
   const last = d.bosses.last;
   const opt = (t) => {
     const b = G.bossFor(t), g = goalNow(t), sel = t === d.raid.tier;
-    const tag = !last ? "First raid" : t === last ? "Same as last week" : t > last ? "One up" : "One down";
+    const tag = G.isEventTier(t) ? `Event · ${b.eventName}` : !last ? "First raid" : t === last ? "Same as last week" : t > last ? "One up" : "One down";
     return `<button class="bossopt ${sel ? "on" : ""}" data-act="lobby-boss" data-tier="${t}" aria-pressed="${sel}">
         <span class="bp has-fallback"><span class="fb">${ic("raid")}</span>${portraitImg("boss", b.id, { w: 120, h: 130 })}</span>
         <span class="grow"><small>${tag}</small><b>${esc(b.name)}</b><span class="tiny faint" style="display:block;margin-bottom:2px">${esc(b.style || "")}</span><span class="tiny ${g.met ? "" : "red-t"}">${g.met ? "Step goal made" : "Step goal missed: enraged"}</span></span>
@@ -1630,7 +1959,7 @@ async function joinRaid() {
   S.skew = r.now - Date.now();
   if (r.raid.status === "done") { showRaidResult(r.raid.result, null); return; }
   if (!window.supabase) { toast("Couldn't load the live connection. Check your signal and try again."); return; }
-  for (const m of r.roster) ANS[m.id] = m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id);
+  for (const m of r.roster) ANS[m.id] = { ...(m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id)), ...wearOf(m.wear) };
   V.raid = {
     raid: r.raid, roster: Object.fromEntries(r.roster.map((m) => [m.id, m])), my: r.me, R: null, host: false, A: null,
     present: {}, heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
@@ -1673,7 +2002,7 @@ function becomeHost() {
   if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
   if (!R) {
     const here = Object.keys(v.present).filter((id) => v.roster[id]);
-    R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged, affix: v.raid.goal?.affix || null });
+    R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged, affix: v.raid.goal?.affix || null, den: v.raid.goal?.den || null });
     for (const m of R.members) m.away = !(m.id in v.present);
   }
   R.dur = (ends - started) / 1000;
@@ -1739,7 +2068,7 @@ function raidTick() {
       v.ch?.send({ type: "broadcast", event: "st", payload: { host: v.my, R: G.raidExport(R), fx: v.fxOut.splice(0, 40) } });
       v.fxOut.length = 0;
     }
-    if (t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) showRaidResult(r.result, v); }).catch(() => {}); }
+    if (!v.hunt && t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) showRaidResult(r.result, v); }).catch(() => {}); }
     if (R.over) return hostFinish();
     if (rosterKey(R) !== v.rosterKey) return render();
   } else {
@@ -1772,6 +2101,12 @@ async function reportRaid(R) {
   const v = V.raid; if (!v) return null;
   v.finishing = true;
   const res = R.result || { how: R.boss.hp <= 0 ? "won" : "timeout" };
+  if (v.hunt) {
+    try {
+      const r = await call("hunt_finish", { token: S.token, how: res.how, frac: 1 - R.boss.hp / R.boss.max, members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
+      return { ...R.result, hunt: true, shares: R.result.shares.map((x) => ({ ...x, reward: x.id === v.my ? r.amount : 0, tax: 0, total: x.id === v.my ? r.amount : 0 })), settle: null };
+    } catch (e) { toast(e.message); return { ...R.result, hunt: true, shares: [], settle: null }; }
+  }
   try {
     const r = await call("raid_finish", { token: S.token, raid_id: v.raid.id, how: res.how, frac: 1 - R.boss.hp / R.boss.max, paralysed: !!R.paralysed, deepDive: R.deepDive || 0,
       members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
@@ -1815,7 +2150,7 @@ function renderRaid() {
     </div>
     <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
     <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
-    ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f">${head2d(ANS[m.id])}</div>${esc(m.id === v.my ? "You" : m.name)}</div>`).join("")}</div>`}
+    ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f" style="transform:scale(${G.stepScale(m.stride)})">${head2d(ANS[m.id])}</div>${esc(m.id === v.my ? "You" : m.name)}</div>`).join("")}</div>`}
     <div class="foot"><div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
         <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
@@ -1823,10 +2158,11 @@ function renderRaid() {
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
   FX.init($("#arena"));
+  if (!R.over) FX.music(true, R.boss.phase || 1);
   if (three) {
-    v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: m.pos })) });
+    v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: m.pos, scale: G.stepScale(m.stride) })) });
     if (!v.A) return renderRaid();
-    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.id === v.my ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.id === v.my ? "You" : m.name)}<span class="st"></span><i><s></s></i></div>`).join("");
+    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.id === v.my ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.id === v.my ? "You" : m.name)}<span class="pw ${m.stride >= 1.15 ? "hi" : m.stride <= 0.85 ? "lo" : ""}">×${(m.stride || 1).toFixed(2)}</span><span class="st"></span><i><s></s></i></div>`).join("");
   }
   v.abRow = null; v.q = null;
   if (!v.toasted) {
@@ -1834,9 +2170,10 @@ function renderRaid() {
     const mine = R.members.find((m) => m.id === v.my) || v.roster[v.my];
     setTimeout(() => toast(mine.title === "top" ? `Top walker this week: you hit ×${mine.stride.toFixed(2)}` : mine.title === "last" ? `Dead weight this week: ×${mine.stride.toFixed(2)} power, and the boss knows it` : `Your steps give you ×${mine.stride.toFixed(2)} power`), 900);
     FX.play("roar"); setTimeout(() => banner(R.boss.name, R.boss.title), 150);
-    if (R.affix && G.AFFIXES[R.affix]) setTimeout(() => toast(`${G.AFFIXES[R.affix].name}: ${G.AFFIXES[R.affix].what}`), 3200);
+    if (G.affixInfo(R.affix)) setTimeout(() => toast(`${G.affixInfo(R.affix).name}: ${G.affixInfo(R.affix).what}`), 3200);
   }
-  $("#arena").classList.toggle("fogged", R.affix === "fog");
+  $("#arena").classList.toggle("fogged", G.affixList(R.affix).includes("fog"));
+  $("#arena").classList.toggle("frosted", G.affixList(R.affix).includes("frost"));
   paintRaid();
 }
 // Sound, shake and (for the person hit) a banner for each boss's signature move.
@@ -1905,7 +2242,7 @@ function raidFx(e) {
     case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
     case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
     case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("Back up!"); break;
-    case "phase": FX.play("phase"); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
+    case "phase": FX.play("phase"); FX.music(true, e.phase); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
     case "feastEnd": if (e.healed) { FX.number(bx, by - 40, `+${fmt(e.healed)}`, { size: 30, color: "#7ee29d" }); FX.play("heal"); } else { FX.number(bx, by - 40, "Interrupted", { size: 26, grad: ["#fff3a0", "#ff7a3d"] }); FX.play("combo"); } break;
     case "special": {
       const m = R.members.find((x) => x.id === e.id), S = m && G.specialOf(m);
@@ -1931,7 +2268,7 @@ function raidFx(e) {
     case "answered": if (e.id !== my) FX.play(e.valid ? "tap" : "blocked"); break;
     case "triviaDone": FX.play(e.failed ? "wrong" : "right"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(true); } break;
     case "paralysed": FX.play("stun"); banner("Paralysed", `${fmt(G.RULES.paralysedSteps)} steps down tomorrow`); break;
-    case "end": break;
+    case "end": FX.music(false); break;
   }
 }
 function paintRaid() {
@@ -2122,7 +2459,7 @@ function renderResult() {
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
         ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
       <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
-        ${!mine ? `<div class="small muted">You weren't in this one.</div>` : ""}${won ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(out.tier + 1).name)}</div>` : ""}</section>`;
+        ${!mine ? `<div class="small muted">You weren't in this one.</div>` : ""}${won && !out.hunt && !G.isEventTier(out.tier) ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(out.tier + 1).name)}</div>` : ""}${out.prize ? `<div class="small" style="margin-top:6px">${ic("star")} Won the <b>${esc(G.wardrobeById(out.prize)?.name || "")}</b>. Wear it from Me → Wardrobe.</div>` : ""}</section>`;
   }
   $("#app").innerHTML = `<div class="results ${won ? "" : "lost"}" id="arena"><div class="inner">
     <div class="ribbon ol">${title}</div>
@@ -2183,6 +2520,7 @@ document.addEventListener("submit", async (e) => {
   const kind = f.dataset.form, data = Object.fromEntries(new FormData(f));
   const btn = f.querySelector("button:not([type=button])");
   const busy = async (fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (err) { toast(err.message); } finally { if (btn) btn.disabled = false; } };
+  if (kind === "chat") { chatSend(); return; }
   switch (kind) {
     case "answer": {
       const text = $("#tv-in").value.trim(); if (!text) return;
@@ -2281,6 +2619,9 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, a[data-act]");
   if (!t) return;
   const d = t.dataset;
+  if (d.tab === "chat") { if (!$("#sheet").hidden) closeSheet(); openChat(); return; }
+  if (d.jump) { chatJump(Number(d.jump)); return; }
+  if (d.cact) { chatAction(d.cact, Number(d.id)); return; }
   if (d.tab) { if (!$("#sheet").hidden) closeSheet(); S.tab = d.tab; store.set("tab", d.tab); render(); scrollTo(0, 0); FX.play("tap"); return; }
   if (d.answer !== undefined && S.view === "quiz") {
     const q = QUESTIONS[S.qi];
@@ -2389,6 +2730,14 @@ document.addEventListener("click", async (e) => {
     case "raid-result": if (S.D.raid?.result) { V.result = { kind: "raid", out: S.D.raid.result, R: null, lvlBefore: level() }; S.view = "result"; render(); } break;
     case "raid-quit": if (!V.raid?.R || confirm("Leave the raid? Your squad keeps fighting, and you can rejoin while it's on.")) { leaveRaid(); S.view = "main"; await refresh(true); render(); } break;
     case "ability": raidAct("ab"); break;
+    case "hunt": startHunt(); break;
+    case "chat-close": closeChat(); break;
+    case "chat-search": { const sr = $("#csearch"); sr.hidden = !sr.hidden; if (!sr.hidden) $("#cq").focus(); else closeChatSearch(); break; }
+    case "chat-latest": if (!CH.live) chatLoad(); else { const l = $("#clist"); l.scrollTop = l.scrollHeight; $("#cjump").hidden = true; } break;
+    case "den-room": denSheet(d.room); break;
+    case "den-give": denGive(d.room, Number(d.amount)); break;
+    case "wear-buy": { const w = G.wardrobeById(d.id); if (w) wardrobe({ buy: w.id }, `Bought the ${w.name}`); break; }
+    case "wear": wardrobe({ [d.kind]: d.id || null }, d.id ? "Looking sharp" : null); break;
     case "chapter": chapterSheet(Number(d.k)); break;
     case "claim": claim(d.what, Number(d.k), d.ref); break;
     case "claim-track": claimTrack(); break;

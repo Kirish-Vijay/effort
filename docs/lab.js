@@ -588,7 +588,7 @@ function renderRaid() {
     </div>
     <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
     <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
-    ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f">${head2d(m.answers)}</div>${esc(m.you ? "You" : m.name)}</div>`).join("")}</div>`}
+    ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f" style="transform:scale(${G.stepScale(m.stride)})">${head2d(m.answers)}</div>${esc(m.you ? "You" : m.name)}</div>`).join("")}</div>`}
     <div class="foot"><div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
         <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
@@ -596,8 +596,9 @@ function renderRaid() {
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
   FX.init($("#arena"));
+  if (!R.over) FX.music(true, R.boss.phase || 1);
   if (three) {
-    V.raid.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: !!m.you, answers: m.answers, pos: m.pos })) });
+    V.raid.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: !!m.you, answers: m.answers, pos: m.pos, scale: G.stepScale(m.stride) })) });
     if (!V.raid.A) return renderRaid();
     $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.you ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.you ? "You" : m.name)}<span class="st"></span><i><s></s></i></div>`).join("");
   }
@@ -702,7 +703,7 @@ function raidFx(e) {
     case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
     case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
     case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("Back up!"); break;
-    case "phase": FX.play("phase"); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
+    case "phase": FX.play("phase"); FX.music(true, e.phase); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
     case "feastEnd": if (e.healed) { FX.number(bx, by - 40, `+${fmt(e.healed)}`, { size: 30, color: "#7ee29d" }); FX.play("heal"); } else { FX.number(bx, by - 40, "Interrupted", { size: 26, grad: ["#fff3a0", "#ff7a3d"] }); FX.play("combo"); } break;
     case "trivia": FX.play("warn"); break;
     case "answered": if (e.id !== "me") FX.play(e.valid ? "tap" : "blocked"); break;

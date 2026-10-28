@@ -83,7 +83,7 @@ function traits(a) {
   const hue = Number.isFinite(Number(a.hue)) ? Number(a.hue) : Math.floor(r() * 360);
   const pal = (PALETTES[a.time] || PALETTES.noon)(hue);
   return {
-    sig, hue, num, time: a.time,
+    sig, hue, num, time: a.time, wear: { suit: a._suit || null, band: a._band || null },
     pal: { ...pal, accent: hsl(hue + 150 + num * 3, 72, 54), accent2: hsl(hue + 200 + num * 5, 68, 62), cheek: "#ff8a8a" },
     shape: SHAPES[a.pace] ? a.pace : "stroll",
     pattern: a.land || "forest", carry: a.carry || "none", feature: a.creature || "bear",
@@ -116,9 +116,11 @@ const SIGILS = [
 // headband and sash from the accents, skin from your favourite number.
 const SKIN = ["#f6d3b5", "#eab68f", "#cf9468", "#a56c47", "#f3c6a0", "#7c4f33"];
 const SUIT = { dawn: [40, 44], noon: [48, 33], golden: [44, 35], night: [26, 20] };
+// A hex colour a bit darker (for the shaded side of a wardrobe suit).
+const darker = (hex, k = 0.72) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * k).toString(16).padStart(2, "0")).join("");
 function ninjaPalette(t) {
-  const [s, l] = SUIT[t.time] || SUIT.noon;
-  return { suit: hsl(t.hue, s, l), dark: hsl(t.hue, s, Math.max(10, l - 12)), band: t.pal.accent, sash: t.pal.accent2,
+  const [s, l] = SUIT[t.time] || SUIT.noon, W = t.wear || {};
+  return { suit: W.suit || hsl(t.hue, s, l), dark: W.suit ? darker(W.suit) : hsl(t.hue, s, Math.max(10, l - 12)), band: W.band || t.pal.accent, sash: t.pal.accent2,
     wrap: "#ece6d6", skin: SKIN[t.num % SKIN.length], metal: "#cfd8e0", straw: "#d9b46a", wood: "#3a2a22" };
 }
 

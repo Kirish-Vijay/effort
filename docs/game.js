@@ -214,7 +214,8 @@ function itemStats(item, up) {
 }
 // Prices are always whole Endeavours (multiples of 100 Efforts) so the shop never shows fractions.
 const wholeE = (efforts) => Math.max(RULES.effortsPerEndeavour, Math.round(efforts / RULES.effortsPerEndeavour) * RULES.effortsPerEndeavour);
-const upgradeCost = (item, up) => wholeE(tierOf(item.tier).price * RULES.upgradeCostShare * (up + 1));
+// den: the squad's Den levels (the Workshop makes upgrades cheaper).
+const upgradeCost = (item, up, den) => wholeE(tierOf(item.tier).price * RULES.upgradeCostShare * (up + 1) * (1 - Math.min(0.2, denMods(den).upgrade || 0)));
 // The sets someone has every piece of on.
 function setsWorn(equipped) {
   const ids = Object.values(equipped || {}), sets = CAT().SETS || {};
@@ -249,7 +250,7 @@ const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RUL
 // ---------- 7pm: the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
 // (only the moving weak spot takes proper damage), and golden receipts fly past for bonus loot.
-function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {}, level = 1, squadAvg = 0 }) {
+function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {}, level = 1, squadAvg = 0, den = null }) {
   const efforts = effortsFromSteps(steps), over = overBudget(steps, scrollMin);
   const { g, perks } = loadout(st, equipped, inv);
   return {
@@ -263,7 +264,7 @@ function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, 
     critMult: 3 + (perks.critDmg || 0),
     comboWindow: RULES.comboWindowMs + (g.speed || 0) * 12,
     comboGain: 1 + (perks.combo || 0),
-    stealCap: RULES.stealCap + (perks.steal || 0) + Math.min(0.15, RULES.stealPerLevel * (level - 1)),
+    stealCap: RULES.stealCap + (perks.steal || 0) + Math.min(0.15, RULES.stealPerLevel * (level - 1)) + (denMods(den).steal || 0),
     seconds: RULES.dailyWindowMin * 60,
   };
 }
@@ -480,9 +481,34 @@ const BOSSES = [
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
 ];
+// Event bosses wear an existing model (recoloured in models.js) and fight with two signature moves.
+const EVENT_BOSSES = {
+  newyear: { id: "ev-newyear", model: "notification", name: "Rez", title: "A wobbly slime made of every promise you made at midnight", style: "Starts strong, gets wobbly by the second week. Slimes a whole row with guilt", blurb: "Every January a slime crawls out of the leftover trifle, made entirely of resolutions. Walk it down before it quietly gives up on itself.", sig: "ooze",
+    pattern: [["swipe", "stomp", "ooze", "vanish"], ["swipe", "ooze", "vanish", "scream", "feast"], ["ooze", "vanish", "scream", "feast", "stomp"]],
+    attacks: {"swipe": "Fresh Start Slap", "stomp": "January Belly Flop", "scream": "Motivational Screech", "feast": "Cheat Day", "ooze": "Twelve-Month Gym Contract", "vanish": "Quiet Quitting"} },
+  spring: { id: "ev-spring", model: "autoplay", name: "Atchoo", title: "Orange, full of pollen, and up far too early for March", style: "Stampedes about like the clocks just changed, then sneezes clouds that keep on itching", blurb: "The clocks went forward and something orange woke up in the allotment. It sneezes a lot, and it's faster than you in a light jacket.", sig: "spores",
+    pattern: [["swipe", "stomp", "spores", "gust"], ["swipe", "spores", "gust", "scream", "feast"], ["spores", "gust", "scream", "feast", "stomp"]],
+    attacks: {"swipe": "Spring Clean", "stomp": "Lamb Stampede", "scream": "Almighty Sneeze", "feast": "Easter Binge", "spores": "Pollen Cloud", "gust": "April Shower"} },
+  solstice: { id: "ev-solstice", model: "dragon", name: "Solveig", title: "A sun-gold dragon that refuses to set", style: "Burns all day and will not go down. Only a Shield Wall keeps the back rows out of the glare", blurb: "On the longest day a dragon sits on the sun and won't let it go down. Out-walk it before the light runs out, at about half ten.", sig: "breath",
+    pattern: [["swipe", "stomp", "breath", "slam"], ["swipe", "breath", "slam", "scream", "feast"], ["breath", "slam", "scream", "feast", "stomp"]],
+    attacks: {"swipe": "Sunburn Claw", "stomp": "Heatwave Tail", "scream": "It's Still Light Out", "feast": "Barbecue", "breath": "Solar Flare", "slam": "Sunfall"} },
+  harvest: { id: "ev-harvest", model: "algorithm", name: "Big Marrow Morris", title: "Brown, enormous, and swinging a prize-winning marrow", style: "Slow, heavy marrow swings. Stop the Harvest Slam or it flattens the whole allotment", blurb: "Every September he wins the village show by sitting on the judges. This year he wants your squad's steps instead.", sig: "slam",
+    pattern: [["swipe", "stomp", "slam", "grab"], ["swipe", "slam", "grab", "scream", "feast"], ["slam", "grab", "scream", "feast", "stomp"]],
+    attacks: {"swipe": "Marrow Swing", "stomp": "Wellie Stomp", "scream": "Show Results Bellow", "feast": "Harvest Supper", "slam": "Harvest Slam", "grab": "Into the Basket"} },
+  haunted: { id: "ev-haunted", model: "leftonread", name: "The Grey Lady", title: "Waits at the bus stop. The 47 stopped running in 1962", style: "Fades out where you can't hit it, then haunts whoever has walked the least", blurb: "For one week in October a pale lady drifts along the routes you walk, still waiting for a bus that isn't coming. Walk past her enough times and she might finally take the hint.", sig: "vanish",
+    pattern: [["swipe", "stomp", "vanish", "spores"], ["swipe", "vanish", "spores", "scream", "feast"], ["vanish", "spores", "scream", "feast", "stomp"]],
+    attacks: {"swipe": "Cold Hand", "stomp": "Rattling Chains", "scream": "Wail of the Last Bus", "feast": "Soul Snack", "vanish": "Missed the Bus", "spores": "Grave Mist"} },
+  krampus: { id: "ev-krampus", model: "algorithm", name: "Krampus", title: "Dark red, horned, and checking the naughty list against your step count", style: "Slow birch-switch swings and a sack for the stragglers. Stop the Naughty List Slam or it flattens you", blurb: "St Nicholas does the presents. His colleague does everyone who sat down all of November.", sig: "slam",
+    pattern: [["swipe", "stomp", "slam", "grab"], ["swipe", "slam", "grab", "scream", "feast"], ["slam", "grab", "scream", "feast", "stomp"]],
+    attacks: {"swipe": "Birch Switch", "stomp": "Hoof Stomp", "scream": "Bell Clang", "feast": "Stocking Raid", "slam": "Naughty List Slam", "grab": "Into the Sack"} },
+};
 const DEFAULT_PATTERN = [["swipe", "swipe", "swipe", "stomp", "scream"], ["swipe", "swipe", "stomp", "stomp", "scream", "feast"], ["swipe", "stomp", "scream", "scream", "feast"]];
 // tier starts at 1. Tier 8 is Brett again on lap 2, and so on.
 function bossFor(tier) {
+  if (isEventTier(tier)) {
+    const ev = EVENTS[Math.floor((tier - EVENT_TIER) / 1000)], base = bossFor(baseTier(tier)), E = EVENT_BOSSES[ev?.id];
+    if (E) return { ...base, ...E, tier: Number(tier), lap: base.lap, hp: base.hp, dmg: base.dmg, reward: base.reward * 1.25, event: ev.id, eventName: ev.name };
+  }
   const t = Math.max(1, Math.floor(tier || 1)), lap = Math.floor((t - 1) / BOSSES.length), b = BOSSES[(t - 1) % BOSSES.length];
   const k = RULES.lapHp ** lap, rk = RULES.lapReward ** lap;
   const i = (t - 1) % BOSSES.length;
@@ -501,7 +527,7 @@ function bossFor(tier) {
 // joined mid-week adds only the days since they joined (and only their steps since then count). Miss it and
 // Sunday's boss is enraged.
 function raidGoal(tier, players) {
-  const i = (Math.max(1, Math.floor(tier || 1)) - 1) % BOSSES.length;
+  const i = (Math.max(1, Math.floor(baseTier(tier) || 1)) - 1) % BOSSES.length;
   const perDay = RULES.raidGoalPerDay + RULES.raidGoalStep * i;
   const n = Math.max(1, players);
   return { perDay, players: n, target: perDay * RULES.raidGoalDays * n };
@@ -542,7 +568,7 @@ function makeMember(m, row) {
     cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
-function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null } = {}) {
+function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null } = {}) {
   const r = rng(seed);
   const table = weekTable(members);
   const ms = members.map((m) => makeMember(m, table.rows.find((x) => x.id === m.id)));
@@ -556,10 +582,11 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
     // Short test raids pay proportionally less.
     sizeDmg: 1, timeShare: Math.min(1, minutes / 15),
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
-    members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: AFFIXES[affix] ? affix : null,
+    members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: affixList(affix).join("+") || null, mods: modsFor(affix, den), atkCount: 0, echo: null,
     // Squad-wide effects from specials (each is a time it lasts until, or a count of attacks).
     vulnUntil: 0, weakUntil: 0, prophecyUntil: 0, swarmUntil: 0, swarmBy: null, peckAcc: 0, blockNext: 0, feeble: 0, grab: null,
   };
+  for (const m of R.members) m.perks.spCharge = (m.perks.spCharge || 0) + (R.mods.spCharge || 0);
   scheduleAttack(R);
   return R;
 }
@@ -579,16 +606,19 @@ const ATTACKS = {
 };
 function scheduleAttack(R) {
   const B = R.boss;
-  const every = RULES.raidAtkEvery * B.speed * (B.phase === 1 ? 1 : B.phase === 2 ? 0.85 : 0.65);
+  const M = R.mods || {};
+  const every = RULES.raidAtkEvery * B.speed * (B.phase === 1 ? 1 : B.phase === 2 ? 0.85 : 0.65) * (1 - (M.haste || 0));
   const pool = (B.pattern || DEFAULT_PATTERN)[B.phase - 1];
   let type = pick(R.r, pool);
+  // Volatile: the signature move comes round far more often.
+  if (M.volatile && B.sig && pool.includes(B.sig) && R.r() < M.volatile) type = B.sig;
   // The signature move never comes twice in a row.
   if (type === B.sig && B.last === type) type = pick(R.r, pool.filter((x) => x !== type));
   B.last = type;
   const brains = Math.max(0, ...R.members.filter((m) => m.alive).map((m) => m.g.brains));
   const at = R.t + every;
   // Fog: the warning comes later (never less than a moment before it lands).
-  const late = AFFIXES[R.affix]?.warnLate || 0, warn = RULES.raidTelegraph + (ATTACKS[type].tele || 0) + brains * 0.05;
+  const late = (M.warnLate || 0) - (M.warnEarly || 0), warn = RULES.raidTelegraph + (ATTACKS[type].tele || 0) + brains * 0.05;
   B.next = { type, at, warnAt: at - Math.max(0.8, warn - late), mid: 0, staggered: false, cancel: false };
   B.warned = false;
 }
@@ -629,15 +659,18 @@ const fx = (R, e) => R.fx.push(e);
 const attackName = (R, type) => R.boss.attacks?.[type] || ATTACKS[type]?.label || type;
 
 // One ordinary tap's damage before combo, crits and buffs.
+// How big a walker stands in the raid: their week's steps against the squad (stride), 0.78× to 1.4×.
+const stepScale = (stride) => Math.max(0.78, Math.min(1.4, 1 + ((Number(stride) || 1) - 1) * 0.6));
 const tapBase = (m) => (20 + m.g.power * 4) * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos) ** 1.5;
 const charge = (m, n) => { m.sp = Math.min(RULES.spMax, (m.sp || 0) + n * (1 + m.g.brains * 0.015) * (1 + (m.perks.spCharge || 0))); };
 // How much the middle row has to deal during a wind-up to stagger it.
-const interruptNeed = (R, type) => Math.round(RULES.interruptShare * R.boss.max * (ATTACKS[type]?.stop ? 2 : 1));
+const interruptNeed = (R, type) => Math.round(RULES.interruptShare * R.boss.max * (ATTACKS[type]?.stop ? 2 : 1) * (1 + (R.mods?.stagger || 0)));
 // Every bit of damage to the boss goes through here.
 function dmgBoss(R, m, dmg) {
   const B = R.boss;
   if (R.over || B.hidden || dmg <= 0) return 0;
   if (R.t < R.vulnUntil) dmg *= 1 + RULES.brewVuln;
+  dmg *= 1 + (R.mods?.dealt || 0);
   if (B.feast) B.feast.dealt += dmg;
   if (R.grab) { R.grab.dealt += dmg; if (R.grab.dealt >= R.grab.need) release(R, true); }
   const N = B.next;
@@ -656,7 +689,7 @@ function dmgBoss(R, m, dmg) {
 }
 // Heal someone and clear slime, spores and burns off them (not a Kraken's grip).
 function mend(R, by, who, amt) {
-  const heal = Math.max(0, Math.min(who.max - who.hp, Math.round(amt)));
+  const heal = Math.max(0, Math.min(who.max - who.hp, Math.round(amt * (1 + (R.mods?.heal || 0)))));
   who.hp += heal; if (by) by.healed += heal;
   who.slimeUntil = 0;
   if (R.grab?.id !== who.id) who.dotUntil = 0;
@@ -684,7 +717,7 @@ function raidTap(R, id) {
   if (B.hidden) { if (!m.you && R.r() < 0.2) fx(R, { type: "tap", id: m.id, miss: true }); return { dmg: 0, crit: false, swing: false, miss: true }; }
   const crit = R.r() < m.g.luck * 0.02 + (m.perks.critChance || 0) + (R.t < R.prophecyUntil ? RULES.prophecyCrit : 0);
   // Stride: walk more than the squad this week and every hit lands harder.
-  let dmg = tapBase(m) * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) : 1) * (joy ? 2 : 1) * (R.t < m.slimeUntil ? 0.5 : 1);
+  let dmg = tapBase(m) * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) + (R.mods?.crit || 0) : 1) * (joy ? 2 : 1) * (R.t < m.slimeUntil ? 0.5 : 1);
   let swing = false;
   if (m.swing > 0) { dmg *= 3; m.swing--; swing = true; }
   if (B.feast) dmg *= m.perks.feast || 1;
@@ -754,7 +787,7 @@ function raidSpecial(R, id) {
 function raidMove(R, id, pos) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !m.alive || m.pos === pos || R.over) return false;
-  m.pos = pos; m.moveUntil = R.t + Math.max(1.5, 4 - m.g.speed * 0.2); m.swing = 0; m.slimeUntil = 0;
+  m.pos = pos; m.moveUntil = R.t + Math.max(1.5, 4 - m.g.speed * 0.2) * (1 + (R.mods?.move || 0)); m.swing = 0; m.slimeUntil = 0;
   fx(R, { type: "move", id: m.id, pos });
   say(R, `${nm(m)} ${vb(m, "moves", "move")} to the ${posOf(pos).label.toLowerCase()}`);
   return true;
@@ -767,7 +800,7 @@ function dmgTo(R, m, base) {
   if (R.t < m.shieldUntil) d *= 0.4;
   if (R.t < R.weakUntil) d *= 0.75;
   if (R.t < R.swarmUntil) d *= 0.5;
-  return d;
+  return d * (1 + (R.mods?.taken || 0));
 }
 function wound(R, m, d) {
   if (!m.alive) return;
@@ -805,12 +838,12 @@ function release(R, freed) {
   fx(R, { type: "release", id: G.id, freed });
   if (m && freed) say(R, `${nm(m)} ${vb(m, "is", "are")} free`, "good");
 }
-function bossAttack(R) {
-  const B = R.boss, N = B.next, type = N.type, up = alive(R), name = attackName(R, type);
+function bossAttack(R, echo = null) {
+  const B = R.boss, N = echo || B.next, type = N.type, up = alive(R), name = attackName(R, type);
   B.hidden = false;
   if (R.blockNext) { R.blockNext = 0; fx(R, { type: "blocked", attack: type }); say(R, `${name} bounces off. Nobody's hurt`, "good"); return; }
   if (N.cancel) { fx(R, { type: "blocked", attack: type, stopped: true }); say(R, `${name} never lands`, "good"); return; }
-  let mult = (B.phase === 1 ? 1 : B.phase === 2 ? 1.25 : 1.5) * (N.staggered ? RULES.staggerMult : 1);
+  let mult = (B.phase === 1 ? 1 : B.phase === 2 ? 1.25 : 1.5) * (N.staggered ? RULES.staggerMult : 1) * (echo ? 0.6 : 1);
   if (R.feeble > 0) { R.feeble--; mult *= RULES.feebleMult; }
   const base = RULES.raidBossDmg * mult;
   const marked = (N.ids || []).map((id) => up.find((m) => m.id === id)).filter(Boolean);
@@ -821,6 +854,7 @@ function bossAttack(R) {
     const ts = marked.length ? marked : [swipeTarget(R)].filter(Boolean);
     fx(R, { type: "attack", attack: "swipe", ids: ts.map((m) => m.id) });
     const ds = ts.map((m) => hit(R, m, base * (B.swipeMult || 1)));
+    if (R.mods?.leech) { const healed = ds.some((d) => d > 0) ? Math.round(B.max * R.mods.leech) : 0; if (healed) { B.hp = Math.min(B.max, B.hp + healed); fx(R, { type: "leech", amt: healed }); } }
     if (ts.length) say(R, `${name} hits ${who(ts)} for ${ds.join(" and ")}`, "bad");
   } else if (type === "stomp" || type === "slam") {
     let rows = up.filter((m) => m.pos !== "back");
@@ -884,7 +918,7 @@ function bossAttack(R) {
   }
 }
 
-function triviaTime(m) { return RULES.triviaSeconds + Math.max(0, m.g.brains - 5) + (m.perks.trivia || 0); }
+function triviaTime(m, R) { return RULES.triviaSeconds + Math.max(0, m.g.brains - 5) + (m.perks.trivia || 0) + (R?.mods?.trivia || 0); }
 // Someone's down: every squad member (the fallen too) gets their own question. If 2/3 of the squad
 // get theirs wrong, everyone is paralysed. Rare valid answers knock a slice off the boss either way.
 function startTrivia(R) {
@@ -893,7 +927,7 @@ function startTrivia(R) {
   const qs = triviaSet(R.seed + R.triviaRuns * 7919, who.length);
   const per = {}, botPlan = {};
   who.forEach((m, i) => {
-    per[m.id] = { i, q: qs[i], secs: triviaTime(m), until: R.t + triviaTime(m), ans: null };
+    per[m.id] = { i, q: qs[i], secs: triviaTime(m, R), until: R.t + triviaTime(m, R), ans: null };
     if (m.bot) {
       const knows = R.r() < 0.45 + m.g.brains * 0.045;
       botPlan[m.id] = { at: R.t + 4 + R.r() * 16, text: knows ? qs[i].sample(R.r, R.r() < 0.75) : pick(R.r, ["uhh", "idk", "pass", "42", "the sun?"]) };
@@ -993,7 +1027,13 @@ function raidStep(R, dt) {
     if (B.next.type === "vanish") B.hidden = true;
     fx(R, { type: "windup", attack: B.next.type, ids: B.next.ids });
   }
-  if (B.next && R.t >= B.next.at) { bossAttack(R); if (!R.over) scheduleAttack(R); }
+  if (B.next && R.t >= B.next.at) {
+    const N = B.next;
+    bossAttack(R);
+    if (R.mods?.echo && ["swipe", "stomp", "scream", "breath", "spores"].includes(N.type) && ++R.atkCount % 3 === 0) R.echo = { type: N.type, at: R.t + 1, row: N.row };
+    if (!R.over) scheduleAttack(R);
+  }
+  if (R.echo && R.t >= R.echo.at && !R.over) { const E = R.echo; R.echo = null; fx(R, { type: "echo", attack: E.type }); bossAttack(R, { type: E.type, ids: targetsOf(R, E.type), row: E.row, mid: 0 }); }
   if (R.over) return;
   if (R.grab && R.t >= R.grab.until) release(R, false);
   // Spores, burns and the Kraken's squeeze tick once a second.
@@ -1032,7 +1072,7 @@ function endRaid(R, how) {
   const n = R.members.length;
   const frac = 1 - R.boss.hp / R.boss.max;
   const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
-  const pool = (how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0) * (1 + (AFFIXES[R.affix]?.loot || 0));
+  const pool = (how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0) * (1 + (R.mods?.loot || 0));
   // Split: half by steps walked this week, half by what you did in the fight (damage, healing, hits taken).
   const work = (m) => m.dmg + m.healed * 200 + m.taken * 100;
   const totalWork = R.members.reduce((s, m) => s + work(m), 0) || 1;
@@ -1054,33 +1094,210 @@ function endRaid(R, how) {
   say(R, how === "won" ? `${R.boss.name} is down!` : how === "timeout" ? "Time's up" : "Squad wiped", how === "won" ? "good" : "bad");
 }
 
-// ---------- seasons ----------
-// 13 weeks each. The squad walks a real route on the journey map; each landmark opens a story chapter
-// (no more than one new chapter a week). Every season has an affix that changes every boss, and a gear set.
+// ---------- the calendar ----------
+// Everything new switches itself on by date (UK days), so the game keeps changing without anyone deploying.
+const FEATURES = { wardrobe: "2026-11-16", hunt: "2026-11-18", den: "2027-02-01" };
+const featureOn = (f, day) => !!FEATURES[f] && day >= FEATURES[f];
+
+// Season twists. Numbers are mods the fight reads (see modsFor). Later seasons pair two of them.
 const AFFIXES = {
   fog: { name: "Fog", what: "Warnings come 0.8s later. Raid rewards +10%", warnLate: 0.8, loot: 0.1 },
+  frost: { name: "Frost", what: "Moving rows takes twice as long. Raid rewards +10%", move: 1, loot: 0.1 },
+  haste: { name: "Haste", what: "Bosses attack 15% faster. Raid rewards +15%", haste: 0.15, loot: 0.15 },
+  thickhide: { name: "Thick Hide", what: "Crits hit ×2 instead of ×2.5. Raid rewards +10%", crit: -0.5, loot: 0.1 },
+  volatile: { name: "Volatile", what: "Bosses use their own move far more often. Raid rewards +15%", volatile: 0.2, loot: 0.15 },
+  leech: { name: "Leech", what: "Every Strike that lands heals the boss a little. Raid rewards +15%", leech: 0.002, loot: 0.15 },
+  bloodmoon: { name: "Blood Moon", what: "Bosses hit 40% harder. Raid rewards +20%", taken: 0.4, loot: 0.2 },
+  silence: { name: "Silence", what: "Specials charge 25% slower. Raid rewards +10%", spCharge: -0.25, loot: 0.1 },
+  brittle: { name: "Brittle", what: "Staggers need half the damage, but bosses hit 15% harder. Raid rewards +5%", stagger: -0.5, taken: 0.15, loot: 0.05 },
+  echo: { name: "Echo", what: "Every third attack repeats a second later, softer. Raid rewards +15%", echo: 1, loot: 0.15 },
 };
-const SEASONS = [
-  { n: 1, id: "s1", name: "The Long Way Up", route: "Land's End to John o' Groats", start: "2026-11-02", weeks: 13, affix: "fog", set: "s1",
-    miles: [0, 110, 200, 270, 360, 450, 540, 610, 680, 760, 830, 900, 1000] },
+const affixList = (id) => String(id || "").split("+").filter((x) => AFFIXES[x]);
+const affixInfo = (id) => { const L = affixList(id); return L.length ? { name: L.map((x) => AFFIXES[x].name).join(" + "), what: L.map((x) => AFFIXES[x].what).join(" ") } : null; };
+
+// Seasons run back to back, 13 weeks each, from Season 1. 1-4 are written; after that they build themselves
+// from the world route (names below; landmarks and story beats in world.js) and a rotation of twists.
+const S1_START = "2026-11-02", SEASON_DAYS = 91;
+const MILES = [0, 80, 165, 245, 330, 410, 495, 575, 660, 740, 825, 910, 1000];
+const WRITTEN = [
+  { name: "The Long Way Up", route: "Land's End to John o' Groats", affix: "fog", miles: [0, 110, 200, 270, 360, 450, 540, 610, 680, 760, 830, 900, 1000] },
+  { name: "The Northern Line", route: "Lindesnes to Nordkapp", affix: "frost" },
+  { name: "Sun Over the Gulf", route: "Round the Gulf of Bothnia to Tallinn", affix: "haste" },
+  { name: "The Amber Road", route: "Tallinn to Vienna", affix: "thickhide" },
 ];
+// Seasons 5 onwards: [name, route], round the world (kept in step with world.js).
+const LEGS = [
+  ["The Blue Danube", "Vienna to Belgrade"],
+  ["The Dinaric Way", "Belgrade to Kotor"],
+  ["Gods and Goat Paths", "Kotor to Athens"],
+  ["Where Europe Stops", "Athens to Istanbul"],
+  ["Fairy Chimneys", "Istanbul to Göreme"],
+  ["In Ararat's Shadow", "Göreme to Tbilisi"],
+  ["The Land of Fire", "Tbilisi to Baku"],
+  ["The Silk Road", "Baku to Samarkand"],
+  ["The Roof of the World", "Samarkand to Kashgar"],
+  ["The Karakoram", "Kashgar to Amritsar"],
+  ["The Grand Trunk Road", "Amritsar to Varanasi"],
+  ["Where the Buddha Walked", "Varanasi to Kathmandu"],
+  ["Tea and Thunder", "Kathmandu to Imphal"],
+  ["The Golden Land", "Imphal to Bangkok"],
+  ["The Temple Road", "Bangkok to Ho Chi Minh City"],
+  ["The Long Coast", "Ho Chi Minh City to Hanoi"],
+  ["The Karst Country", "Hanoi to Xi'an"],
+  ["The Long Wall", "Xi'an to Shanhaiguan"],
+  ["The Yellow Sea", "Shanhaiguan to Busan"],
+  ["The Tōkaidō", "Busan to Tokyo"],
+  ["The Island Chain", "Tokyo to Manila"],
+  ["Ten Thousand Islands", "Manila to Darwin"],
+  ["The Red Centre", "Darwin to Uluru"],
+  ["Back of Beyond", "Uluru to Sydney"],
+  ["The Long White Cloud", "Sydney to Auckland"],
+  ["The Date Line", "Auckland to Taveuni"],
+  ["The Long Ferry", "Taveuni to Valparaíso"],
+  ["Salt and Stars", "Valparaíso to Puno"],
+  ["The Inca Road", "Puno to Quito"],
+  ["Coffee and Canals", "Quito to Arenal"],
+  ["Pyramids in the Trees", "Arenal to Campeche"],
+  ["The Silver Road", "Campeche to El Paso"],
+  ["The Long Road East", "El Paso to Washington DC"],
+  ["Lighthouse to Lighthouse", "Washington DC to Cape Spear"],
+  ["The Norse Way Back", "Cape Spear to Gullfoss"],
+  ["The Long Way Home", "Gullfoss to Land's End"],
+];
+const SOLO = ["volatile", "leech", "bloodmoon", "silence", "brittle", "echo", "fog", "frost"];
+function affixFor(n) {
+  if (n <= WRITTEN.length) return WRITTEN[n - 1].affix;
+  if (n <= 12) return SOLO[(n - 5) % SOLO.length];
+  // From year 4, two at once: every pairing in turn.
+  const ids = Object.keys(AFFIXES), pairs = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) pairs.push(`${ids[i]}+${ids[j]}`);
+  return pairs[((n - 13) * 7) % pairs.length];
+}
+function seasonDef(n) {
+  const w = WRITTEN[n - 1], leg = LEGS[(n - WRITTEN.length - 1) % Math.max(1, LEGS.length)];
+  return { n, id: `s${n}`, name: w?.name || leg?.[0] || `Season ${n}`, route: w?.route || leg?.[1] || "Onwards", start: dayOf(dayNo(S1_START) + (n - 1) * SEASON_DAYS),
+    weeks: 13, affix: affixFor(n), set: `s${n}`, miles: w?.miles || MILES, written: n <= WRITTEN.length };
+}
 const dayNo = (day) => Math.floor(Date.parse(day + "T12:00:00Z") / 86400000);
 const dayOf = (n) => new Date(n * 86400000).toISOString().slice(0, 10);
-// The season on a day: { season, week (1-13), day (0-90), start, end }, or the next one coming up (week 0).
+// The season on a day: { season, week (1-13), day (0-90), start, end }, or Season 1 coming up (week 0).
 function seasonOn(day) {
-  const d = dayNo(day);
-  for (const S of SEASONS) {
-    const a = dayNo(S.start), b = a + S.weeks * 7 - 1;
-    if (d < a) return { season: S, week: 0, day: d - a, start: S.start, end: dayOf(b), upcoming: true };
-    if (d <= b) return { season: S, week: Math.floor((d - a) / 7) + 1, day: d - a, start: S.start, end: dayOf(b) };
-  }
-  return null;
+  const d = dayNo(day), d1 = dayNo(S1_START);
+  if (d < d1) { const S = seasonDef(1); return { season: S, week: 0, day: d - d1, start: S.start, end: dayOf(d1 + SEASON_DAYS - 1), upcoming: true }; }
+  const n = Math.floor((d - d1) / SEASON_DAYS) + 1, S = seasonDef(n), a = dayNo(S.start);
+  return { season: S, week: Math.floor((d - a) / 7) + 1, day: d - a, start: S.start, end: dayOf(a + SEASON_DAYS - 1) };
 }
-const seasonById = (id) => SEASONS.find((S) => S.id === id) || null;
-// Season gear is only on sale during its season.
-const onSale = (item, day) => !item.season || (seasonOn(day)?.season.id === item.season && seasonOn(day).week > 0);
+const seasonById = (id) => (/^s\d+$/.test(id || "") ? seasonDef(Number(id.slice(1))) : null);
+// Gear tiers arrive on their release day; season gear is only on sale during its season.
+const tierOut = (tier, day) => !tier.release || day >= tier.release;
+const onSale = (item, day) => tierOut(tierOf(item.tier), day) && (!item.season || (seasonOn(day)?.season.id === item.season && seasonOn(day).week > 0));
+
+// Season sets: three pieces any class can wear, stronger every season. Names for written seasons come from
+// items.js (SEASON_SETS); later ones are named after their route.
+const SET_SLOTS = { weapon: ["power", "speed", "Walking Pole", "🥢"], armour: ["guard", "luck", "Trail Jacket", "🧥"], trinket: ["brains", null, "Route Map", "🗺️"] };
+function seasonTier(n) {
+  const k = 1 + 0.12 * (n - 1);
+  return { id: `s${n}`, label: `Season ${n}`, color: "#5fd0a8", lvl: Math.min(60, 6 + 4 * (n - 1)), price: Math.round((1800 * k * k) / 100) * 100, season: `s${n}` };
+}
+function seasonSetItems(n) {
+  const k = 1 + 0.12 * (n - 1), names = CAT().SEASON_SETS?.[`s${n}`] || {}, S = seasonDef(n);
+  return Object.entries(SET_SLOTS).map(([slot, [a, b, noun, e]]) => {
+    const nm = names[slot] || {};
+    const stats = slot === "trinket" ? { [a]: Math.round(6 * k) } : { [a]: Math.round(8 * k), [b]: Math.round(3 * k) };
+    return { id: `s${n}-${slot}`, slot, tier: `s${n}`, set: `s${n}`, season: `s${n}`, name: nm.name || `${S.name} ${noun}`, e: nm.e || e, stats, perk: null,
+      text: nm.text || `Issued to every squad that walked ${S.route}.` };
+  });
+}
+// Adds season tiers, sets and set bonuses (s2 onwards) to the catalogue once it's loaded. Season 1's are in items.js.
+function addSeasonGear(upTo = 80) {
+  const C = CAT();
+  if (!C.ITEMS || C._seasonGear) return;
+  C._seasonGear = true;
+  C.SETS = C.SETS || {};
+  for (let n = 2; n <= upTo; n++) {
+    if (!C.TIERS.some((t) => t.id === `s${n}`)) C.TIERS.push(seasonTier(n));
+    for (const it of seasonSetItems(n)) if (!C.ITEMS.some((x) => x.id === it.id)) C.ITEMS.push(it);
+    C.SETS[`s${n}`] = C.SETS[`s${n}`] || { name: `${seasonDef(n).name} kit`, season: `s${n}`, bonus: ["spCharge", 0.25], what: "Wear all three: your special charges 25% faster" };
+  }
+}
+
+// ---------- the Den ----------
+// The squad's base. Everyone chips in Efforts; each room has 10 levels and gives the whole squad a small bonus.
+const DEN_ROOMS = [
+  { id: "kitchen", name: "Kitchen", what: "Raid rewards", per: 0.02, mod: "loot", fmt: "pct" },
+  { id: "gym", name: "Gym", what: "Damage in raids", per: 0.01, mod: "dealt", fmt: "pct" },
+  { id: "infirmary", name: "Infirmary", what: "Healing in raids", per: 0.03, mod: "heal", fmt: "pct" },
+  { id: "library", name: "Library", what: "Time on trivia questions", per: 0.5, mod: "trivia", fmt: "s" },
+  { id: "lookout", name: "Lookout", what: "Earlier warnings", per: 0.05, mod: "warnEarly", fmt: "s" },
+  { id: "shrine", name: "Shrine", what: "Special charge", per: 0.02, mod: "spCharge", fmt: "pct" },
+  { id: "maproom", name: "Map Room", what: "Journey miles", per: 0.01, mod: "miles", fmt: "pct" },
+  { id: "workshop", name: "Workshop", what: "Cheaper upgrades", per: 0.02, mod: "upgrade", fmt: "pct" },
+  { id: "vault", name: "Vault", what: "Most you can steal from the Taxman", per: 0.01, mod: "steal", fmt: "pct" },
+  { id: "trophy", name: "Trophy Hall", what: "Season rewards", per: 0.02, mod: "season", fmt: "pct" },
+];
+const DEN_MAX = 10;
+const denCost = (L) => Math.round((1000 * L ** 1.5) / 100) * 100; // the cost of reaching level L from L-1
+const denLevel = (total) => { let L = 0, spent = 0; while (L < DEN_MAX && spent + denCost(L + 1) <= total) spent += denCost(++L); return L; };
+const denNext = (total) => { const L = denLevel(total); let spent = 0; for (let i = 1; i <= L; i++) spent += denCost(i); return L >= DEN_MAX ? null : { level: L + 1, need: spent + denCost(L + 1) - total }; };
+// { room: level } → { mod: value }.
+function denMods(levels) {
+  const out = {};
+  for (const r of DEN_ROOMS) { const L = levels?.[r.id] || 0; if (L) out[r.mod] = (out[r.mod] || 0) + L * r.per; }
+  return out;
+}
+// Every mod a fight reads, from the season's twist and the squad's Den.
+function modsFor(affix, den) {
+  const m = {};
+  for (const id of affixList(affix)) for (const [k, v] of Object.entries(AFFIXES[id])) if (typeof v === "number") m[k] = (m[k] || 0) + v;
+  for (const [k, v] of Object.entries(denMods(den))) m[k] = (m[k] || 0) + v;
+  return m;
+}
+
+// ---------- the wardrobe ----------
+// Cosmetics: suit and headband colours and titles. Some only come from events.
+const WARDROBE = [
+  ...[["midnight", "Midnight", "#1c2340"], ["forest", "Forest", "#2f6b3a"], ["crimson", "Crimson", "#9e2235"], ["ocean", "Ocean", "#1f5f8b"], ["plum", "Plum", "#5e2f73"],
+    ["sand", "Sand", "#c8a46a"], ["ash", "Ash", "#6d7381"], ["snow", "Snow", "#e9edf5"]].map(([id, name, c], i) => ({ id: `suit-${id}`, kind: "suit", name: `${name} suit`, color: c, price: 400 + i * 150 })),
+  ...[["gold", "Gold", "#ffc83d"], ["lime", "Lime", "#9be15d"], ["hotpink", "Hot pink", "#ff4fa3"], ["cyan", "Cyan", "#3fd8ff"], ["white", "White", "#f6f6f6"], ["black", "Black", "#1a1a1a"]]
+    .map(([id, name, c], i) => ({ id: `band-${id}`, kind: "band", name: `${name} headband`, color: c, price: 300 + i * 100 })),
+  { id: "suit-gilded", kind: "suit", name: "Gilded suit", color: "#d4a017", price: 12000 },
+  { id: "title-pavement", kind: "title", name: "Pavement Pounder", price: 1500 },
+  { id: "title-insole", kind: "title", name: "Professional Insole", price: 3000 },
+  { id: "title-legend", kind: "title", name: "Local Legend", price: 8000 },
+  // Event exclusives: won by beating that event's boss.
+  { id: "band-firework", kind: "band", name: "Firework headband", color: "#ff3fd1", event: "newyear" },
+  { id: "suit-blossom", kind: "suit", name: "Blossom suit", color: "#f4a6c8", event: "spring" },
+  { id: "band-sunrise", kind: "band", name: "Sunrise headband", color: "#ff9d2e", event: "solstice" },
+  { id: "suit-harvest", kind: "suit", name: "Harvest suit", color: "#b5651d", event: "harvest" },
+  { id: "suit-spectre", kind: "suit", name: "Spectre suit", color: "#c9d6ff", event: "haunted" },
+  { id: "band-krampus", kind: "band", name: "Krampus headband", color: "#b3122e", event: "krampus" },
+];
+const wardrobeById = (id) => WARDROBE.find((w) => w.id === id) || null;
+
+// ---------- events ----------
+// Every year, on these dates (inclusive). While one's on, its boss is an extra choice in the Sunday lobby: same
+// strength as your ladder boss, 25% more loot, a cosmetic the first time you beat it, and the ladder doesn't move.
+const EVENTS = [
+  { id: "newyear", name: "New Year Rush", from: "01-01", to: "01-14" },
+  { id: "spring", name: "Spring Sprint", from: "03-20", to: "04-02" },
+  { id: "solstice", name: "Solstice", from: "06-17", to: "06-27" },
+  { id: "harvest", name: "Harvest", from: "09-19", to: "10-02" },
+  { id: "haunted", name: "The Haunted Walk", from: "10-24", to: "11-01" },
+  { id: "krampus", name: "Krampus Night", from: "12-10", to: "12-31" },
+];
+const eventOn = (day) => { const md = String(day).slice(5); return EVENTS.find((e) => md >= e.from && md <= e.to) || null; };
+const EVENT_TIER = 100000;
+const eventTier = (eventId, base) => EVENT_TIER + EVENTS.findIndex((e) => e.id === eventId) * 1000 + Math.max(1, Math.min(999, base || 1));
+const isEventTier = (t) => Number(t) >= EVENT_TIER;
+const baseTier = (t) => (isEventTier(t) ? Number(t) % 1000 : Number(t));
+
+// ---------- the Midweek Hunt ----------
+// Wednesdays, noon to 11pm UK: a five-minute fight against your squad's ladder boss, with your squad-mates' gear
+// fighting beside you as bots. Once a week; you keep your own share.
+const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5 };
+
 // Miles along the route from the squad's daily average steps (each day only counts people who'd joined by then).
-const journeyMiles = (S, dailyAvgs) => Math.min(S.miles[S.miles.length - 1], dailyAvgs.reduce((a, x) => a + x, 0) / RULES.stepsPerMile);
+const journeyMiles = (S, dailyAvgs, bonus = 0) => Math.min(S.miles[S.miles.length - 1], (dailyAvgs.reduce((a, x) => a + x, 0) / RULES.stepsPerMile) * (1 + bonus));
 // Chapter k (1-based) opens once the squad reaches its landmark and the season has reached week k.
 const chapterOpen = (S, k, week, miles) => k >= 1 && k <= S.miles.length && week >= k && miles >= S.miles[k - 1];
 // The season track: a tier for every trackSteps of your own steps this season.
@@ -1138,6 +1355,7 @@ function raidImport(d) {
   return R;
 }
 
+addSeasonGear();
 root.Game = {
   DEFAULT_RULES, get RULES() { return RULES; }, setRules,
   hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
@@ -1148,7 +1366,8 @@ root.Game = {
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
-  SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn,
-  AFFIXES, SEASONS, seasonOn, seasonById, onSale, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
+  SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
+  AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
+  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
 })(typeof window !== "undefined" ? window : globalThis);

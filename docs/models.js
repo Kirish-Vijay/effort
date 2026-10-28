@@ -15,6 +15,14 @@
     kraken: { url: "models/kraken.glb", height: 5.8, hover: 0.7, clips: FLY, credit: "Squidle" },
     algorithm: { url: "models/algorithm.glb", height: 6.6, clips: BIG, credit: "Blue Demon" },
     dragon: { url: "models/dragon.glb", height: 7.0, hover: 0.9, clips: FLY, credit: "Dragon Evolved" },
+    // Yearly event bosses: the same models, recoloured (tint blends in; strong tints read as a new creature).
+    "ev-newyear": { url: "models/notification.glb", height: 4.4, clips: BLOB, credit: "Pink Slime", tint: "#7cf0ff" },
+    "ev-spring": { url: "models/autoplay.glb", height: 4.8, clips: BLOB, credit: "Mushnub Evolved",
+      paint: { MushroomKing_Main: "#ffb000", MushroomKing_Secondary: "#7cc84a", Spikes: "#fff36a" } },
+    "ev-solstice": { url: "models/dragon.glb", height: 7.2, hover: 0.9, clips: FLY, credit: "Dragon Evolved", tint: "#ffd23d" },
+    "ev-harvest": { url: "models/algorithm.glb", height: 6.8, clips: BIG, credit: "Blue Demon", tint: "#8a5a2b" },
+    "ev-haunted": { url: "models/leftonread.glb", height: 5.4, hover: 1.1, clips: FLY, credit: "Ghost", tint: "#b8c4e8" },
+    "ev-krampus": { url: "models/algorithm.glb", height: 7.0, clips: BIG, credit: "Blue Demon", tint: "#8e0f24" },
     taxman: {
       url: "models/taxman.glb", height: 5.2, credit: "Business Man", taxman: true,
       clips: { idle: ["Idle"], attack: ["Punch_Right", "Punch_Left"], hit: ["HitRecieve", "HitRecieve_2"], death: ["Death"], roar: ["Wave"], stomp: ["Kick_Right"], eat: ["Interact"], win: ["Wave"] },
