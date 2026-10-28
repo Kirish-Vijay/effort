@@ -666,7 +666,7 @@ function tabMe() {
         : `<p class="small muted" style="margin:0 0 10px">You're not in a squad.</p><button class="btn green block" data-act="squad-sheet">${ic("squad")} Make or join a squad</button>`}
     </section>
     <section class="panel">
-      <div class="ptitle"><span class="ic-badge green">${ic("lock")}</span><h2 class="ol-sm">Signing in</h2>${noWayBackIn() ? `<span class="side chip red">Not set up</span>` : ""}</div>
+      <div class="ptitle"><span class="ic-badge green">${ic("lock")}</span><h2 class="ol-sm">Signing in</h2>${needsAccount() ? `<span class="side chip red">Needs ${S.auth.email ? "a password" : S.auth.has_password ? "an email" : "email + password"}</span>` : ""}</div>
       <p class="small muted" style="margin:-4px 0 12px">How you get back in on a new phone, or if you're ever signed out. Set up at least one.</p>
       <div class="meths">${signinMethods()}</div>
     </section>
@@ -885,9 +885,9 @@ async function checkAuth() {
     // Added by tapping the email's link in another browser: close the "type the code" sheet here.
     if (gotEmail && $("#sheet [data-form^=email]")) { closeSheet(); toast(`Email added: ${r.email}`); }
     if (was !== JSON.stringify(S.auth) && ["main", "setup"].includes(S.view) && $("#sheet").hidden) render();
+    promptAccount();
   } catch { /* try again next time */ }
 }
-const noWayBackIn = () => S.auth && !S.auth.has_password && !S.auth.email && !S.auth.passkeys;
 
 // Passkeys: in the Android app through Android's Credential Manager, elsewhere through the browser (WebAuthn).
 const passkeysReady = () => (NATIVE ? typeof NATIVE.passkey === "function" && (typeof NATIVE.passkeysAvailable !== "function" || NATIVE.passkeysAvailable())
@@ -960,12 +960,32 @@ function signinMethods() {
     + row("mail", "Email", a.email ? `${esc(a.email)}. For when you forget everything` : "Get back in with a code if you forget everything", "email-add", a.email ? "Change" : "Add", !a.email)
     + row("lock", "Password", a.has_password ? "Set. Squad code, your name, then this" : "Squad code, your name, then a password", "password", a.has_password ? "Change" : "Set", false);
 }
-// Players without both an email and a password: a nudge on Today until they add them (Later hides it for 3 days).
-const authNudge = () => (!S.auth || (S.auth.email && S.auth.has_password) || Date.now() - (store.get("authNudgeLater") || 0) < 3 * 86400000) ? "" : `<section class="panel update">
+// Every account needs an email and a password. New players add them while signing up; everyone else gets the
+// Today banner (no way to hide it) and a pop-up each time they open the game, until both are there.
+const needsAccount = () => !!S.auth && !(S.auth.email && S.auth.has_password);
+function accountRows() {
+  const a = S.auth || {};
+  const need = (icon, title, done, doneText, todo, act) => `<div class="meth"><span class="mic">${ic(icon)}</span><span class="grow"><b>${title}</b><small>${done ? doneText : todo}</small></span>${done ? `<span class="chip green">${ic("check")} Done</span>` : `<button class="btn xs gold" data-act="${act}">Add</button>`}</div>`;
+  return `<div class="meths">${need("mail", "Email", a.email, esc(a.email || ""), "We'll send a code to check it's yours", "email-add")}
+    ${need("lock", "Password", a.has_password, "Set. Squad code, your name, then this", "Signs you in on any phone", "password")}</div>`;
+}
+const authNudge = () => !needsAccount() ? "" : `<section class="panel update">
     <div class="row"><span class="ic-badge">${ic("lock")}</span><div class="grow"><b class="disp">Make your account permanent</b><span class="small muted" style="display:block">Add an email and a password, so you can get back in on a new phone or if you're ever signed out.</span></div></div>
-    <div class="meths" style="margin-top:12px">${signinMethods()}</div>
-    <button class="btn xs" style="margin-top:10px" data-act="auth-later">Later</button>
+    <div style="margin-top:12px">${accountRows()}</div>
   </section>`;
+function accountSheet() {
+  openSheet(`${sheetHead("Make your account permanent")}
+    <p class="small muted" style="margin:-4px 0 12px">Every Effort account needs an email and a password, so you can get back in on a new phone or if you're ever signed out. Takes a minute.</p>
+    ${accountRows()}`);
+}
+// Pops up when the game opens (and when you come back to it after half an hour), between fights only.
+let accountPromptAt = 0;
+function promptAccount(force) {
+  if (!needsAccount() || S.view !== "main" || !$("#sheet").hidden) return;
+  if (!force && Date.now() - accountPromptAt < 30 * 60000) return;
+  accountPromptAt = Date.now();
+  accountSheet();
+}
 
 // ---------- onboarding ----------
 function viewWelcome() {
@@ -1037,19 +1057,14 @@ function viewSquad() {
   </section>`;
 }
 function viewSetup() {
-  const step = S.setupStep, a = S.auth || {};
-  // A ticked row once it's done, a button until then.
-  const need = (icon, title, done, doneText, todo, act) => `<div class="meth"><span class="mic">${ic(icon)}</span><span class="grow"><b>${title}</b><small>${done ? doneText : todo}</small></span>${done ? `<span class="chip green">${ic("check")} Done</span>` : `<button class="btn xs gold" data-act="${act}">Add</button>`}</div>`;
+  const step = S.setupStep;
   $("#app").innerHTML = `<section class="onboard">
     <div class="dots"><i class="on"></i><i class="${step === "account" ? "" : "on"}"></i><i class="${step === "remind" ? "on" : ""}"></i></div>
     ${step === "account" ? `<h1 class="ol disp ob-title">Make it permanent</h1>
       <p class="muted">Add an email and a password so you can always get back in: a new phone, getting signed out, anything.</p>
-      <section class="panel"><div class="meths">
-        ${need("mail", "Email", a.email, esc(a.email || ""), "We'll send a code to check it's yours", "email-add")}
-        ${need("lock", "Password", a.has_password, "Set. Squad code, your name, then this", "Signs you in on any phone", "password")}
-      </div></section>
-      <button class="btn gold xl block" style="margin-top:14px" data-act="account-next" ${a.email && a.has_password ? "" : "disabled"}>Next ${ic("arrowRight")}</button>
-      <button class="btn xs" style="margin:12px auto 0;display:flex" data-act="account-next" data-skip="1">Skip for now</button>`
+      <section class="panel">${accountRows()}</section>
+      <button class="btn gold xl block" style="margin-top:14px" data-act="account-next" ${needsAccount() ? "disabled" : ""}>Next ${ic("arrowRight")}</button>
+      <p class="tiny faint" style="text-align:center;margin:10px 0 0">Both are needed to carry on. The code can take a minute, and might be in spam.</p>`
     : step === "steps" && NATIVE ? `<h1 class="ol disp ob-title">Connect your phone</h1>
       <p class="muted">Two taps. Your steps and scrolling count by themselves from then on.</p>
       <section class="panel"><span class="field-label">Steps</span>${nativeSetup("steps")}<span class="field-label">Scrolling (optional)</span>${nativeSetup("scroll")}</section>
@@ -1834,11 +1849,13 @@ document.addEventListener("submit", async (e) => {
       if (f.dataset.mode === "signin") { const r = await callAuth("email_signin", { access_token: access }); await signedIn(r.token); return; }
       const r = await callAuth("link_email", { token: S.token, access_token: access });
       S.auth = { ...(S.auth || {}), email: r.email }; closeSheet(); render(); toast("Email added");
+      if (needsAccount()) promptAccount(true);
     }); break;
     case "set-password": await busy(async () => {
       if (data.password !== data.again) throw new Error("Those two don't match");
       await callAuth("set_password", { token: S.token, password: data.password });
       S.auth = { ...(S.auth || {}), has_password: true }; closeSheet(); render(); toast("Password saved");
+      if (needsAccount()) promptAccount(true);
     }); break;
     case "log-steps": await busy(async () => {
       const r = await call("log", { token: S.token, steps: data.n, date: data.date, source: "manual" });
@@ -1907,7 +1924,6 @@ document.addEventListener("click", async (e) => {
     case "passkey-signin": t.disabled = true; await passkeySignin(); t.disabled = false; break;
     case "email-add": case "email-again": emailSheet(); break;
     case "signin-email": S.signin = { step: "email" }; render(); setTimeout(() => $("[name=email]")?.focus(), 50); break;
-    case "auth-later": store.set("authNudgeLater", Date.now()); render(); break;
     case "app-update-later": store.set("appUpdateLater", Date.now()); S.appUpdate = false; render(); break;
     case "native-steps": natOr("connectSteps"); break;
     case "native-scroll": natOr("connectScroll"); break;
@@ -1926,7 +1942,7 @@ document.addEventListener("click", async (e) => {
     case "skip-squad": S.view = "setup"; S.setupStep = "steps"; render(); break;
     case "setup-next": S.setupStep = "remind"; render(); scrollTo(0, 0); break;
     case "account-next":
-      if (t.dataset.skip && !confirm("Skip it? Without an email and password you can't get this account back if you lose your phone or get signed out.")) break;
+      if (needsAccount()) break;
       S.view = S.afterAccount === "squad" ? "squad" : "setup"; S.setupStep = "steps"; render(); scrollTo(0, 0); break;
     case "setup-done": S.view = "main"; S.tab = "today"; render(); scrollTo(0, 0); break;
     case "setup-steps": setupSheet("steps"); break;
@@ -1973,7 +1989,7 @@ document.addEventListener("visibilitychange", () => {
     if (document.hidden) { v.ch.untrack(); v.host = false; }
     else { v.joinedAt = now(); v.ch.track({ at: v.joinedAt }); }
   }
-  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); checkAppUpdate(); if (!S.auth?.email) checkAuth(); }
+  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); checkAppUpdate(); if (needsAccount() || !S.auth) checkAuth(); }
 });
 
 // ---------- updates ----------
