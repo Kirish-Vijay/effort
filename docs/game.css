@@ -819,3 +819,15 @@ button.mate.pick > svg:last-child { flex: none; opacity: .5; }
 .plate .pw.hi { color: var(--gold-hi); }
 .plate .pw.lo { color: #ff9aa3; }
 .party2d .m .f { transition: transform .3s; transform-origin: 50% 100%; }
+
+/* today's unpaid walk, on the wallet */
+.wallet .cur.eff { position: relative; }
+.wallet .pend { position: absolute; top: -8px; right: -6px; font: 700 10.5px/1 var(--ui); font-style: normal; color: #0b2a17; background: #5ee08f; border: 2px solid var(--ink); border-radius: 99px; padding: 2px 5px; font-variant-numeric: tabular-nums; }
+.pendrow { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: rgba(94,224,143,.1); border: 2px solid rgba(94,224,143,.35); font: 500 13.5px/1.4 var(--ui); color: var(--text-2); }
+.pendrow svg { flex: none; width: 22px; height: 22px; margin-top: 1px; }
+.pendrow b { color: #8af0b1; }
+/* @mention picker */
+.cmention { display: grid; gap: 2px; padding: 4px; border-radius: 12px; border: 2px solid var(--ink); background: var(--panel); max-height: 220px; overflow-y: auto; }
+.cmention button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: 600 14px/1.2 var(--ui); text-align: left; cursor: pointer; }
+.cmention button.on, .cmention button:hover { background: rgba(122,162,255,.18); }
+.cmention .cav { width: 26px; height: 26px; flex: none; display: grid; place-items: center; }

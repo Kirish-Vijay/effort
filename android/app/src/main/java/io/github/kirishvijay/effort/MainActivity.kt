@@ -27,6 +27,9 @@ import androidx.credentials.exceptions.NoCredentialException
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -39,11 +42,23 @@ class MainActivity : ComponentActivity() {
     private var stepsOn = false
     private var lastError: String? = null
     private val credentials by lazy { CredentialManager.create(this) }
+    // Live steps while the app's open: read every 10 seconds, shown at once, sent at most every 15.
+    private val live by lazy { Live(this) { n -> onLive(n) } }
+    private var liveJob: Job? = null
+    private var postedSteps = -1L
+    private var postedAt = 0L
 
     private val askSteps: ActivityResultLauncher<Set<String>> =
         registerForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted: Set<String> ->
             stepsOn = Sync.STEPS in granted
             sync()
+            askMotionOnce()
+        }
+    // The phone's own step counter, which keeps the count moving between Health Connect's updates.
+    private val askMotion: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok: Boolean ->
+            if (ok) live.start()
+            pushStatus()
         }
     private val askNotify: ActivityResultLauncher<String> =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok: Boolean ->
@@ -102,11 +117,54 @@ class MainActivity : ComponentActivity() {
         web.onResume()
         // Coming back from Settings or Health Connect: see what's now allowed, and sync.
         sync()
+        startLive()
     }
 
     override fun onPause() {
+        stopLive()
         web.onPause()
         super.onPause()
+    }
+
+    private fun startLive() {
+        live.start()
+        liveJob?.cancel()
+        liveJob = lifecycleScope.launch {
+            while (isActive) {
+                if (stepsOn && Sync.token(this@MainActivity) != null) {
+                    try { live.health(Sync.todaySteps(this@MainActivity)) } catch (e: Exception) { /* try again in a moment */ }
+                    postLive()
+                }
+                delay(10_000)
+            }
+        }
+    }
+
+    private fun stopLive() {
+        live.stop()
+        liveJob?.cancel()
+        liveJob = null
+        lifecycleScope.launch { postLive(force = true) } // don't leave the last few steps unsent
+    }
+
+    private fun onLive(n: Long) {
+        Sync.rememberLive(this, n)
+        web.evaluateJavascript("window.onEffortSteps && window.onEffortSteps($n)", null)
+    }
+
+    private suspend fun postLive(force: Boolean = false) {
+        val n = live.steps
+        if (n < 0 || n == postedSteps || (!force && System.currentTimeMillis() - postedAt < 15_000)) return
+        try { Sync.logToday(this, n); postedSteps = n; postedAt = System.currentTimeMillis() } catch (e: Exception) { /* next time */ }
+    }
+
+    // Asked once, after steps are connected; saying no just means the count moves when Health Connect updates.
+    private fun askMotionOnce() {
+        if (Build.VERSION.SDK_INT < 29 || !stepsOn || live.allowed() || !live.hasCounter()) return
+        val p = Sync.prefs(this)
+        if (p.getBoolean("askedMotion", false)) return
+        p.edit().putBoolean("askedMotion", true).apply()
+        askMotion.launch(Manifest.permission.ACTIVITY_RECOGNITION)
     }
 
     private fun openOutside(u: Uri) {
@@ -122,6 +180,7 @@ class MainActivity : ComponentActivity() {
             }
             stepsOn = health == "ok" && Sync.stepsAllowed(this@MainActivity)
             pushStatus()
+            askMotionOnce()
             if (Sync.token(this@MainActivity) == null || !(stepsOn || Sync.scrollAllowed(this@MainActivity))) return@launch
             Sync.schedule(this@MainActivity)
             lastError = try { Sync.run(this@MainActivity); null } catch (e: Exception) { e.message }
@@ -134,6 +193,7 @@ class MainActivity : ComponentActivity() {
         return JSONObject()
             .put("health", health).put("steps", stepsOn).put("scroll", Sync.scrollAllowed(this))
             .put("reminders", Reminders.enabled(this) && Reminders.canNotify(this))
+            .put("live", live.hasCounter() && live.allowed())
             .put("syncedAt", p.getLong("syncedAt", 0)).put("todaySteps", p.getLong("syncedSteps", -1))
             .put("error", lastError ?: JSONObject.NULL)
             .put("version", packageManager.getPackageInfo(packageName, 0).versionName)

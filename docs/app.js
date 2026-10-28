@@ -173,6 +173,18 @@ window.onEffortNative = (st) => {
   else softRender();
   if (synced && S.view === "main") refresh(true);
 };
+// The Android app reads steps live while it's open and hands each new total straight over, so Today moves as
+// you walk. The server gets the same number from the app; a full reload now and then picks up everyone else.
+window.onEffortSteps = (n) => {
+  const t = S.D?.today; n = Math.round(Number(n));
+  if (!t || !Number.isFinite(n) || n < 0 || n === t.rawSteps) return;
+  const was = t.steps;
+  t.rawSteps = n; t.steps = Math.max(0, n - (t.debt || 0));
+  const mine = S.D.squad?.members.find((m) => m.id === S.D.me.id);
+  if (mine) { mine.weekSteps = Math.max(0, mine.weekSteps + t.steps - was); mine.todaySteps = t.steps; }
+  if (S.view === "main") softRender();
+  if (Date.now() - (S.liveRefresh || 0) > 60000) { S.liveRefresh = Date.now(); setTimeout(() => S.view === "main" && refresh(true), 4000); }
+};
 // The Android back button: close a sheet, step back through the quiz, or go back to Today; otherwise leave the app.
 window.effortBack = () => {
   if (!$("#sheet").hidden) { closeSheet(); return true; }
@@ -393,13 +405,22 @@ function viewMain() {
   if (app.firstElementChild?.matches("header.header")) morph(app, html, 3);
   else { app.innerHTML = html; for (const c of app.children) stamp(c, 3); }
 }
+// Today's walking that isn't in the wallet yet: a day is paid at midnight, after the Taxman's cut. Until the
+// Taxman's settled it's the full amount; after that, what's left of it once he's had his share.
+function pendingToday() {
+  if (!S.D?.today) return { n: 0, taxed: false };
+  const T = taxSetup(), E = T.efforts, f = S.D.fight, st = taxState(), paid = ledgerFor("tax", S.D.today.day)?.amount || 0;
+  if (f && st === "done") return { n: Math.max(0, E - Math.round(E * Number(f.rate) * (1 - (Number(f.knocked) || 0))) + Math.round(E * (Number(f.steal_pct) || 0)) - paid), taxed: true };
+  if (st === "missed") return { n: Math.max(0, E - Math.round(E * T.taxRate)), taxed: true };
+  return { n: E, taxed: false };
+}
 function walletHtml() {
   const w = S.D.wallet;
   if (w < 0) return `<button class="wallet" data-act="wallet" aria-label="You owe ${fmt(-w)} Efforts"><span class="cur eff debt"><span class="cico">${coin(24)}</span><span class="cv"><b>−${fmt(-w)}</b><small>Efforts owed</small></span></span></button>`;
-  const n = Math.floor(w / PER_E()), e = w % PER_E();
-  return `<button class="wallet" data-act="wallet" aria-label="${n} Endeavours and ${e} Efforts. What are these?">
+  const n = Math.floor(w / PER_E()), e = w % PER_E(), p = pendingToday().n;
+  return `<button class="wallet" data-act="wallet" aria-label="${n} Endeavours and ${e} Efforts${p ? `, plus ${p} from today on the way` : ""}. What are these?">
       <span class="cur end"><span class="cico">${gem(24)}</span><span class="cv"><b>${fmt(n)}</b><small>Endeavour${n === 1 ? "" : "s"}</small></span></span>
-      <span class="cur eff"><span class="cico">${coin(24)}</span><span class="cv"><b>${e}</b><small>Effort${e === 1 ? "" : "s"}</small></span></span>
+      <span class="cur eff"><span class="cico">${coin(24)}</span><span class="cv"><b>${e}</b><small>Effort${e === 1 ? "" : "s"}</small></span>${p ? `<em class="pend">+${fmt(p)}</em>` : ""}</span>
     </button>`;
 }
 // A dot on the dock when something's waiting: the Taxman is open, or the raid is live.
@@ -531,11 +552,34 @@ async function chatSend() {
       if (!CH.live) await chatLoad(); else { chatAdd([r.message]); chatPaint({ toBottom: true }); }
       CH.ch?.send({ type: "broadcast", event: "new", payload: { id: r.message.id } });
     }
-    ta.value = ""; chatGrow();
+    ta.value = ""; chatGrow(); mentionShow(null);
     chatComposerState();
   } catch (e) { toast(e.message); }
   CH.sending = false;
   ta.focus();
+}
+// Typing @ (or @ and the start of a name) lists the squad to pick from.
+function mentionCheck() {
+  const ta = $("#cinput"); if (!ta) return;
+  const before = ta.value.slice(0, ta.selectionStart), m = before.match(/(?:^|\s)@([^\s@]{0,24})$/);
+  if (!m || ta.selectionStart !== ta.selectionEnd) return mentionShow(null);
+  const q = m[1].toLowerCase(), mates = (squad()?.members || []).filter((x) => x.id !== me().id);
+  const list = [...mates.filter((x) => x.name.toLowerCase().startsWith(q)), ...mates.filter((x) => !x.name.toLowerCase().startsWith(q) && x.name.toLowerCase().includes(q))].slice(0, 6).map((x) => x.name);
+  mentionShow(list.length ? { at: before.length - m[1].length - 1, list, i: 0 } : null);
+}
+function mentionShow(M) {
+  CH.mention = M;
+  const box = $("#cmention"); if (!box) return;
+  box.hidden = !M;
+  box.innerHTML = M ? M.list.map((n, i) => { const x = squad().members.find((y) => y.name === n);
+    return `<button type="button" role="option" aria-selected="${i === M.i}" class="${i === M.i ? "on" : ""}" data-mention="${esc(n)}"><span class="cav">${face(x.id, 26)}</span><b>${esc(n)}</b></button>`; }).join("") : "";
+}
+function mentionPick(name) {
+  const ta = $("#cinput"), M = CH.mention; if (!ta || !M || !name) return;
+  const end = ta.selectionStart, ins = `@${name} `;
+  ta.value = ta.value.slice(0, M.at) + ins + ta.value.slice(end);
+  ta.selectionStart = ta.selectionEnd = M.at + ins.length;
+  mentionShow(null); chatGrow(); ta.focus();
 }
 function chatGrow() { const ta = $("#cinput"); if (!ta) return; ta.style.height = "auto"; ta.style.height = `${Math.min(140, ta.scrollHeight)}px`; }
 function closeChatSearch() { const s = $("#csearch"); if (s) { s.hidden = true; $("#cresults").innerHTML = ""; } }
@@ -564,6 +608,7 @@ function viewChat() {
     <button class="cjump" id="cjump" data-act="chat-latest" hidden>${ic("arrowRight")} Jump to latest</button>
     <form class="ccomposer" data-form="chat">
       <div class="cctx" id="cctx" hidden></div>
+      <div class="cmention" id="cmention" role="listbox" aria-label="Mention someone" hidden></div>
       <div class="crow"><textarea id="cinput" rows="1" maxlength="2000" placeholder="Message ${esc(squad()?.name || "your squad")}" aria-label="Message"></textarea>
         <button class="btn gold csend" aria-label="Send">${ic("arrowRight")}</button></div>
     </form>
@@ -575,6 +620,19 @@ function viewChat() {
   }, { passive: true });
   const ta = $("#cinput");
   ta.addEventListener("input", chatGrow);
+  ta.addEventListener("input", mentionCheck);
+  ta.addEventListener("click", mentionCheck);
+  ta.addEventListener("blur", () => setTimeout(() => mentionShow(null), 150));
+  // The picker gets first go at the keys while it's open.
+  ta.addEventListener("keydown", (e) => {
+    const M = CH.mention; if (!M) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { M.i = (M.i + (e.key === "ArrowDown" ? 1 : -1) + M.list.length) % M.list.length; mentionShow(M); }
+    else if (e.key === "Enter" || e.key === "Tab") mentionPick(M.list[M.i]);
+    else if (e.key === "Escape") mentionShow(null);
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  });
+  $("#cmention").addEventListener("pointerdown", (e) => { const b = e.target.closest("[data-mention]"); if (!b) return; e.preventDefault(); mentionPick(b.dataset.mention); });
   ta.addEventListener("keydown", (e) => {
     // Enter sends on a keyboard; on phones it's a new line and the button sends.
     if (e.key === "Enter" && !e.shiftKey && matchMedia("(pointer: fine)").matches) { e.preventDefault(); chatSend(); }
@@ -1360,6 +1418,7 @@ function walletSheet() {
       <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut at 7pm unless you beat him.</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : w % PER_E()}</b></div>
       <div class="mrow"><span class="mic">${gem(44)}</span><div class="grow"><b>Endeavours</b><span>${PER_E()} Efforts make 1 Endeavour, automatically. Gear in the shop costs Endeavours.</span></div><b class="num">${fmt(Math.max(0, Math.floor(w / PER_E())))}</b></div>
     </div>
+    ${(() => { const p = pendingToday(); return p.n ? `<div class="pendrow">${coin(22)}<span><b>+${fmt(p.n)} Effort${p.n === 1 ? "" : "s"} from today's walking</b> ${p.taxed ? "land at midnight. That's after the Taxman's share." : "so far. They land at midnight, after the Taxman takes his cut: beat him at 7pm to keep them all."}</span></div>` : ""; })()}
     ${w < 0 ? `<p class="small" style="color:#ff9aa3;margin:12px 0 0">You're in debt: your next ${fmt(-w)} Efforts pay it off before you keep any.</p>` : `<p class="tiny faint" style="margin:12px 0 0">So ${fmt(w)} Efforts in total: ${fmt(Math.floor(w / PER_E()))} Endeavour${Math.floor(w / PER_E()) === 1 ? "" : "s"} and ${w % PER_E()} Effort${w % PER_E() === 1 ? "" : "s"} towards the next.</p>`}
     <button class="btn gold block" style="margin-top:14px" data-tab="shop">${ic("bag")} Spend them in the shop</button>`);
 }

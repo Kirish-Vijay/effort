@@ -6,6 +6,8 @@
     <!-- Only steps. Background reading lets the sync carry on with the app closed. -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <!-- The phone's own step counter, for the live count between Health Connect's updates. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <!-- Minutes in short-video apps, for the scroll budget. The player turns this on in Settings → Usage access. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <!-- The 6:45pm reminder, rebooked after a restart. -->
