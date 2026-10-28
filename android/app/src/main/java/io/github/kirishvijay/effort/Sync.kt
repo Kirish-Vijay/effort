@@ -34,7 +34,7 @@ class Unlinked : IllegalStateException("Your account link expired. Sign in to Ef
 // Sends the player's steps (from Health Connect) and short-video minutes (from Android's usage
 // stats) to their Effort account: today's and yesterday's, so the last part of a day isn't lost.
 object Sync {
-    const val APP_URL = "https://kirish-vijay.github.io/effort/"
+    const val APP_URL = "https://effort-game.vercel.app/"
     private const val API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort"
     private const val WORK = "effort-steps"
     val STEPS = HealthPermission.getReadPermission(StepsRecord::class)

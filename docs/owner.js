@@ -2,7 +2,7 @@
 // Everything goes through POST /owner with the owner key from app_config.
 (() => {
 const API = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort";
-const APP_URL = "https://kirish-vijay.github.io/effort/";
+const APP_URL = "https://effort-game.vercel.app/";
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Number(n).toLocaleString("en-GB");

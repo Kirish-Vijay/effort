@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.kirishvijay.effort",
+      "sha256_cert_fingerprints": ["F8:FA:FC:80:7B:AA:E9:80:9E:86:10:E3:5A:04:09:DA:C6:85:AD:C7:B4:AC:66:DF:23:96:D3:67:8D:B7:2E:C1"]
+    }
+  }
+]

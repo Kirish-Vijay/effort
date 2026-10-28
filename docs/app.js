@@ -21,7 +21,9 @@ function androidApp(t) {
 // Effort, the Android app that reads steps from Health Connect (android/ in the repo).
 // effort://connect?t=TOKEN opens it signed in; as a Chrome intent link it downloads the app instead
 // if it isn't installed yet.
-const STEPS_APK = "https://github.com/Kirish-Vijay/effort/releases/latest/download/effort-steps.apk";
+// Both live on the site itself: the newest build, and app-version.json saying which build that is.
+const SITE = "https://effort-game.vercel.app/";
+const STEPS_APK = SITE + "effort-steps.apk";
 const stepsAppLink = (token) => `intent://connect?t=${token}#Intent;scheme=effort;package=io.github.kirishvijay.effort;S.browser_fallback_url=${encodeURIComponent(STEPS_APK)};end`;
 // Inside the Android app the game can ask for steps, usage access and reminders itself (android/MainActivity.kt).
 const NATIVE = window.EffortAndroid || null;
@@ -31,8 +33,8 @@ const nat = (fn, ...args) => {
   if (typeof NATIVE?.[fn] !== "function") return false;
   try { NATIVE[fn](...args); return true; } catch { return false; }
 };
-// A newer Android app: each release is titled "Effort for Android 1.<build>", the same as the app's own version.
-// Checked at most every 6 hours (GitHub allows 60 lookups an hour per phone).
+// A newer Android app: app-version.json names the newest build ("1.<build>", the same as the app's own version).
+// Checked at most every 6 hours.
 const appBuild = (v) => Number(String(v || "").match(/\d+\.(\d+)/)?.[1] || 0);
 async function checkAppUpdate() {
   const mine = appBuild(S.native?.version);
@@ -41,9 +43,9 @@ async function checkAppUpdate() {
   let latest = cached && Date.now() - cached.at < 6 * 3600000 ? cached.build : null;
   if (latest == null) {
     try {
-      const r = await fetch("https://api.github.com/repos/Kirish-Vijay/effort/releases/tags/steps-app");
+      const r = await fetch(SITE + "app-version.json", { cache: "no-cache" });
       if (!r.ok) return;
-      latest = appBuild((await r.json()).name);
+      latest = appBuild((await r.json()).version);
       store.set("appLatest", { at: Date.now(), build: latest });
     } catch { return; }
   }

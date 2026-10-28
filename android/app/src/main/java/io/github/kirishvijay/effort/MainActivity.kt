@@ -62,10 +62,10 @@ class MainActivity : ComponentActivity() {
             addJavascriptInterface(Bridge(), "EffortAndroid")
             webChromeClient = WebChromeClient() // the game's confirm() and prompt() boxes
             webViewClient = object : WebViewClient() {
-                // The game stays in the app; anything else (calendar links, Health Connect's Play page) opens outside it.
+                // The game stays in the app; anything else (calendar links, the app download, Health Connect's Play page) opens outside it.
                 override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
                     val u = req.url
-                    if (u.host == Uri.parse(Sync.APP_URL).host && u.path.orEmpty().startsWith("/effort") && !u.path.orEmpty().endsWith(".ics")) return false
+                    if (u.host == Uri.parse(Sync.APP_URL).host && !u.path.orEmpty().endsWith(".ics") && !u.path.orEmpty().endsWith(".apk")) return false
                     openOutside(u)
                     return true
                 }

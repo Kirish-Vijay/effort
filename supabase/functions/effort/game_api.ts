@@ -1,5 +1,5 @@
 // The live game: wallet, the 7pm Taxman, the Sunday raid, gear and the weekly table.
-// The rules are the same game.js the app and the lab run, loaded from the live site (see rules.ts).
+// The rules are the same game.js the app and the lab run, kept in the database (see rules.ts).
 //   POST /game         everything the app needs, after settling any finished days
 //   POST /tax_start    open your Taxman fight (7pm–7:05pm your time)
 //   POST /tax_finish   save the fight (checkpoints while it runs, then final: true)

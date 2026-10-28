@@ -30,9 +30,9 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const fail = (msg: string, status = 400) => json({ ok: false, error: msg }, status);
 const ITERATIONS = 150000;
 // Passkeys belong to the website's domain. The Android app may use them too: the site vouches for it in
-// kirish-vijay.github.io/.well-known/assetlinks.json, and its requests carry the app's signing-key hash as origin.
-const RP_ID = "kirish-vijay.github.io";
-const ORIGINS = ["https://kirish-vijay.github.io", "android:apk-key-hash:-Pr8gHuq6YCehhDjWgQJ2saFrce0rGbfI5bTZ423LsE"];
+// effort-game.vercel.app/.well-known/assetlinks.json, and its requests carry the app's signing-key hash as origin.
+const RP_ID = "effort-game.vercel.app";
+const ORIGINS = ["https://effort-game.vercel.app", "android:apk-key-hash:-Pr8gHuq6YCehhDjWgQJ2saFrce0rGbfI5bTZ423LsE"];
 
 // deno-lint-ignore no-explicit-any
 type Any = any;

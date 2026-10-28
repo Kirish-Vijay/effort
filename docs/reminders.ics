@@ -21,14 +21,14 @@ RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU
 END:STANDARD
 END:VTIMEZONE
 BEGIN:VEVENT
-UID:effort-taxman@kirish-vijay.github.io
+UID:effort-taxman@effort-game.vercel.app
 DTSTAMP:20261027T000000Z
 DTSTART;TZID=Europe/London:20261028T190000
 DTEND;TZID=Europe/London:20261028T190500
 RRULE:FREQ=DAILY
 SUMMARY:Effort: fight the Taxman
-DESCRIPTION:Five minutes only. https://kirish-vijay.github.io/effort/
-URL:https://kirish-vijay.github.io/effort/
+DESCRIPTION:Five minutes only. https://effort-game.vercel.app/
+URL:https://effort-game.vercel.app/
 BEGIN:VALARM
 ACTION:DISPLAY
 DESCRIPTION:The Taxman is open
@@ -36,14 +36,14 @@ TRIGGER:PT0M
 END:VALARM
 END:VEVENT
 BEGIN:VEVENT
-UID:effort-raid@kirish-vijay.github.io
+UID:effort-raid@effort-game.vercel.app
 DTSTAMP:20261027T000000Z
 DTSTART;TZID=Europe/London:20261101T190000
 DTEND;TZID=Europe/London:20261101T191500
 RRULE:FREQ=WEEKLY;BYDAY=SU
 SUMMARY:Effort: squad raid
-DESCRIPTION:15 minutes\, the whole squad. https://kirish-vijay.github.io/effort/
-URL:https://kirish-vijay.github.io/effort/
+DESCRIPTION:15 minutes\, the whole squad. https://effort-game.vercel.app/
+URL:https://effort-game.vercel.app/
 BEGIN:VALARM
 ACTION:DISPLAY
 DESCRIPTION:Raid in 10 minutes

@@ -16,7 +16,7 @@ const CORS = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 const fail = (msg: string, status = 400) => json({ ok: false, error: msg }, status);
-const APP = "https://kirish-vijay.github.io/effort/";
+const APP = "https://effort-game.vercel.app/";
 const SQUAD_TZ = "Europe/London";
 const NO_SCROLL_MIN = 30;
 // deno-lint-ignore no-explicit-any
