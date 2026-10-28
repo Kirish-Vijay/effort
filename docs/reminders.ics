@@ -38,20 +38,20 @@ END:VEVENT
 BEGIN:VEVENT
 UID:effort-raid@effort-game.vercel.app
 DTSTAMP:20261027T000000Z
-DTSTART;TZID=Europe/London:20261101T190000
-DTEND;TZID=Europe/London:20261101T191500
+DTSTART;TZID=Europe/London:20261101T180000
+DTEND;TZID=Europe/London:20261101T210000
 RRULE:FREQ=WEEKLY;BYDAY=SU
-SUMMARY:Effort: squad raid
-DESCRIPTION:15 minutes\, the whole squad. https://effort-game.vercel.app/
+SUMMARY:Effort: squad raid lobby
+DESCRIPTION:Lobby open 6–9pm. 4 or more\, everyone ready\, then 15 minutes. https://effort-game.vercel.app/
 URL:https://effort-game.vercel.app/
 BEGIN:VALARM
 ACTION:DISPLAY
-DESCRIPTION:Raid in 10 minutes
+DESCRIPTION:Raid lobby opens in 10 minutes
 TRIGGER:-PT10M
 END:VALARM
 BEGIN:VALARM
 ACTION:DISPLAY
-DESCRIPTION:The raid is live
+DESCRIPTION:The raid lobby's open till 9pm
 TRIGGER:PT0M
 END:VALARM
 END:VEVENT

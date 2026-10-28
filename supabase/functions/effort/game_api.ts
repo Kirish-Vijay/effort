@@ -3,7 +3,8 @@
 //   POST /game         everything the app needs, after settling any finished days
 //   POST /tax_start    open your Taxman fight (7pm–7:05pm your time)
 //   POST /tax_finish   save the fight (checkpoints while it runs, then final: true)
-//   POST /raid_join    join (or start) this Sunday's squad raid; returns the roster
+//   POST /raid_lobby   Sunday 6–9pm: join the lobby, pick the boss, say you're ready (it starts when 4+ are ready)
+//   POST /raid_join    once it's started, join the fight; returns the roster
 //   POST /raid_sync    the host phone saves the fight so anyone can pick it up
 //   POST /raid_finish  pay out the raid, climb the ladder, settle the week
 //   POST /buy | /upgrade | /equip
@@ -62,11 +63,13 @@ function taxWindow(now: number, tz: string, test: number | null) {
   if (test && test > now) return { day, opens: now, closes: test, next: now, open: true, test: true };
   return { day, opens, closes, next, open: now >= opens && now < closes, test: false };
 }
+// Sunday's lobby opens at 6pm and the raid has to start by 9pm; the fight itself is 15 minutes from then.
+const RAID_FROM = 18, RAID_UNTIL = 21;
 function raidWindow(now: number, test: number | null) {
   const today = localDate(now, SQUAD_TZ);
   let sunday = addDays(today, (7 - dow(today)) % 7);
-  let opens = zoned(sunday, G.RULES.windowHour, 0, SQUAD_TZ), closes = opens + G.RULES.raidMin * 60000;
-  if (now >= closes) { sunday = addDays(sunday, 7); opens = zoned(sunday, G.RULES.windowHour, 0, SQUAD_TZ); closes = opens + G.RULES.raidMin * 60000; }
+  let opens = zoned(sunday, RAID_FROM, 0, SQUAD_TZ), closes = zoned(sunday, RAID_UNTIL, 0, SQUAD_TZ);
+  if (now >= closes) { sunday = addDays(sunday, 7); opens = zoned(sunday, RAID_FROM, 0, SQUAD_TZ); closes = zoned(sunday, RAID_UNTIL, 0, SQUAD_TZ); }
   if (test && test > now) return { slot: "test:" + new Date(test).toISOString(), weekStart: mondayOf(today), opens: now, closes: test, open: true, test: true };
   return { slot: sunday, weekStart: addDays(sunday, -6), opens, closes, open: now >= opens && now < closes, test: false };
 }
@@ -161,13 +164,18 @@ async function settleDays(db: Any, player: Any, squad: Any, L: Any, now: number)
 async function weekRows(db: Any, squad: Any, weekStart: string, to: string) {
   const ids = squad.members.map((m: Any) => m.id);
   const steps = await stepsFor(db, ids, weekStart, to);
-  const freshAfter = zoned(addDays(weekStart, 3), 0, 0, SQUAD_TZ);
-  return squad.members.map((m: Any) => ({
-    id: m.id, name: m.name,
-    weekSteps: Object.values(steps[m.id]).reduce((a: number, b: Any) => a + (b as number), 0),
-    todaySteps: steps[m.id][to] ?? 0,
-    fresh: Date.parse(m.joined_at) > freshAfter,
-  }));
+  const freshAfter = zoned(addDays(weekStart, 3), 0, 0, SQUAD_TZ), saturday = addDays(weekStart, 5);
+  return squad.members.map((m: Any) => {
+    // Only steps from the day they joined the squad count; days before that aren't theirs to claim.
+    const joined = localDate(Date.parse(m.joined_at), SQUAD_TZ), from = joined > weekStart ? joined : weekStart;
+    return {
+      id: m.id, name: m.name,
+      weekSteps: Object.entries(steps[m.id]).reduce((a: number, [day, n]: Any) => a + (day >= from ? n : 0), 0),
+      todaySteps: steps[m.id][to] ?? 0,
+      fresh: Date.parse(m.joined_at) > freshAfter,
+      goalDays: from > saturday ? 0 : daysFrom(from, saturday).length,
+    };
+  });
 }
 
 // The weekly settlement: the week's lowest walker pays a cut of their week's Efforts to the top walker.
@@ -202,13 +210,23 @@ async function rosterFor(db: Any, squad: Any, weekStart: string, to: string) {
     const row = T.rows.find((r: Any) => r.id === m.id), L = ledgers[m.id];
     return {
       id: m.id, name: m.name, answers: m.character || null, stats: statsOf(m), equipped: cleanGear(m.gear, L.inv), inv: L.inv,
-      pos: m.raid_pos || null, weekSteps: row.weekSteps, stride: row.stride, title: row.title, fresh: row.fresh, level: level(L),
+      pos: m.raid_pos || null, weekSteps: row.weekSteps, stride: row.stride, title: row.title, fresh: row.fresh, goalDays: rows.find((r: Any) => r.id === m.id)?.goalDays ?? 6, level: level(L),
     };
   });
 }
 
+// ---------- this week's boss ----------
+function bossChoice(group: Any) {
+  const last = group.last_tier ? Number(group.last_tier) : null;
+  const list = last ? [...new Set([Math.max(1, last - 1), last, last + 1])] : [1];
+  const want = Number(group.tier) || 1;
+  return { list, last, pick: list.includes(want) ? want : list[list.length - 1] };
+}
+// How long a player can go without checking in before they count as having left the lobby.
+const LOBBY_STALE_MS = 20000;
+
 // ---------- the routes ----------
-const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip"]);
+const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip"]);
 export async function gameRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; playerByToken: Any }) {
   const { db, json, fail } = ctx;
   if (!GAME_ROUTES.has(action)) return null;
@@ -242,18 +260,22 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         const week = await weekRows(db, squad, mondayOf(localDate(now, SQUAD_TZ)), localDate(now, SQUAD_TZ));
         const ledgers = await ledgerFor(db, squad.members.map((m: Any) => m.id));
         squadOut = {
-          code: squad.group.code, name: squad.group.name, tier: squad.group.tier, test_until: squad.group.test_until,
+          code: squad.group.code, name: squad.group.name, tier: squad.group.tier, test_until: squad.group.test_until, bosses: bossChoice(squad.group),
           members: squad.members.map((m: Any) => {
             const w = week.find((x: Any) => x.id === m.id), Lm = ledgers[m.id];
             return { id: m.id, name: m.name, character: m.character, gear: cleanGear(m.gear, Lm.inv), pos: m.raid_pos, level: level(Lm),
-              weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, synced: m.steps_synced_at, joined_at: m.joined_at };
+              weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, goalDays: w.goalDays, synced: m.steps_synced_at, joined_at: m.joined_at };
           }),
         };
         const [{ data: cur }, { data: last }] = await Promise.all([
-          db.from("raids").select("id,slot,tier,status,started_at,ends_at,result,goal").eq("group_id", squad.group.id).eq("slot", rw.slot).maybeSingle(),
+          db.from("raids").select("id,slot,tier,status,started_at,ends_at,result,goal,fighters").eq("group_id", squad.group.id).eq("slot", rw.slot).maybeSingle(),
           db.from("raids").select("slot,tier,result,ends_at").eq("group_id", squad.group.id).eq("status", "done").order("ends_at", { ascending: false }).limit(1),
         ]);
         raid = cur; lastRaid = last?.[0] ?? null;
+        if (raid?.status === "lobby") {
+          const { data: lob } = await db.from("raid_lobby").select("player_id,ready,seen").eq("raid_id", raid.id);
+          raid.lobby = (lob ?? []).filter((r: Any) => Date.parse(r.seen) > now - LOBBY_STALE_MS).map((r: Any) => ({ id: r.player_id, ready: r.ready }));
+        }
       }
       return json({
         ok: true, now,
@@ -305,19 +327,57 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       return json({ ok: true, fight: saved, net });
     }
 
+    case "raid_lobby": {
+      if (!squad) return fail("Join a squad first");
+      const w = raidWindow(now, test), choice = bossChoice(squad.group);
+      const sel = () => db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).maybeSingle();
+      let { data: raid } = await sel();
+      if (!raid) {
+        if (!w.open) return fail("The raid lobby opens on Sunday at 6pm");
+        await db.from("raids").upsert({ group_id: squad.group.id, slot: w.slot, tier: choice.pick, seed: crypto.getRandomValues(new Uint32Array(1))[0] >>> 1, status: "lobby",
+          started_at: new Date(now).toISOString(), ends_at: new Date(w.closes).toISOString() }, { onConflict: "group_id,slot", ignoreDuplicates: true });
+        ({ data: raid } = await sel());
+      }
+      if (raid.status === "lobby") {
+        if (now >= w.closes) return fail("Too late: the raid had to start by 9pm");
+        const act = String(body.action || "poll");
+        if (act === "leave") await db.from("raid_lobby").delete().eq("raid_id", raid.id).eq("player_id", player.id);
+        else {
+          if (act === "boss") {
+            const t = Number(body.tier);
+            if (!choice.list.includes(t)) return fail("You can't pick that boss this week");
+            // A new boss means everyone says ready again.
+            if (t !== raid.tier) { await db.from("raids").update({ tier: t }).eq("id", raid.id).eq("status", "lobby"); await db.from("raid_lobby").update({ ready: false }).eq("raid_id", raid.id); raid.tier = t; }
+          }
+          const row: Any = { raid_id: raid.id, player_id: player.id, seen: new Date(now).toISOString() };
+          if (act === "ready" || act === "unready") row.ready = act === "ready";
+          if (act === "boss") row.ready = false;
+          await db.from("raid_lobby").upsert(row, { onConflict: "raid_id,player_id" });
+        }
+        const { data: rows } = await db.from("raid_lobby").select("player_id,ready,seen").eq("raid_id", raid.id);
+        const here = (rows ?? []).filter((r: Any) => Date.parse(r.seen) > now - LOBBY_STALE_MS);
+        // Four or more here and every one of them ready: it starts, with exactly them, and the week's goal locked in.
+        if (here.length >= G.RULES.raidSquadSize && here.every((r: Any) => r.ready)) {
+          const { data: fresh } = await sel();
+          const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
+          const g = G.squadGoal(fresh.tier, roster);
+          await db.from("raids").update({ status: "live", started_at: new Date(now).toISOString(), ends_at: new Date(now + G.RULES.raidMin * 60000).toISOString(),
+            goal: { ...g, enraged: !g.met }, fighters: here.map((r: Any) => r.player_id) }).eq("id", raid.id).eq("status", "lobby");
+        }
+        ({ data: raid } = await sel());
+        const lobby = (rows ?? []).map((r: Any) => ({ id: r.player_id, ready: r.ready, here: Date.parse(r.seen) > now - LOBBY_STALE_MS }));
+        return json({ ok: true, now, raid: { id: raid.id, status: raid.status, tier: raid.tier, fighters: raid.fighters, goal: raid.goal }, lobby, bosses: choice, min: G.RULES.raidSquadSize, closes: w.closes });
+      }
+      return json({ ok: true, now, raid: { id: raid.id, status: raid.status, tier: raid.tier, fighters: raid.fighters, goal: raid.goal, result: raid.result }, lobby: [], bosses: choice, min: G.RULES.raidSquadSize, closes: w.closes });
+    }
+
     case "raid_join": {
       if (!squad) return fail("Join a squad first");
       const w = raidWindow(now, test);
-      let { data: raid } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).maybeSingle();
-      const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
-      if (!raid) {
-        if (!w.open) return fail("The raid opens on Sunday at 7pm");
-        // The squad's weekly step goal, frozen as the raid starts: missed, and the boss is enraged.
-        const g = G.squadGoal(squad.group.tier, roster);
-        await db.from("raids").upsert({ group_id: squad.group.id, slot: w.slot, tier: squad.group.tier, seed: crypto.getRandomValues(new Uint32Array(1))[0] >>> 1,
-          started_at: new Date(now).toISOString(), ends_at: new Date(w.closes).toISOString(), goal: { ...g, enraged: !g.met } }, { onConflict: "group_id,slot", ignoreDuplicates: true });
-        ({ data: raid } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).single());
-      }
+      const { data: raid } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("slot", w.slot).maybeSingle();
+      if (!raid || raid.status === "lobby") return fail("The raid hasn't started yet. Join the lobby");
+      if (raid.status !== "done" && !(raid.fighters || []).includes(player.id)) return fail("This raid started without you. Next week!");
+      const roster = (await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ))).filter((m: Any) => !raid.fighters || raid.fighters.includes(m.id));
       return json({ ok: true, now, me: player.id, raid, roster, boss: G.bossFor(raid.tier) });
     }
 
@@ -452,7 +512,7 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
   const weekStart = raid.slot.startsWith("test:") ? mondayOf(localDate(Date.parse(raid.started_at), SQUAD_TZ)) : addDays(raid.slot, -6);
   const roster = await rosterFor(db, squad, weekStart, localDate(Date.parse(raid.started_at), SQUAD_TZ));
   const report: Record<string, Any> = Object.fromEntries((Array.isArray(body.members) ? body.members : []).filter((m: Any) => m && typeof m.id === "string").map((m: Any) => [m.id, m]));
-  const fighters = roster.filter((m: Any) => report[m.id]);
+  const fighters = roster.filter((m: Any) => report[m.id] && (!raid.fighters || raid.fighters.includes(m.id)));
   const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
   let result: Any = { how, frac: 0, pool: 0, shares: [], boss: G.bossFor(raid.tier).name, tier: raid.tier, settle: null };
   if (fighters.length) {
@@ -477,8 +537,9 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
       await db.from("step_adjust").upsert(fighters.map((m: Any) => ({ player_id: m.id, day: tomorrow, steps: G.RULES.paralysedSteps, reason: "paralysed" })),
         { onConflict: "player_id,day,reason", ignoreDuplicates: true });
     }
-    if (how === "won" && raid.tier === squad.group.tier) await db.from("groups").update({ tier: raid.tier + 1 }).eq("id", squad.group.id).eq("tier", raid.tier);
   }
+  // Next week: this boss again, one up or one down (one up is suggested after a win).
+  await db.from("groups").update({ last_tier: raid.tier, tier: how === "won" ? raid.tier + 1 : raid.tier }).eq("id", squad.group.id);
   // Sunday's raid closes the week: settle the walking table for the whole squad (test raids don't).
   if (!raid.slot.startsWith("test:") && squad.members.length >= 2) result.settle = await settleWeek(db, squad, weekStart);
   const s = result.settle;

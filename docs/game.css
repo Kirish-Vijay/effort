@@ -184,7 +184,8 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .hero .art .bg { position: absolute; inset: 0; }
 .hero .art .portrait { position: absolute; right: 8px; bottom: -6px; width: 150px; height: 160px; filter: drop-shadow(0 8px 10px rgba(0,0,0,.45)); }
 .hero .art .portrait svg { width: 100%; height: 100%; }
-.hero .art .label { position: absolute; left: 14px; top: 14px; right: 150px; }
+.hero .art .label { position: absolute; left: 14px; top: 14px; right: 150px; z-index: 1; }
+.hero .art .label .chip { max-width: 100%; white-space: normal; height: auto; min-height: 24px; line-height: 1.15; padding-top: 3px; padding-bottom: 3px; margin-bottom: 4px; }
 .hero .art h3 { margin: 6px 0 4px; font: 400 26px/1.02 var(--display); }
 .hero .art p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.35; }
 .hero .body { padding: 14px; }
@@ -641,3 +642,16 @@ button.mate.pick > svg:last-child { flex: none; opacity: .5; }
 .goalbar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(180deg, #ff9a7a, #e8483f); border-radius: 99px; transition: width .6s; }
 .goal.met .goalbar i { background: linear-gradient(180deg, #a6f3c0, #3fbf6f); }
 .goalbar span { position: relative; display: block; text-align: center; font: 400 14px/22px var(--display); text-shadow: 0 1px 2px #000; font-variant-numeric: tabular-nums; }
+
+/* Raid lobby */
+.bossopts { display: grid; gap: 8px; }
+.bossopt { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 12px 6px 6px; border-radius: 16px; border: 2px solid var(--ink); background: var(--inset); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bossopt.on { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(255,200,61,.35); }
+.bossopt .bp { width: 60px; height: 64px; flex: none; position: relative; display: grid; place-items: center; }
+.bossopt .bp .fb { font-size: 30px; color: var(--text-3); }
+.bossopt .bp.loaded .fb { display: none; }
+.bossopt .bp .pimg { position: absolute; inset: 0; }
+.bossopt .bp .pimg { width: 100%; height: 100%; object-fit: contain; }
+.bossopt small { display: block; font: 800 10px/1 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.bossopt b { display: block; font: 400 18px/1.15 var(--display); margin: 3px 0 2px; }
+.red-t { color: #ff9aa3; }

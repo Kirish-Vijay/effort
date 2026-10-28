@@ -367,7 +367,7 @@ const KNOBS = [
     ["dailyWindowMin", "Fight length (min)"], ["taxmanBaseHp", "Base health"], ["taxmanHpPerEffort", "Health per Effort earned"], ["taxmanHpPerOverMin", "Health per minute over budget"],
     ["taxmanRegen", "Health regained per idle second", "share of max"], ["taxmanPerLevel", "Toughness per player level"], ["stealPerLevel", "Extra steal cap per level"],
     ["auditEvery", "Seconds between Audits"], ["auditFor", "Audit length (s)"], ["auditBlock", "Damage through an Audit", "share"], ["stealDmgPerPct", "Damage per 1% stolen", "× his health"], ["comboWindowMs", "Combo window (ms)"]]],
-  ["Raid", [["raidHpPerMember", "Boss health per member"], ["raidLvlCurve", "How much gear raises the boss", "1 = fully"], ["raidPerkWeight", "Weight of each gear perk"], ["raidRewardCurve", "Reward growth vs boss level"],
+  ["Raid", [["raidHpBase", "Boss health (Brett)"], ["bossHpGrowth", "Health growth per boss"], ["bossDmgGrowth", "Damage growth per boss"], ["raidPerkWeight", "Weight of each gear perk"], ["raidRewardCurve", "Reward growth vs boss level"],
     ["raidAtkEvery", "Seconds between attacks"], ["raidBossDmg", "Single-hit damage"], ["raidRewardPerMember", "Win reward per member per level", "Efforts"]]],
   ["Competition", [["strideMin", "Lowest raid power", "×"], ["strideMax", "Highest raid power", "×"], ["stepsShare", "Share of loot split by steps"], ["topLoot", "Top walker loot bonus"], ["lastLoot", "Lowest walker loot change"],
     ["slackerTax", "Lowest walker pays this share of their week"], ["slackerAggro", "How much more the boss targets them", "×"], ["paceTax", "Daily tax swing vs squad average"]]],
@@ -951,7 +951,7 @@ document.addEventListener("change", (e) => {
   const k = e.target.dataset.knob;
   if (!k) return;
   const n = Number(e.target.value);
-  const mustBePositive = ["xpPerLevel", "stepsPerEffort", "effortsPerEndeavour", "dailyWindowMin", "raidAtkEvery", "taxmanBaseHp", "raidHpPerMember", "triviaSeconds", "comboWindowMs"];
+  const mustBePositive = ["xpPerLevel", "stepsPerEffort", "effortsPerEndeavour", "dailyWindowMin", "raidAtkEvery", "taxmanBaseHp", "raidHpBase", "triviaSeconds", "comboWindowMs"];
   if (!Number.isFinite(n) || n < 0 || (n === 0 && mustBePositive.includes(k))) { e.target.value = G.RULES[k]; return toast(n === 0 ? "That one can't be zero" : "Needs a number of zero or more"); }
   L.rules[k] = n; G.setRules(L.rules); save();
   const y = window.scrollY; render(); window.scrollTo(0, y);

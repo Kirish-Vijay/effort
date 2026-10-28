@@ -105,7 +105,7 @@ async function evening(players: Any[], now: number) {
       const row = T.rows.find((r: Any) => r.id === p.id);
       const boss = G.bossFor(g.groups?.tier ?? 1);
       const note = row?.title === "top" ? " You're top walker this week." : row?.title === "last" ? " You're the lowest walker. It's coming for you." : "";
-      return { player: p, msg: { title: `Raid at 7: ${boss.name}`, body: `15 minutes, the whole squad. Your steps give you ×${(row?.stride ?? 1).toFixed(2)} power.${note} The Taxman's open too.`, tag: "raid", url: APP } };
+      return { player: p, msg: { title: `Raid lobby's open till 9pm`, body: `Get 4 or more of you in, pick the boss, everyone taps Ready. Your steps give you ×${(row?.stride ?? 1).toFixed(2)} power.${note} The Taxman's at 7 too.`, tag: "raid", url: APP } };
     }
     return { player: p, msg: { title: "The Taxman's coming at 7", body: tax, tag: "taxman", url: APP } };
   });

@@ -176,7 +176,7 @@ window.onEffortNative = (st) => {
 window.effortBack = () => {
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   if (["tax", "raid"].includes(S.view)) return true;
-  const back = $("[data-act=quiz-back]") || $("[data-act=signin-back]") || $("[data-act=back]");
+  const back = $("[data-act=quiz-back]") || $("[data-act=signin-back]") || $("[data-act=lobby-leave]") || $("[data-act=back]");
   if (back) { back.click(); return true; }
   if (S.view === "main" && S.tab !== "today") { S.tab = "today"; render(); return true; }
   return false;
@@ -234,7 +234,7 @@ const level = () => G.levelOf(S.D.xp);
 const squad = () => S.D.squad;
 const squadAvgToday = () => { const m = squad()?.members || []; return m.length > 1 ? m.reduce((s, x) => s + x.todaySteps, 0) / m.length : 0; };
 const taxSetup = () => G.taxmanSetup({ steps: S.D.today.steps, scrollMin: S.D.today.scroll ?? S.D.today.noScrollMin, stats: myStats(), equipped: me().gear, inv: S.D.inv, level: level(), squadAvg: squadAvgToday() });
-const weekRows = () => G.weekTable((squad()?.members || []).map((m) => ({ id: m.id, name: m.name, you: m.id === me().id, weekSteps: m.weekSteps, fresh: m.fresh })));
+const weekRows = () => G.weekTable((squad()?.members || []).map((m) => ({ id: m.id, name: m.name, you: m.id === me().id, weekSteps: m.weekSteps, fresh: m.fresh, goalDays: m.goalDays })));
 const ledgerFor = (kind, ref) => S.D.ledger.find((r) => r.kind === kind && r.ref === ref);
 function taxState() {
   const w = S.D.windows.tax, f = S.D.fight, t = now();
@@ -245,13 +245,17 @@ function taxState() {
   if (t < w.opens) return "soon";
   return "missed";
 }
+// nosquad | soon (before Sunday 6pm) | open (the lobby's open) | live (your raid's on) | without (it started without you) | done
 function raidState() {
-  const w = S.D.windows.raid;
+  const w = S.D.windows.raid, r = S.D.raid;
   if (!squad()) return "nosquad";
-  if (S.D.raid?.status === "done") return "done";
+  if (r?.status === "done") return "done";
+  if (r && ["live", "settling"].includes(r.status)) return (r.fighters || []).includes(me().id) ? "live" : "without";
   if (w.open && now() < w.closes) return "open";
   return "soon";
 }
+// The boss this week: the one picked in the lobby, or the suggested one.
+const raidTier = () => S.D.raid?.tier ?? squad()?.bosses?.pick ?? squad()?.tier ?? 1;
 
 // ---------- portraits ----------
 const portraitImg = (kind, id, { w = 256, h = 256, frame = "full", cls = "" } = {}) =>
@@ -362,7 +366,7 @@ function morph(el, html, depth) {
 // main screens only, never a fight, and never under an open sheet.
 const softRender = () => { if (["main", "setup"].includes(S.view) && $("#sheet").hidden) render(); };
 function render() {
-  const views = { boot: viewBoot, welcome: viewWelcome, signin: viewSignin, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, tax: renderTax, raid: renderRaid, result: renderResult };
+  const views = { boot: viewBoot, welcome: viewWelcome, signin: viewSignin, quiz: viewQuiz, reveal: viewReveal, squad: viewSquad, setup: viewSetup, main: viewMain, lobby: viewLobby, tax: renderTax, raid: renderRaid, result: renderResult };
   (views[S.view] || viewBoot)();
   hydratePortraits();
 }
@@ -398,7 +402,7 @@ function walletHtml() {
 // A dot on the dock when something's waiting: the Taxman is open, or the raid is live.
 function dockDot(tab) {
   if (tab === "today" && ["open", "live"].includes(taxState())) return '<i class="ping"></i>';
-  if (tab === "raid" && raidState() === "open") return '<i class="ping"></i>';
+  if (tab === "raid" && ["open", "live"].includes(raidState())) return '<i class="ping"></i>';
   return "";
 }
 
@@ -517,13 +521,13 @@ function raidPreview() {
     const row = T.rows.find((r) => r.id === m.id);
     return { id: m.id, name: m.name, stats: G.stats(m.character || {}), equipped: m.id === me().id ? me().gear : m.gear, inv: m.id === me().id ? S.D.inv : {}, weekSteps: m.weekSteps, stride: row.stride, title: row.title };
   });
-  return G.raidCreate(members, { seed: 1, tier: sq.tier, enraged: !goalNow().met });
+  return G.raidCreate(members, { seed: 1, tier: raidTier(), enraged: !goalNow().met });
 }
 // This week's squad goal (see Game.squadGoal): once the raid has started, the server's frozen copy.
-const goalNow = () => S.D.raid?.goal || G.squadGoal(squad().tier, weekRows().rows);
+const goalNow = (tier = raidTier()) => (S.D.raid?.goal && S.D.raid.tier === tier ? S.D.raid.goal : G.squadGoal(tier, weekRows().rows));
 function goalPanel() {
   if (!squad()) return "";
-  const g = goalNow(), boss = G.bossFor(squad().tier), pct = Math.min(1, g.steps / Math.max(1, g.target));
+  const g = goalNow(), boss = G.bossFor(raidTier()), pct = Math.min(1, g.steps / Math.max(1, g.target));
   const left = Math.max(0, g.target - g.steps), daysLeft = Math.max(1, 6 - ((new Date().getDay() + 6) % 7));
   const frozen = !!S.D.raid?.goal;
   return `<section class="panel goal ${g.met ? "met" : ""}">
@@ -533,7 +537,7 @@ function goalPanel() {
         ? `${esc(boss.name)} stays normal on Sunday. Every step past this still raises your raid power.`
         : frozen ? `The squad missed the goal, so ${esc(boss.name)} is enraged: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder.`
         : `Between you, average ${fmt(g.perDay)} steps a day each, Monday to Saturday (Sunday's count too). Miss it and ${esc(boss.name)} is <b>enraged</b> on Sunday: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder. About ${fmt(left / g.players / daysLeft)} a day each from here.`}</p>
-      <p class="tiny faint" style="margin:6px 0 0">${g.players} player${g.players === 1 ? "" : "s"} × ${fmt(g.perDay)} × 6 days. Each boss up the ladder asks 500 more a day; it's back to 5,000 at the start of every lap.${squad().members.some((m) => m.fresh) ? " Players who joined after Thursday don't add to it this week." : ""}</p>
+      <p class="tiny faint" style="margin:6px 0 0">${fmt(g.perDay)} × ${g.days ?? g.players * 6} player-days (Monday to Saturday, counted from the day each of you joined). Each boss up the ladder asks 500 more a day; it's back to 5,000 at the start of every lap.</p>
     </section>`;
 }
 const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
@@ -541,29 +545,36 @@ function raidHero() {
   const st = raidState(), w = S.D.windows.raid;
   const P = raidPreview(), boss = P.boss, mine = P.members.find((m) => m.id === me().id);
   let chip, btn;
+  const inLobby = S.D.raid?.lobby?.length || 0;
   if (st === "open") {
-    chip = `<span class="chip green pulse">${ic("raid")} Live now · <span data-count="${w.closes}">${countdown(w.closes - now())}</span></span>`;
-    btn = `<button class="btn green xl block" style="margin-top:14px" data-act="raid">${ic("raid")} Join the raid</button>`;
+    chip = `<span class="chip green pulse">${ic("raid")} Lobby open · <span data-count="${w.closes}">${countdown(w.closes - now())}</span></span>`;
+    btn = `<button class="btn green xl block" style="margin-top:14px" data-act="lobby">${ic("squad")} Join the lobby${inLobby ? ` · ${inLobby} there` : ""}</button>`;
+  } else if (st === "live") {
+    chip = `<span class="chip green pulse">${ic("raid")} Raid on now</span>`;
+    btn = `<button class="btn green xl block" style="margin-top:14px" data-act="raid">${ic("raid")} Back into the fight</button>`;
+  } else if (st === "without") {
+    chip = `<span class="chip">${ic("raid")} Raid on now</span>`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>It started without you</button>`;
   } else if (st === "done") {
     const r = S.D.raid.result;
     chip = `<span class="chip">${ic("check")} This week's raid is done</span>`;
     btn = `<button class="btn blue block" style="margin-top:14px" data-act="raid-result">${ic("chest")} ${r.how === "won" ? "Won" : r.how === "wiped" ? "Wiped" : "Out of time"} · see results</button>`;
   } else {
-    chip = `<span class="chip red">${ic("raid")} Sunday · 7pm</span>`;
+    chip = `<span class="chip red">${ic("raid")} Sunday · 6–9pm</span>`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>`;
   }
   return `<section class="panel hero">
       <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #5a4bb0 0%, #24306e 45%, #121a44 100%)"></div>
-        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}${boss.enraged ? ` <span class="chip red">${ic("bolt")} ${S.D.raid?.goal ? "Enraged" : "Enraged unless you hit the goal"}</span>` : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p></div>
+        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}${boss.enraged ? ` <span class="chip red">${ic("bolt")} ${S.D.raid?.goal ? "Enraged" : "Rage risk"}</span>` : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p></div>
         <div class="portrait">${portraitImg("boss", boss.id, { w: 300, h: 320 })}</div></div>
       <div class="body">
         <div class="tiles">
           <div class="tile red"><div class="k">${ic("heart")} Health</div><div class="v num">${fmt(boss.max)}</div></div>
-          <div class="tile"><div class="k">${ic("upgrade")} Boss level</div><div class="v">${P.lvl.toFixed(2)}<small>from gear</small></div></div>
+          <div class="tile"><div class="k">${ic("bolt")} Hits</div><div class="v">×${boss.dmg.toFixed(2)}<small>vs Brett</small></div></div>
           <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(P))}<small>squad</small></div></div>
           <div class="tile ${mine.stride > 1 ? "green" : mine.stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${mine.stride.toFixed(2)}<small>from steps</small></div></div>
         </div>${btn}
-        <p class="tiny faint" style="margin:10px 0 0">Everyone fights the same boss at the same time, 15 minutes. If the full squad turns up it has ${fmt(boss.max)} health; it's smaller if fewer come.</p>
+        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–9pm: join the lobby, pick the boss, and when ${G.RULES.raidSquadSize} or more of you are in and everyone's ready, the 15-minute fight starts. The boss is the same however many come: gear, positions and steps decide it.</p>
       </div>
     </section>`;
 }
@@ -578,7 +589,7 @@ function tabRaid() {
         const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
         return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
-      <p class="small muted" style="margin:10px 0 0">Beat a boss and next Sunday brings the next one. After the last, the ladder loops, twice as tough and twice as rich.</p>
+      <p class="small muted" style="margin:10px 0 0">Each Sunday the lobby picks: last week's boss again, one up, or one down. Each step up is tougher, so climbing before your gear's ready can lose. After the last, the ladder loops, twice as tough and twice as rich.</p>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2><span class="side chip gold">Best: ${G.posOf(sug).label}</span></div>
@@ -586,7 +597,7 @@ function tabRaid() {
       ${statRows(st)}
       <span class="field-label">Where you start on Sunday</span>
       <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
-      <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. You can move rows during the fight.</p>
+      <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. ${pos === sug ? "That's your best spot." : `Out of your best spot you hit ${Math.round((1 - G.posFit(G.loadout(st, me().gear, S.D.inv).g, pos) ** 1.5) * 100)}% weaker and take more damage.`} You can move rows during the fight.</p>
     </section>
     ${S.D.lastRaid && S.D.raid?.status !== "done" ? lastRaidPanel(S.D.lastRaid) : ""}
     ${howRaids()}`;
@@ -601,10 +612,11 @@ function howRaids() {
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad average set how hard you hit. Half the loot is split by steps, half by what you did in the fight. The lowest walker gets hunted by the boss and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, ${p.ability}`).join(". ")}. Moving takes a few seconds.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, ${p.ability}`).join(". ")}. Out of your best row you hit weaker, take more and heal less; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder. Moving takes a few seconds.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early: single hits, stomps on the front two rows, screams on everyone, and a feast that heals it unless you burst it.</span></div></div>
         <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear raises the stakes</b><span>Better squad gear makes the boss stronger, but the reward grows faster.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear wins it</b><span>The boss doesn't change with your gear or how many turn up. Better weapons hit harder and better armour takes the hits; tougher bosses need better gear.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>The lobby</b><span>Sunday 6–9pm. At least ${G.RULES.raidSquadSize} of you, everyone taps Ready, then it starts. Only one raid a week.</span></div></div>
       </div>
     </section>`;
 }
@@ -735,7 +747,7 @@ function reminderButtons() {
   const gcal = (text, start, mins, rule) => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(text)}&dates=${gstamp(start)}/${gstamp(start + mins * 60000)}&ctz=Europe/London&recur=${encodeURIComponent("RRULE:" + rule)}&details=${encodeURIComponent(APP_URL)}`;
   const taxAt = w.tax.test ? w.tax.next : w.tax.opens > now() ? w.tax.opens : w.tax.next;
   return `<a class="btn sm block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
-    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman", taxAt, 5, "FREQ=DAILY")}">Google: 7pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid", w.raid.test ? w.raid.closes : w.raid.opens, 15, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
+    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman", taxAt, 5, "FREQ=DAILY")}">Google: 7pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–9pm)", w.raid.test ? w.raid.closes : w.raid.opens, 180, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
 }
 
 // ---------- sheets ----------
@@ -1371,6 +1383,78 @@ async function finishTax() {
 // ---------- Sunday: the live squad raid ----------
 let SB = null;
 const realtime = () => SB || (SB = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 40 } } }));
+// ---------- the raid lobby ----------
+// Polls the server every 2s: who's in, who's ready, which boss. When it starts, everyone in it goes straight in.
+async function openLobby() {
+  FX.unlock();
+  S.view = "lobby"; V.lobby = { data: null, busy: false };
+  render();
+  await lobbyCall("join");
+  if (V.lobby) V.lobby.timer = setInterval(() => lobbyCall("poll"), 2000);
+}
+async function lobbyCall(action, extra = {}) {
+  const L = V.lobby; if (!L || (L.busy && action === "poll")) return;
+  L.busy = true;
+  try {
+    const r = await call("raid_lobby", { token: S.token, action, ...extra });
+    if (!V.lobby) return;
+    L.data = r; S.skew = r.now - Date.now();
+    if (r.raid.status === "live" || r.raid.status === "settling") {
+      const mine = (r.raid.fighters || []).includes(me().id);
+      closeLobby(false);
+      if (mine) { FX.play("roar"); return joinRaid(); }
+      toast("The raid started without you"); S.view = "main"; S.tab = "raid"; await refresh(true); render(); return;
+    }
+    if (r.raid.status === "done") { closeLobby(false); S.view = "main"; S.tab = "raid"; await refresh(true); render(); return; }
+    if (S.view === "lobby") render();
+  } catch (e) {
+    toast(e.message);
+    if (action === "join") { closeLobby(false); S.view = "main"; S.tab = "raid"; render(); }
+  } finally { if (V.lobby) V.lobby.busy = false; }
+}
+function closeLobby(leave) {
+  if (!V.lobby) return;
+  clearInterval(V.lobby.timer);
+  V.lobby = null;
+  if (leave) call("raid_lobby", { token: S.token, action: "leave" }).catch(() => {});
+}
+function viewLobby() {
+  const L = V.lobby, d = L?.data;
+  const head = `<div class="quiz-top"><button class="iconbtn" data-act="lobby-leave" aria-label="Leave the lobby">${ic("chevronLeft")}</button><span class="grow"></span><span class="chip">${ic("clock")} Start by 9pm</span></div>`;
+  if (!d) { $("#app").innerHTML = `<section class="onboard">${head}<div class="boot" style="min-height:40dvh"><p class="muted">Joining the lobby…</p></div></section>`; return; }
+  const members = squad().members, here = d.lobby.filter((x) => x.here), mine = here.find((x) => x.id === me().id);
+  const ready = here.filter((x) => x.ready).length, need = Math.max(0, d.min - here.length);
+  const last = d.bosses.last;
+  const opt = (t) => {
+    const b = G.bossFor(t), g = goalNow(t), sel = t === d.raid.tier;
+    const tag = !last ? "First raid" : t === last ? "Same as last week" : t > last ? "One up" : "One down";
+    return `<button class="bossopt ${sel ? "on" : ""}" data-act="lobby-boss" data-tier="${t}" aria-pressed="${sel}">
+        <span class="bp has-fallback"><span class="fb">${ic("raid")}</span>${portraitImg("boss", b.id, { w: 120, h: 130 })}</span>
+        <span class="grow"><small>${tag}</small><b>${esc(b.name)}</b><span class="tiny ${g.met ? "" : "red-t"}">${g.met ? "Step goal made" : "Step goal missed: enraged"}</span></span>
+      </button>`;
+  };
+  const st = myStats(), g = G.loadout(st, me().gear, S.D.inv).g, pos = me().pos || G.suggestedPosition(g), best = G.suggestedPosition(g);
+  const noGear = G.SLOTS.filter((sl) => !me().gear?.[sl]);
+  $("#app").innerHTML = `<section class="onboard rlobby">${head}
+    <h1 class="ol disp ob-title">Raid lobby</h1>
+    <p class="muted">${need ? `Need ${need} more to start (at least ${d.min}).` : ready === here.length ? "Everyone's ready. Starting…" : `${ready} of ${here.length} ready. It starts when everyone is.`}</p>
+    <span class="field-label">This week's boss</span>
+    <div class="bossopts">${d.bosses.list.map(opt).join("")}</div>
+    <p class="tiny faint" style="margin:6px 0 0">Changing the boss means everyone taps Ready again.</p>
+    <span class="field-label">Squad</span>
+    <div class="mates">${members.map((m) => {
+      const x = d.lobby.find((y) => y.id === m.id && y.here);
+      return `<div class="mate">${face(m.id, 40)}<div class="grow"><b>${esc(m.id === me().id ? "You" : m.name)}</b><small>${x ? (x.ready ? "Ready" : "In the lobby") : "Not here"}</small></div>${x?.ready ? `<span class="chip green">${ic("check")}</span>` : ""}</div>`;
+    }).join("")}</div>
+    <span class="field-label">You</span>
+    <div class="panel flat" style="margin:0">
+      <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
+      <p class="tiny ${pos === best ? "faint" : "red-t"}" style="margin:8px 0 0">${pos === best ? `${G.posOf(pos).label} is your best spot.` : `Your best spot is the ${G.posOf(best).label.toLowerCase()}. Here you hit weaker and take more.`}${noGear.length ? ` <span class="red-t">Nothing in your ${noGear.join(", ")} slot${noGear.length > 1 ? "s" : ""}.</span>` : ""}</p>
+    </div>
+    <button class="btn ${mine?.ready ? "" : "gold"} xl block" style="margin-top:14px" data-act="lobby-ready">${mine?.ready ? "Not ready" : `${ic("check")} Ready`}</button>
+  </section>`;
+}
+
 async function joinRaid() {
   FX.unlock();
   if (S.busy) return;
@@ -1425,7 +1509,8 @@ function becomeHost() {
   if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
   if (!R) {
     const here = Object.keys(v.present).filter((id) => v.roster[id]);
-    R = G.raidCreate((here.length ? here : [v.my]).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged });
+    R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged });
+    for (const m of R.members) m.away = !(m.id in v.present);
   }
   R.dur = (ends - started) / 1000;
   R.t = Math.max(R.t, (now() - started) / 1000);
@@ -1962,7 +2047,7 @@ document.addEventListener("click", async (e) => {
   if (d.copy) { copy(d.copy); return; }
   if (d.signin && S.signin) { S.signin.id = d.signin; S.signin.step = "password"; render(); setTimeout(() => $("[name=password]")?.focus(), 50); return; }
   if (d.pos) {
-    me().pos = d.pos; render();
+    me().pos = d.pos; render(); // works in the lobby too
     call("equip", { token: S.token, pos: d.pos }).catch((err) => toast(err.message));
     return;
   }
@@ -2049,6 +2134,10 @@ document.addEventListener("click", async (e) => {
     case "tax": startTax(); break;
     case "tax-stop": if (V.tax && confirm("End the fight now? You can't fight him again today.")) { V.tax.left = 0; } break;
     case "raid": joinRaid(); break;
+    case "lobby": openLobby(); break;
+    case "lobby-leave": closeLobby(true); S.view = "main"; S.tab = "raid"; render(); break;
+    case "lobby-ready": if (V.lobby?.data) { const mine = V.lobby.data.lobby.find((x) => x.id === me().id); lobbyCall(mine?.ready ? "unready" : "ready"); FX.play("tap"); } break;
+    case "lobby-boss": if (V.lobby?.data && Number(t.dataset.tier) !== V.lobby.data.raid.tier) lobbyCall("boss", { tier: Number(t.dataset.tier) }); break;
     case "raid-result": if (S.D.raid?.result) { V.result = { kind: "raid", out: S.D.raid.result, R: null, lvlBefore: level() }; S.view = "result"; render(); } break;
     case "raid-quit": if (!V.raid?.R || confirm("Leave the raid? Your squad keeps fighting, and you can rejoin while it's on.")) { leaveRaid(); S.view = "main"; await refresh(true); render(); } break;
     case "ability": raidAct("ab"); break;

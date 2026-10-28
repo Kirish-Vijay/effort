@@ -40,10 +40,11 @@ const DEFAULT_RULES = {
   stealDmgPerPct: 0.07,     // extra damage (as a share of his health) for each 1% stolen
   comboWindowMs: 320,
   comboMax: 50,
-  raidHpPerMember: 220000,   // boss HP per squad member at level 1 (about 12 min for a good squad)
-  raidLvlCurve: 0.6,        // boss level = squad strength from gear ^ this. Below 1, gear helps you climb the ladder; 0.85 makes gear barely help
-  raidPerkWeight: 0.08,     // how much each gear perk counts towards squad strength
-  raidToughWeight: 0.25,    // how much extra health from gear counts towards squad strength
+  raidHpBase: 700000,       // Brett's health. Fixed: how many turn up doesn't change the boss (tuned for four)
+  raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
+  bossHpGrowth: 1.3,        // each boss up the ladder has this much more health…
+  bossDmgGrowth: 1.15,      // …and hits this much harder; every lap doubles health on top
+  noFrontDmg: 1.3,          // with nobody at the front, every hit lands this much harder
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
   raidBossDmg: 15,          // a swipe at level 1
@@ -166,9 +167,14 @@ const POSITIONS = [
   { id: "back", label: "Back", e: "🩹", ability: "Patch Up", abilityWhat: "Heal the most hurt teammate 35%", mult: 0.85, aggro: 5 },
 ];
 const posOf = (id) => POSITIONS.find((p) => p.id === id) || POSITIONS[1];
+const posScores = (st) => ({ front: st.guard * 2 + st.power * 0.5, mid: st.power + st.speed, back: st.brains + st.luck * 0.8 + st.speed * 0.3 });
 function suggestedPosition(st) {
-  const score = { front: st.guard * 2 + st.power * 0.5, mid: st.power + st.speed, back: st.brains + st.luck * 0.8 + st.speed * 0.3 };
-  return Object.entries(score).sort((a, b) => b[1] - a[1])[0][0];
+  return Object.entries(posScores(st)).sort((a, b) => b[1] - a[1])[0][0];
+}
+// 1 in your best spot, less elsewhere. Out of position you hit weaker, take more and heal less.
+function posFit(st, pos) {
+  const sc = posScores(st), best = Math.max(...Object.values(sc));
+  return best > 0 ? Math.max(0.3, (sc[pos] ?? 0) / best) : 1;
 }
 
 // ---------- gear ----------
@@ -431,23 +437,26 @@ const BOSSES = [
 function bossFor(tier) {
   const t = Math.max(1, Math.floor(tier || 1)), lap = Math.floor((t - 1) / BOSSES.length), b = BOSSES[(t - 1) % BOSSES.length];
   const k = 2 ** lap, rk = (BOSSES[BOSSES.length - 1].reward * 1.1) ** lap; // lap 2 starts richer than the final boss of lap 1
-  return { ...b, tier: t, lap: lap + 1, hp: b.hp * k, dmg: b.dmg * k ** 0.5, reward: b.reward * rk };
+  const i = (t - 1) % BOSSES.length;
+  return { ...b, tier: t, lap: lap + 1, hp: RULES.bossHpGrowth ** i * k, dmg: RULES.bossDmgGrowth ** i * k ** 0.5, reward: b.reward * rk };
 }
-// The squad's weekly goal before Sunday: between them, everyone (bar players who joined after Thursday)
-// averages perDay steps a day, Monday to Saturday. Brett asks 5,000, Rory 5,500, Wisp 6,000 and so on;
-// each new lap starts again at 5,000. Miss it and Sunday's boss is enraged.
+// The squad's weekly goal before Sunday: between them, the squad averages perDay steps a day each, Monday to
+// Saturday. Brett asks 5,000, Rory 5,500, Wisp 6,000 and so on; each new lap starts again at 5,000. Someone who
+// joined mid-week adds only the days since they joined (and only their steps since then count). Miss it and
+// Sunday's boss is enraged.
 function raidGoal(tier, players) {
   const i = (Math.max(1, Math.floor(tier || 1)) - 1) % BOSSES.length;
   const perDay = RULES.raidGoalPerDay + RULES.raidGoalStep * i;
   const n = Math.max(1, players);
   return { perDay, players: n, target: perDay * RULES.raidGoalDays * n };
 }
-// The goal for a squad from its week table rows ({ weekSteps, fresh }).
+// The goal for a squad from its week table rows ({ weekSteps, goalDays }).
 function squadGoal(tier, rows) {
-  const counted = rows.filter((r) => !r.fresh);
-  const g = raidGoal(tier, counted.length || rows.length);
+  const g = raidGoal(tier, rows.length);
+  const days = rows.reduce((a, r) => a + (r.goalDays ?? RULES.raidGoalDays), 0);
   const steps = rows.reduce((a, r) => a + (r.weekSteps || 0), 0);
-  return { ...g, steps, met: steps >= g.target };
+  const target = g.perDay * Math.max(1, days);
+  return { ...g, days, target, steps, met: steps >= target };
 }
 // A fighter. The live game passes stride and title from the whole squad's week (so they don't
 // depend on who turned up); the lab works them out from whoever is in the raid.
@@ -455,7 +464,7 @@ function makeMember(m, row) {
   const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
   const maxHp = Math.round(80 + g.guard * 10);
   return { ...m, g, perks, gearPts: points, weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
-    pos: m.pos || suggestedPosition(m.stats), hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0,
+    pos: m.pos || suggestedPosition(g), hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0,
     cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind };
 }
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false } = {}) {
@@ -463,23 +472,15 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   const n = members.length;
   const table = weekTable(members);
   const ms = members.map((m) => makeMember(m, table.rows.find((x) => x.id === m.id)));
-  // Boss level tracks how much stronger gear makes the squad than their bare stats (damage × toughness × perks),
-  // so better gear never makes Sunday easier. Rewards grow faster than the level (see raidRewardCurve).
-  const strength = ms.reduce((s, m) => {
-    const dmg = (20 + m.g.power * 4) / (20 + m.stats.power * 4);
-    const tough = (80 + m.g.guard * 10) / (80 + m.stats.guard * 10);
-    // Rarer perks are stronger, so they count for more.
-    const perkScore = Object.values(m.equipped || {}).reduce((t, id) => { const it = itemById(id); return t + (it && it.perk && !TAX_ONLY.has(it.perk[0]) ? PERK_WEIGHT[it.tier] || 1 : 0); }, 0);
-    return s + dmg * tough ** RULES.raidToughWeight * (1 + RULES.raidPerkWeight * perkScore);
-  }, 0) / Math.max(1, n);
-  const lvl = Math.round(strength ** RULES.raidLvlCurve * 100) / 100;
+  // The boss is the same however many turn up and whatever they wear: gear, positions and steps decide it.
+  const lvl = 1;
   const def = bossFor(tier);
   // Shorter test raids get a proportionally smaller boss so the pacing feels the same.
-  const max = Math.round(RULES.raidHpPerMember * n * lvl * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1));
+  const max = Math.round(RULES.raidHpBase * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1));
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null,
-    // Balanced for a squad of four; smaller squads take lighter hits. Short test raids pay proportionally less.
-    sizeDmg: Math.min(1, 0.4 + 0.15 * n), timeShare: Math.min(1, minutes / 15),
+    // Short test raids pay proportionally less.
+    sizeDmg: 1, timeShare: Math.min(1, minutes / 15),
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged },
     members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0,
   };
@@ -519,8 +520,6 @@ function targetsOf(R, type) {
   if (type === "scream") return up.map((m) => m.id);
   return [];
 }
-const PERK_WEIGHT = { rare: 0.6, epic: 1, legendary: 1.6, mythic: 2.4 };
-const TAX_ONLY = new Set(["taxStart", "steal"]);
 const alive = (R) => R.members.filter((m) => m.alive && !m.away);
 const canAct = (R, m) => m.alive && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
 // `you: true` marks the person playing on this screen, so the log reads "You raise" not "You raises".
@@ -536,7 +535,7 @@ function raidTap(R, id) {
   m.lastTap = R.t;
   const crit = R.r() < m.g.luck * 0.02 + (m.perks.critChance || 0);
   // Stride: walk more than the squad this week and every hit lands harder.
-  let dmg = (20 + m.g.power * 4) * m.stride * posOf(m.pos).mult * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) : 1);
+  let dmg = (20 + m.g.power * 4) * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos) ** 1.5 * (1 + m.combo / (RULES.comboMax * 2)) * (crit ? 2.5 + (m.perks.critDmg || 0) : 1);
   let swing = false;
   if (m.swing > 0) { dmg *= 3; m.swing--; swing = true; }
   if (R.boss.feast) { dmg *= m.perks.feast || 1; R.boss.feast.dealt += dmg; }
@@ -564,7 +563,7 @@ function raidAbility(R, id) {
   } else {
     const hurt = alive(R).sort((a, b) => a.hp / a.max - b.hp / b.max)[0];
     if (!hurt) return false;
-    const heal = Math.min(hurt.max - hurt.hp, Math.round(hurt.max * (0.35 + (m.perks.heal || 0))));
+    const heal = Math.min(hurt.max - hurt.hp, Math.round(hurt.max * (0.35 + (m.perks.heal || 0)) * posFit(m.g, m.pos)));
     hurt.hp += heal; m.healed += heal;
     fx(R, { type: "heal", by: m.id, id: hurt.id, amt: heal });
     say(R, `${nm(m)} ${vb(m, "patches", "patch")} up ${hurt === m ? vb(m, "themself", "yourself") : nm(hurt).replace(/^You$/, "you")} (+${heal})`, "good");
@@ -584,7 +583,8 @@ function raidMove(R, id, pos) {
 function hit(R, m, base) {
   if (!m.alive) return 0;
   if (m.perks.dodge && R.r() < m.perks.dodge) { fx(R, { type: "dodge", id: m.id }); return 0; }
-  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - Math.min(0.6, m.g.guard * 0.02));
+  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - Math.min(0.6, m.g.guard * 0.02)) / posFit(m.g, m.pos);
+  if (!alive(R).some((x) => x.pos === "front")) d *= RULES.noFrontDmg;
   if (R.t < m.shieldUntil) d *= 0.4;
   d = Math.round(d);
   m.hp -= d; m.taken += d;
@@ -619,8 +619,7 @@ function bossAttack(R) {
     up.forEach((m) => hit(R, m, RULES.raidBossDmg * 0.45 * mult));
     say(R, `${B.attacks.scream} hits everyone`, "bad");
   } else if (type === "feast") {
-    // The target scales with who's standing, so a small squad isn't punished for being small.
-    const need = Math.round(up.length * 1100 * R.lvl * B.dmg);
+    const need = Math.round(RULES.raidSquadSize * 1100 * R.lvl * B.dmg);
     B.feast = { until: R.t + 6, need, dealt: 0 };
     fx(R, { type: "attack", attack: "feast", ids: [] });
     say(R, `${B.attacks.feast}. Deal ${need.toLocaleString("en-GB")} damage in 6s or it heals`, "warn");
@@ -793,7 +792,7 @@ root.Game = {
   hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
   pace, weekTable,
-  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition,
+  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit,
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,

@@ -50,7 +50,7 @@ object Reminders {
         val sunday = LocalDate.now().dayOfWeek == DayOfWeek.SUNDAY
         val (title, body) = when {
             test -> "Notifications are on" to "You'll get a ping at 6:45pm before the Taxman, and before the raid on Sunday."
-            sunday -> "Raid at 7" to "15 minutes, the whole squad, one boss. The Taxman's open too."
+            sunday -> "Raid lobby's open till 9pm" to "4 or more of you, everyone ready, one boss. The Taxman's at 7 too."
             else -> "The Taxman's coming at 7" to "Five minutes to stop him taking his cut. Get your steps in."
         }
         val open = PendingIntent.getActivity(
