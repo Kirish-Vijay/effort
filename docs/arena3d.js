@@ -12,6 +12,9 @@ try { ({ buildWalker } = await import("./ninja3d.js")); } catch { /* falls back 
 const INK = 0x1f2a24;
 const ROWS = { front: -0.4, mid: 1.1, back: 2.6 };
 const BOSS_Z = -5.2;
+// Ground warning colour for each boss move, and the colour of each class's special.
+const WARN = { swipe: 0xff3b3b, stomp: 0xff3b3b, scream: 0xff3b3b, ooze: 0x5cff4a, spores: 0xffa13d, gust: 0x7ff0ff, grab: 0x9b5cff, slam: 0xff2a00, breath: 0xff7a1a };
+const CLASS_FX = { bouncer: 0xffc83d, menace: 0xff4d5e, mad: 0x7dff6a, gremlin: 0xff8a2b, lollipop: 0xfff04a, librarian: 0x9fb4ff, pigeon: 0xe8e8f0, courier: 0x45d483, pickpocket: 0xc77dff, hedge: 0x6fd4ff };
 
 // Boss models. Filled in once the CC0 models are chosen; anything missing uses a built-in boss.
 const MODELS = (window.EffortModels || {});
@@ -413,9 +416,14 @@ class Arena {
     }).catch(() => { /* keep the built-in boss */ });
   }
   collectMats(root) {
-    const mats = [];
-    root.traverse((o) => { if (o.isMesh && o.material && o.material.emissive && o.material !== OUTLINE) mats.push(o.material); });
-    this.boss.mats = mats;
+    const mats = [], all = [], shells = [];
+    root.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      if (o.material === OUTLINE) { shells.push(o); return; }
+      for (const m of [].concat(o.material)) { all.push(m); if (m.emissive) mats.push(m); }
+    });
+    for (const m of all) { m.userData.baseOp = m.opacity; m.userData.baseT = m.transparent; }
+    Object.assign(this.boss, { mats, allMats: all, shells, fadeK: 1 });
   }
   bossPlay(name, { once = false, then = "idle" } = {}) {
     const B = this.boss;
@@ -486,17 +494,24 @@ class Arena {
     const B = this.boss; if (!B) return;
     B.windup = 1;
     this.danger.intensity = 25;
-    if (B.mixer && type === "scream" && B.clips.roar) this.bossPlay("roar", { once: true });
-    // Ground telegraphs under whoever is about to be hit.
-    const spots = type === "scream" ? [...this.heroes.values()] : ids.map((i) => this.heroes.get(i)).filter(Boolean);
-    for (const h of spots) this.decal(h.w.group.position, type === "stomp" ? 1.4 : 0.9, 0xff3b3b, 2.2);
+    if (B.mixer && ["scream", "spores", "breath"].includes(type) && B.clips.roar) this.bossPlay("roar", { once: true });
+    if (type === "vanish") { B.ghost = true; this.burst(this.bossPoint(0.5, 0), 0xb9c8ff, 40, 5); return; }
+    // Ground telegraphs under whoever is about to be hit, in the move's colour.
+    const col = WARN[type] || 0xff3b3b, big = type === "stomp" || type === "slam";
+    const spots = ["scream", "spores", "breath"].includes(type) ? [...this.heroes.values()] : ids.map((i) => this.heroes.get(i)).filter(Boolean);
+    for (const h of spots) this.decal(h.w.group.position, big ? (type === "slam" ? 1.9 : 1.4) : 0.9, col, type === "slam" ? 3.6 : 2.2);
+    if (type === "slam") { B.raise = 1; this.danger.intensity = 45; }
+    if (type === "breath") { B.inhale = 1; this.burst(this.bossPoint(0.62, 0), 0xff8a2b, 24, 1.5); }
   }
   bossAttack(type, ids = []) {
     const B = this.boss; if (!B) return;
-    B.windup = 0; this.danger.intensity = 0;
-    B.act = `atk-${type}`; B.actT = 0; B.lunge = type === "swipe" || type === "stomp" ? 1 : 0;
-    if (B.mixer) this.bossPlay(type === "feast" ? "eat" : type === "stomp" && B.clips.stomp ? "stomp" : type === "scream" && B.clips.roar ? "roar" : "attack", { once: true });
+    B.windup = 0; this.danger.intensity = 0; B.raise = 0; B.inhale = 0;
+    const act = { slam: "stomp", ooze: "stomp", gust: "scream", spores: "scream", breath: "scream", grab: "swipe", vanish: "swipe" }[type] || type;
+    B.act = `atk-${act}`; B.actT = 0; B.lunge = act === "swipe" || act === "stomp" ? 1 : 0;
+    if (B.mixer) this.bossPlay(type === "feast" ? "eat" : act === "stomp" && B.clips.stomp ? "stomp" : act === "scream" && B.clips.roar ? "roar" : "attack", { once: true });
     const origin = this.bossPoint(0.55, 0);
+    const heroAt = (id, up = 0.9) => { const h = this.heroes.get(id); return h ? h.w.group.position.clone().add(new THREE.Vector3(0, up, 0)) : null; };
+    if (this.signature(type, ids, origin, heroAt)) return;
     if (type === "swipe") {
       for (const id of ids) { const h = this.heroes.get(id); if (h) this.slashAt(h.w.group.position.clone().add(new THREE.Vector3(0, 0.9, 0)), 0xff4d6d); }
       this.shake(0.25);
@@ -508,6 +523,136 @@ class Arena {
     } else if (type === "feast") {
       B.feastGlow = 6;
     }
+  }
+  // Each boss's own move. Returns true when it handled the type.
+  signature(type, ids, origin, heroAt) {
+    const B = this.boss;
+    if (type === "ooze") {
+      for (const id of ids) { const to = heroAt(id, 0.6); if (!to) continue; this.projectile(origin.clone(), to, 0x7dff6a, 0.32, true); setTimeout(() => { this.burst(to, 0x7dff6a, 22, 4); this.puddle(to, 0x52d64a, 6); }, 260); }
+      this.shake(0.35); return true;
+    }
+    if (type === "spores") {
+      this.cloud(new THREE.Vector3(0, 1.4, ROWS.mid), 0xffa13d, 0x9be15d, 4.2);
+      this.shockwave(origin.clone(), 0xffa13d, 10, 0.9, true); this.shake(0.25); return true;
+    }
+    if (type === "vanish") {
+      B.ghost = false;
+      const to = heroAt(ids[0], 0); if (to) { B.blink = { x: to.x, z: to.z - 2.4, t: 0.9 }; setTimeout(() => this.slashAt(to.clone().add(new THREE.Vector3(0, 0.9, 0)), 0xc9d4ff), 260); }
+      this.burst(origin.clone(), 0xb9c8ff, 30, 6); this.shake(0.45); return true;
+    }
+    if (type === "gust") {
+      for (let i = 0; i < 5; i++) setTimeout(() => { if (this.disposed) return; this.swirl(0x9ff3ff, i); }, i * 90);
+      this.shake(0.4); return true;
+    }
+    if (type === "grab") {
+      const id = ids[0], h = this.heroes.get(id); if (!h) return true;
+      this.tentacle(id, 0x7a3cff);
+      h.w.play("hurt"); this.shake(0.35); return true;
+    }
+    if (type === "slam") {
+      this.shockwave(new THREE.Vector3(0, 0.06, this.bossZ + 2), 0xff7a2f, 13, 0.9);
+      setTimeout(() => this.shockwave(new THREE.Vector3(0, 0.06, this.bossZ + 2), 0xffe0a0, 9, 0.7), 120);
+      this.burst(new THREE.Vector3(0, 0.3, ROWS.front - 1), 0xc9a27a, 60, 7);
+      this.shake(1.1); return true;
+    }
+    if (type === "breath") { this.fireBreath(ids, origin); this.shake(0.6); return true; }
+    return false;
+  }
+  // A blob of slime on the floor.
+  puddle(at, color, life) {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.75, 24), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(at.x, 0.03, at.z); this.scene.add(m);
+    this.fx.push({ obj: m, life, t: 0, update: (f) => { const k = f.t / f.life; m.scale.setScalar(Math.min(1, f.t * 6) * (1 + Math.sin(f.t * 4) * 0.04)); m.material.opacity = 0.7 * (1 - k * k); }, done: () => this.scene.remove(m) });
+  }
+  // A drifting cloud of two-coloured particles.
+  cloud(at, c1, c2, life) {
+    const n = 140, geo = new THREE.BufferGeometry(), pos = new Float32Array(n * 3), col = new Float32Array(n * 3), vel = [];
+    const a = new THREE.Color(c1), b = new THREE.Color(c2);
+    for (let i = 0; i < n; i++) {
+      pos.set([at.x + (Math.random() - 0.5) * 9, at.y + Math.random() * 1.6, at.z + (Math.random() - 0.5) * 4.5], i * 3);
+      const c = Math.random() < 0.5 ? a : b; col.set([c.r, c.g, c.b], i * 3);
+      vel.push(new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.15 + Math.random() * 0.3, (Math.random() - 0.5) * 0.5));
+    }
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3)); geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.32, vertexColors: true, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.scene.add(pts);
+    this.fx.push({ obj: pts, life, t: 0, update: (f, dt) => { const p = geo.attributes.position; for (let i = 0; i < n; i++) p.setXYZ(i, p.getX(i) + vel[i].x * dt, p.getY(i) + vel[i].y * dt, p.getZ(i) + vel[i].z * dt); p.needsUpdate = true; const k = f.t / f.life; pts.material.opacity = Math.min(1, f.t * 4) * 0.75 * (1 - k); }, done: () => this.scene.remove(pts) });
+  }
+  // A spinning gust ring rushing from the boss to the squad.
+  swirl(color, i) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.2 + i * 0.25, 0.06, 6, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+    ring.position.set((Math.random() - 0.5) * 2, 1.2 + Math.random(), this.bossZ + 1.5); this.scene.add(ring);
+    const z0 = ring.position.z, z1 = ROWS.back + 1.5;
+    this.fx.push({ obj: ring, life: 0.8, t: 0, update: (f) => { const k = f.t / f.life; ring.position.z = z0 + (z1 - z0) * k; ring.rotation.z += 0.4; ring.scale.setScalar(1 + k * 1.8); ring.material.opacity = 0.8 * (1 - k); }, done: () => this.scene.remove(ring) });
+  }
+  // A tentacle from the boss to someone, wriggling until they're let go.
+  tentacle(id, color) {
+    this.untangle(id);
+    const h = this.heroes.get(id); if (!h) return;
+    const mat = toon(new THREE.Color(color));
+    const N = 14, segs = [];
+    const group = new THREE.Group(); this.scene.add(group);
+    for (let i = 0; i < N; i++) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.34 - i * 0.017, 10, 8), mat); group.add(s); segs.push(s); }
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.12, 8, 24), mat); ring.rotation.x = Math.PI / 2; group.add(ring);
+    const f = { obj: group, life: 11, t: 0, id, update: (g) => {
+      const a = this.bossPoint(0.35, 0.6), b = h.w.group.position.clone().add(new THREE.Vector3(0, 0.8, 0));
+      const grow = Math.min(1, g.t * 4);
+      for (let i = 0; i < N; i++) {
+        const k = (i / (N - 1)) * grow, p = a.clone().lerp(b, k);
+        p.y += Math.sin(k * Math.PI) * 1.6 + Math.sin(g.t * 6 + i * 0.7) * 0.18; p.x += Math.sin(g.t * 4 + i) * 0.15;
+        segs[i].position.copy(p);
+      }
+      ring.position.copy(b); ring.scale.setScalar(grow * (1 + Math.sin(g.t * 8) * 0.06));
+    }, done: () => this.scene.remove(group) };
+    this.fx.push(f); h.grab = f;
+  }
+  untangle(id) { const h = this.heroes.get(id); if (h?.grab) { h.grab.t = h.grab.life; h.grab = null; } }
+  release(id, freed) { const h = this.heroes.get(id); if (!h) return; this.untangle(id); if (freed) { this.burst(h.w.group.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xd6b8ff, 26, 5); h.w.play("cheer"); } }
+  // Fire sweeping across the squad, left to right, then burning at their feet.
+  fireBreath(ids, origin) {
+    const targets = ids.map((id) => this.heroes.get(id)).filter(Boolean).sort((a, b) => a.w.group.position.x - b.w.group.position.x);
+    for (let i = 0; i < 26; i++) setTimeout(() => {
+      if (this.disposed) return;
+      const x = -5 + (i / 25) * 10, to = new THREE.Vector3(x, 0.4 + Math.random() * 0.8, ROWS.mid + (Math.random() - 0.5) * 3.5);
+      this.projectile(origin.clone().add(new THREE.Vector3(0, 0.6, 0)), to, i % 3 ? 0xff7a1a : 0xffd23d, 0.26, true);
+      if (i % 4 === 0) this.burst(to, 0xff8a2b, 10, 3);
+    }, i * 40);
+    setTimeout(() => { if (!this.disposed) for (const h of targets) this.puddle(h.w.group.position, 0xff5a1a, 3.5); }, 700);
+  }
+  // A class special: a pillar of the class's colour and a burst; damage specials also launch a big shot.
+  special(id, cls, roll) {
+    const h = this.heroes.get(id); if (!h) return;
+    const col = CLASS_FX[cls] || 0xffd166, at = h.w.group.position;
+    h.w.play(["courier", "hedge", "librarian", "lollipop", "pickpocket"].includes(cls) ? "cast" : "big");
+    this.pillar(at, col); this.shockwave(new THREE.Vector3(at.x, 0.06, at.z), col, 4, 0.7);
+    const hits = ["bouncer", "mad", "pickpocket"].includes(cls) || (cls === "gremlin" && roll === "crit");
+    if (hits) {
+      const from = at.clone().add(new THREE.Vector3(0, 1.2, -0.3)), to = this.bossPoint(0.5, 0);
+      for (let i = 0; i < 3; i++) setTimeout(() => !this.disposed && this.projectile(from.clone(), to.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.4, (Math.random() - 0.5), 0)), col, 0.36, true), i * 90);
+      setTimeout(() => { if (this.disposed) return; this.burst(to, col, 40, 7); this.bossHit(true); this.shake(0.5); if (this.boss) this.boss.lunge = cls === "bouncer" ? 0 : this.boss.lunge; }, 380);
+    }
+    if (cls === "pigeon") for (let i = 0; i < 18; i++) setTimeout(() => !this.disposed && this.projectile(at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, 0.5 + Math.random(), 1)), this.bossPoint(0.3 + Math.random() * 0.5, (Math.random() - 0.5) * 3), 0xe8e8f0, 0.12, false), i * 60);
+    if (["lollipop", "librarian", "hedge"].includes(cls) || (cls === "gremlin" && roll === "fizzle")) {
+      for (const x of this.heroes.values()) if (!x.down) this.shockwave(new THREE.Vector3(x.w.group.position.x, 1, x.w.group.position.z), col, 1.6, 0.6, true);
+    }
+    if (cls === "gremlin" && roll === "heal") for (const x of this.heroes.values()) if (!x.down) this.pillar(x.w.group.position, 0x7ee29d);
+  }
+  // The middle row knocked it off balance.
+  stagger(stopped) {
+    const B = this.boss; if (!B) return;
+    B.windup = 0; B.raise = 0; this.danger.intensity = 0; B.flash = 1; B.squash = stopped ? 0.3 : 0.18; B.reel = 1;
+    this.shockwave(this.bossPoint(0.55, 0), 0xffffff, stopped ? 7 : 4.5, 0.5, true);
+    this.burst(this.bossPoint(0.6, 0), 0xfff3a0, stopped ? 50 : 26, 6);
+    this.shake(stopped ? 0.6 : 0.3);
+  }
+  // An attack that bounced off the whole squad.
+  blocked() {
+    for (const h of this.heroes.values()) if (!h.down) this.shockwave(new THREE.Vector3(h.w.group.position.x, 1, h.w.group.position.z), 0x8fd8ff, 1.8, 0.6, true);
+    this.shockwave(new THREE.Vector3(0, 0.06, ROWS.front - 0.8), 0x8fd8ff, 7, 0.6);
+  }
+  pulse(fromId, toId) {
+    const a = this.heroes.get(fromId), b = this.heroes.get(toId); if (!a || !b) return;
+    this.burst(b.w.group.position.clone().add(new THREE.Vector3(0, 1, 0)), 0x7ee29d, 8, 2);
   }
   hurt(id) { const h = this.heroes.get(id); if (h) { h.w.play("hurt"); if (h.m.you) this.shake(0.22); } }
   down(id) { const h = this.heroes.get(id); if (h) { h.down = true; h.w.play("down"); } }
@@ -657,7 +802,7 @@ class Arena {
     const H = B.holder;
     const grow = B.grow || 1;
     // Built-in bosses are animated by hand; models use their clips plus these extras.
-    let sy = 1, sx = 1, ry = 0, y = 0, z = this.bossZ, rx = 0;
+    let sy = 1, sx = 1, ry = 0, y = 0, z = this.bossZ, rx = 0, x = 0;
     if (B.mixer && B.lunge) { B.lunge = Math.max(0, B.lunge - dt * 1.6); z += Math.sin(B.lunge * Math.PI) * 2.2; }
     if (!B.dead) {
       sy += Math.sin(this.t * 2.2) * 0.02; sx -= Math.sin(this.t * 2.2) * 0.012;
@@ -668,13 +813,33 @@ class Arena {
       if (B.act === "atk-scream" && k < 0.7) { const s = Math.sin(k / 0.7 * Math.PI); sx += 0.15 * s; sy += 0.15 * s; rx = -0.2 * s; }
       if (B.act === "atk-feast" && k < 1.2) { sy -= 0.08 * Math.abs(Math.sin(k * 10)); }
       if (B.squash) { sx += B.squash; sy -= B.squash; B.squash *= Math.pow(0.001, dt * 6); if (B.squash < 0.002) B.squash = 0; }
+      if (B.raise) { y += 0.9 + Math.sin(this.t * 18) * 0.06; rx = -0.25; sy += 0.06; }
+      if (B.inhale) { sx += 0.1; sy += 0.05; rx = -0.15; }
+      if (B.reel) { B.reel = Math.max(0, B.reel - dt * 1.5); rx = 0.35 * Math.sin(B.reel * Math.PI); z -= B.reel * 0.8; }
+      if (B.blink) {
+        B.blink.t -= dt;
+        const k = Math.sin(Math.max(0, Math.min(1, 1 - B.blink.t / 0.9)) * Math.PI);
+        x = B.blink.x * k * 0.85; z += (B.blink.z - z) * k * 0.55;
+        if (B.blink.t <= 0) B.blink = null;
+      }
     } else {
       const k = Math.min(1, B.actT / 1.2);
       if (!B.mixer || !B.clips.death) { rx = -k * 1.4; y = -k * 0.4; }
       sy = 1 - (B.mixer ? 0 : k * 0.1);
     }
     H.scale.set(sx * grow, sy * grow, sx * grow);
-    H.position.set(0, y + (B.hover ? Math.sin(this.t * 1.6) * 0.15 : 0), z);
+    H.position.set(x, y + (B.hover ? Math.sin(this.t * 1.6) * 0.15 : 0), z);
+    // Vanish: fade out to a shimmer, then back.
+    const fade = B.ghost ? Math.max(0.1, (B.fadeK ?? 1) - dt * 3) : Math.min(1, (B.fadeK ?? 1) + dt * 5);
+    if (fade !== B.fadeK) {
+      const was = B.fadeK; B.fadeK = fade;
+      for (const m of B.allMats || []) {
+        const t = fade < 1 || m.userData.baseT;
+        if (m.transparent !== t) { m.transparent = t; m.needsUpdate = true; }
+        m.opacity = (m.userData.baseOp ?? 1) * fade;
+      }
+      if ((was >= 1) !== (fade >= 1)) for (const o of B.shells || []) o.visible = fade >= 1;
+    }
     H.rotation.set(rx, ry, 0);
     // Hit flash: push the emissive up and fade it out.
     if (B.flash > 0) B.flash = Math.max(0, B.flash - dt * 6);

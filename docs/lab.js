@@ -223,9 +223,12 @@ function botKit(cls, kind) {
 function botSquad() {
   const names = ["Priya", "Tom", "Jas", "Mo", "Ellie"];
   const st = myStats();
+  // Each bot a different class from you and from each other, so playtests see a mix of specials.
+  const used = new Set([G.classOf(st).id]);
   const bots = names.slice(0, L.bots).map((name, i) => {
-    const answers = Walker.fallbackAnswers("bot-" + name);
-    const stats = G.stats(answers);
+    let answers = Walker.fallbackAnswers("bot-" + name), stats = G.stats(answers);
+    for (let k = 1; k < 200 && used.has(G.classOf(stats).id); k++) { answers = Walker.fallbackAnswers(`bot-${name}-${k}`); stats = G.stats(answers); }
+    used.add(G.classOf(stats).id);
     return { id: "bot" + i, name, answers, stats, equipped: botKit(G.classOf(stats).id, L.botGear), inv: {}, bot: true, weekSteps: botWeek(i) };
   });
   // Fill the rows the player isn't covering so a test squad always has some shape.
@@ -290,7 +293,9 @@ function tabRaid() {
         <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, takes ${p.aggro}% of single hits, ${p.ability}`).join(". ")}. Moving takes a few seconds.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early: single hits, stomps on the front two rows, screams on everyone, and a feast that heals it unless you burst it.</span></div></div>
         <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down. Rare answers hurt the boss.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear raises the stakes</b><span>Better squad gear makes the boss stronger, but the reward grows faster. Gear is how you climb.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("guard")}</span><div><b>Each row has a job</b><span>${G.POSITIONS.map((p) => `${p.label}, ${p.passive}: ${p.passiveWhat.charAt(0).toLowerCase() + p.passiveWhat.slice(1)}`).join(". ")}.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Class specials</b><span>${esc(G.specialOf({ cls: cls.id }).name)}: ${esc(G.specialOf({ cls: cls.id }).what)}. It charges as you tap, use your ability and take hits.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear wins it</b><span>The boss doesn't change with your gear. Each boss expects a gear tier: none for Brett, common for Rory and Wisp, rare for Gale, epic for The Kraken, legendary for Grimm, mythic for Vex.</span></div></div>
       </div>
     </section>`;
 }
@@ -367,8 +372,10 @@ const KNOBS = [
     ["dailyWindowMin", "Fight length (min)"], ["taxmanBaseHp", "Base health"], ["taxmanHpPerEffort", "Health per Effort earned"], ["taxmanHpPerOverMin", "Health per minute over budget"],
     ["taxmanRegen", "Health regained per idle second", "share of max"], ["taxmanPerLevel", "Toughness per player level"], ["stealPerLevel", "Extra steal cap per level"],
     ["auditEvery", "Seconds between Audits"], ["auditFor", "Audit length (s)"], ["auditBlock", "Damage through an Audit", "share"], ["stealDmgPerPct", "Damage per 1% stolen", "× his health"], ["comboWindowMs", "Combo window (ms)"]]],
-  ["Raid", [["raidHpBase", "Boss health (Brett)"], ["bossHpGrowth", "Health growth per boss"], ["bossDmgGrowth", "Damage growth per boss"], ["raidPerkWeight", "Weight of each gear perk"], ["raidRewardCurve", "Reward growth vs boss level"],
+  ["Raid", [["raidHpBase", "Boss health (Brett)"], ["raidRewardCurve", "Reward growth vs boss level"], ["enragedHp", "Enraged health", "×"], ["enragedDmg", "Enraged damage", "×"],
     ["raidAtkEvery", "Seconds between attacks"], ["raidBossDmg", "Single-hit damage"], ["raidRewardPerMember", "Win reward per member per level", "Efforts"]]],
+  ["Rows and specials", [["guardShare", "Front: share of back-row hits taken"], ["interruptShare", "Middle: wind-up damage to stagger", "share of boss health"], ["staggerMult", "Staggered attack lands", "×"],
+    ["supportEvery", "Back: taps per support heal"], ["supportHeal", "Back: support heal", "share of health"], ["spPerTap", "Special charge per tap"], ["spPerAbility", "Special charge per ability"], ["spPerHit", "Special charge per hit taken"]]],
   ["Competition", [["strideMin", "Lowest raid power", "×"], ["strideMax", "Highest raid power", "×"], ["stepsShare", "Share of loot split by steps"], ["topLoot", "Top walker loot bonus"], ["lastLoot", "Lowest walker loot change"],
     ["slackerTax", "Lowest walker pays this share of their week"], ["slackerAggro", "How much more the boss targets them", "×"], ["paceTax", "Daily tax swing vs squad average"]]],
   ["Trivia", [["triviaSeconds", "Seconds per question"], ["triviaFailShare", "Share wrong that paralyses"], ["rarityBossDmg", "Boss damage per rarity point", "share of health"], ["paralysedSteps", "Step penalty when paralysed"], ["paralysedStunSec", "Stun when paralysed (s)"]]],
@@ -575,12 +582,14 @@ function renderRaid() {
         <div class="nm"><b class="ol-sm">${esc(R.boss.name)}</b><small>Boss ${R.tier} · ${esc(R.boss.title)}</small></div>
         <div class="right"><span class="timer">${ic("clock")}<span id="r-clock"></span></span><button class="hbtn" data-act="raid-quit" aria-label="End raid">${ic("close")}</button></div></div>
       <div class="hp" id="r-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
+      <div class="buffs" id="buffs"></div>
     </div>
     <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
     <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
     ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f">${head2d(m.answers)}</div>${esc(m.you ? "You" : m.name)}</div>`).join("")}</div>`}
     <div class="foot"><div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
+        <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
         <div class="rows">${G.POSITIONS.map((p) => `<button data-move="${p.id}" aria-label="Move to ${p.label}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div></div>
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
@@ -609,23 +618,75 @@ function raidTick() {
   }
   paintRaid();
 }
+const SIG_FX = { ooze: ["ooze", 6, "Slimed: half damage till you move or get healed"], spores: ["spores", 4, "Spores: healing clears them"], vanish: ["swipe", 9, ""],
+  gust: ["gust", 8, "Blown back: get back to your row"], grab: ["grab", 7, "Grabbed: your squad has to free you"], slam: ["slam", 16, ""], breath: ["breath", 10, "Burning: healing puts it out"] };
+const SIG_COL = { ooze: "#7dff6a", spores: "#ffa13d", vanish: "#b9c8ff", gust: "#9ff3ff", grab: "#9b5cff", slam: "#ff7a2f", breath: "#ff7a1a" };
+const SPECIAL_COL = { bouncer: "#ffc83d", menace: "#ff4d5e", mad: "#7dff6a", gremlin: "#ff8a2b", lollipop: "#fff04a", librarian: "#9fb4ff", pigeon: "#e8e8f0", courier: "#45d483", pickpocket: "#c77dff", hedge: "#6fd4ff" };
+function paintBuffs(R) {
+  const el = $("#buffs"); if (!el) return;
+  const left = (u) => Math.max(0, Math.ceil(u - R.t)), mine = R.members.find((m) => m.id === "me");
+  const list = [
+    R.t < R.vulnUntil && ["fire", `Brew +${Math.round(G.RULES.brewVuln * 100)}%`, left(R.vulnUntil)],
+    R.t < R.weakUntil && ["coin", "Wallet lifted", left(R.weakUntil)],
+    R.t < R.prophecyUntil && ["eye", "Prophecy", left(R.prophecyUntil)],
+    R.t < R.swarmUntil && ["crown", "Pigeons", left(R.swarmUntil)],
+    mine && R.t < mine.joyUntil && ["speed", "Joyride", left(mine.joyUntil)],
+    R.blockNext && ["flag", "Next attack blocked", ""],
+    R.feeble && ["brains", `SHHH ×${R.feeble}`, ""],
+  ].filter(Boolean);
+  const html = list.map(([i, t, s]) => `<span class="buff">${ic(i)}${esc(t)}${s !== "" ? `<b>${s}</b>` : ""}</span>`).join("");
+  if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; }
+}
 const mateEl = (id) => $(`#np-${id}`) || $(`#m-${id}`);
 const mateXY = (id) => { const A = arena(); if (A) return toArena(A.screenOf(id, 0.75)); return mateEl(id) ? FX.centre(mateEl(id)) : [0, 0]; };
 function raidFx(e) {
   const v = V.raid, R = v.R, boss = $("#boss"), A = v.A;
   const [bx, by] = bossXY();
   switch (e.type) {
-    case "tap": A?.heroAttack(e.id, { crit: e.crit, big: e.swing }); break;
+    case "tap": if (!e.miss) A?.heroAttack(e.id, { crit: e.crit, big: e.swing }); break;
     case "move": A?.move(e.id, e.pos); break;
-    case "windup": if (A) A.bossWindup(e.attack, e.ids || []); FX.play("warn"); break;
+    case "windup": {
+      if (A) A.bossWindup(e.attack, e.ids || []);
+      FX.play(e.attack === "vanish" ? "vanish" : "warn");
+      const mine = R.members.find((m) => m.id === "me");
+      if (mine?.pos === "mid" && G.ATTACKS[e.attack]?.cut) hint(`${ic("bigSwing")} ${G.ATTACKS[e.attack].stop ? "Stop it" : "Stagger it"}: hit hard now`);
+      break;
+    }
     case "attack": {
       A?.bossAttack(e.attack, e.ids);
       if (e.attack === "swipe") { FX.play("swipe"); for (const id of e.ids) { const [x, y] = mateXY(id); FX.claw(x, y); } FX.shake($("#shake"), 6, 220); }
       if (e.attack === "stomp") { FX.play("stomp"); FX.shake($("#shake"), A ? 8 : 14, 500); }
       if (e.attack === "scream") { FX.play("scream"); if (!A) FX.screamWaves(bx, by); FX.shake($("#shake"), 6, 600); }
       if (e.attack === "feast") { FX.play("feast"); FX.chomp(bx, by + 30); banner(R.boss.attacks?.feast || "Feast", "Burst it down before it heals"); }
+      if (SIG_FX[e.attack]) {
+        const [snd, shake, sub] = SIG_FX[e.attack];
+        FX.play(snd); FX.shake($("#shake"), shake, 500);
+        if (e.attack === "vanish") FX.play("appear");
+        if (!A) for (const id of e.ids || []) { const [x, y] = mateXY(id); FX.sparks(x, y, SIG_COL[e.attack], 14, 400); }
+        if (sub && (e.ids || []).includes("me")) banner(R.boss.attacks?.[e.attack] || G.ATTACKS[e.attack].label, sub);
+      }
       break;
     }
+    case "special": {
+      const m = R.members.find((x) => x.id === e.id), S = m && G.specialOf(m);
+      FX.play("special"); A?.special(e.id, e.cls, e.roll); FX.shake($("#shake"), 10, 450); FX.buzz(30);
+      if (S) {
+        const [x, y] = mateXY(e.id);
+        FX.number(x, y - 34, S.name, { size: 24, grad: ["#ffffff", SPECIAL_COL[e.cls] || "#ffd166"] });
+        if (e.id === "me" || ["lollipop", "librarian", "hedge", "pigeon"].includes(e.cls)) banner(S.name, e.id === "me" ? S.what : `${m.name}: ${S.what}`);
+        if (["bouncer", "mad", "pickpocket"].includes(e.cls) || e.roll === "crit") setTimeout(() => { FX.sparks(bx, by, SPECIAL_COL[e.cls] || "#ffd166", 30, 700); bossHurt(true); }, 380);
+      }
+      break;
+    }
+    case "stagger": {
+      A?.stagger(e.stopped); FX.play("stagger"); FX.shake($("#shake"), e.stopped ? 12 : 7, 350);
+      FX.number(bx, by - 50, e.stopped ? "Stopped!" : "Staggered", { size: e.stopped ? 34 : 28, grad: ["#ffffff", "#ffd166"] });
+      if (e.id === "me") FX.buzz(25);
+      break;
+    }
+    case "blocked": A?.blocked(); FX.play("shield"); FX.number(bx, by + 10, e.stopped ? "Never landed" : "Blocked", { size: 26, grad: ["#ffffff", "#8fd8ff"] }); break;
+    case "pulse": { A?.pulse(e.by, e.id); if (e.id === "me" || e.by === "me") FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${e.amt}`, { size: 16, color: "#7ee29d" }); break; }
+    case "release": { A?.release(e.id, e.freed); if (e.freed) { FX.play("release"); const [x, y] = mateXY(e.id); FX.number(x, y - 28, "Free!", { size: 22, grad: ["#ffffff", "#c9a6ff"] }); } break; }
     case "hurt": {
       A?.hurt(e.id);
       const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${e.amt}`, { size: 22, color: "#ff6b78" });
@@ -654,20 +715,28 @@ function paintRaid() {
   const pct = Math.ceil((B.hp / B.max) * 10) / 10;
   if (!v.A && pct !== v.bossPct && $("#boss")) { v.bossPct = pct; $("#boss").innerHTML = Walker.boss(B.hp / B.max, false); }
   const tele = $("#tele"), tt = tele.querySelector(".tt"), cdbar = tele.querySelector(".cd");
-  if (B.feast) {
+  if (R.grab) {
+    const who = R.members.find((m) => m.id === R.grab.id);
+    tele.className = "tele grab";
+    tt.innerHTML = `${esc(B.attacks.grab || "Grab")}: ${esc(who?.you ? "you" : who?.name || "")}<small>${fmt(R.grab.dealt)} / ${fmt(R.grab.need)} to break free</small>`;
+    cdbar.style.width = `${Math.max(0, (R.grab.until - R.t) / 10) * 100}%`;
+  } else if (B.feast) {
     tele.className = "tele feast";
     tt.innerHTML = `${esc(B.attacks.feast)}<small>${fmt(B.feast.dealt)} / ${fmt(B.feast.need)} damage</small>`;
     cdbar.style.width = `${Math.max(0, (B.feast.until - R.t) / 6) * 100}%`;
   } else if (B.next && R.t >= B.next.warnAt) {
     const a = G.ATTACKS[B.next.type], total = B.next.at - B.next.warnAt;
-    tele.className = "tele hot";
-    tt.innerHTML = `${esc(B.attacks[B.next.type] || a.label)}<small>${esc(a.what)} · ${Math.max(0, B.next.at - R.t).toFixed(1)}s</small>`;
+    const N = B.next, need = a.cut ? G.interruptNeed(R, N.type) : 0;
+    tele.className = `tele hot ${N.staggered ? "staggered" : ""}`;
+    const meter = a.cut && !N.staggered && R.members.some((m) => m.alive && m.pos === "mid") ? ` · middle ${Math.min(100, Math.round((N.mid / need) * 100))}% to ${a.stop ? "stop" : "stagger"}` : N.staggered ? (N.cancel ? " · stopped" : " · staggered") : "";
+    tt.innerHTML = `${esc(B.attacks[N.type] || a.label)}<small>${esc(a.what)}${meter} · ${Math.max(0, N.at - R.t).toFixed(1)}s</small>`;
     cdbar.style.width = `${Math.max(0, (B.next.at - R.t) / total) * 100}%`;
   } else {
     tele.className = "tele idle";
     tt.innerHTML = `Phase ${B.phase}<small>watching for its next move</small>`;
     cdbar.style.width = "0";
   }
+  paintBuffs(R);
   for (const m of R.members) {
     const el = mateEl(m.id); if (!el) continue;
     const f = m.hp / m.max;
@@ -679,7 +748,7 @@ function paintRaid() {
       const bar = el.querySelector("s");
       bar.style.width = `${f * 100}%`;
       bar.style.background = f > 0.5 ? "var(--green)" : f > 0.25 ? "var(--gold)" : "var(--red)";
-      const st = !m.alive ? "skull" : R.t < m.stunUntil ? "bolt" : R.t < m.shieldUntil ? "guard" : m.swing ? "fire" : "";
+      const st = !m.alive ? "skull" : R.grab?.id === m.id ? "lock" : R.t < m.stunUntil ? "bolt" : R.t < m.dotUntil ? "fire" : R.t < m.slimeUntil ? "warning" : R.t < m.shieldUntil ? "guard" : m.swing ? "bigSwing" : (m.sp || 0) >= G.RULES.spMax ? "star" : "";
       const stEl = el.querySelector(".st");
       if (stEl.dataset.s !== st) { stEl.dataset.s = st; stEl.innerHTML = st ? ic(st) : ""; }
     }
@@ -692,12 +761,24 @@ function paintRaid() {
   ab.style.setProperty("--cd", `${cd > 0 ? (cd / total) * 360 : 0}deg`);
   ab.disabled = cd > 0 || !me.alive;
   ab.classList.toggle("ready", cd <= 0 && me.alive && R.t >= me.stunUntil);
+  const sp = $("#sp"), S = G.specialOf(me), chg = Math.min(1, (me.sp || 0) / G.RULES.spMax);
+  if (v.spCls !== me.cls) { v.spCls = me.cls; sp.querySelector(".ic-slot").innerHTML = ic(S.icon); sp.querySelector(".al").textContent = S.short; sp.setAttribute("aria-label", `${S.name}: ${S.what}`); sp.style.setProperty("--sc", SPECIAL_COL[me.cls] || "#ffd166"); }
+  sp.style.setProperty("--sp", `${chg * 360}deg`);
+  sp.querySelector(".pct").textContent = chg < 1 ? `${Math.floor(chg * 100)}%` : "";
+  const spReady = chg >= 1 && me.alive && R.t >= me.stunUntil && R.t >= me.moveUntil;
+  sp.disabled = !spReady; sp.classList.toggle("ready", spReady);
+  if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); toast(`${S.name} is ready: ${S.what}`); }
+  if (!spReady) v.spToast = false;
   document.querySelectorAll("[data-move]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.move === me.pos)));
   if (!me.alive) hint(`${ic("skull")} You're down. Answer your question`);
+  else if (R.grab?.id === me.id) hint(`${ic("lock")} Grabbed! Your squad has to hit it to free you`);
   else if (R.t < me.stunUntil) hint(`${ic("bolt")} Paralysed`);
   else if (R.t < me.moveUntil) hint(`${ic("arrowRight")} Moving rows`);
+  else if (B.hidden) hint(`${ic("eye")} It's vanished. It'll go for the weakest`);
+  else if (me.pos !== me.home && me.botBackAt && R.t < me.botBackAt + 6) hint(`${ic("arrowRight")} Blown out of place: tap ${G.posOf(me.home).label} to get back`);
+  else if (R.t < me.slimeUntil) hint(`${ic("warning")} Slimed: half damage. Move rows or get healed`);
   else if (me.swing) hint(`${ic("fire")} Big swing: ${me.swing} hits left`);
-  else if (v.taps >= 6) hint(null);
+  else hint(v.taps >= 6 ? null : `${ic("target")} Tap the boss`);
   paintCombo(me.combo, 1 + me.combo / (G.RULES.comboMax * 2));
   $("#feed").innerHTML = R.log.slice(0, 2).map((l) => `<div class="${l.kind}">${esc(l.text)}</div>`).join("");
   const veil = $("#veil");
@@ -745,6 +826,7 @@ function raidTap(e) {
   if (!hit) return;
   v.taps++;
   const [x, y] = FX.local(e.clientX, e.clientY);
+  if (hit.miss) { FX.number(x, y, "Miss", { size: 18, color: "#b9c8ff" }); FX.play("blocked"); return; }
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, color: hit.swing ? "#ff9f43" : "#ffd166" });
   FX.play(hit.crit || hit.swing ? "crit" : "hit");
   if (hit.crit || hit.swing) { FX.shake($("#shake"), hit.swing ? 9 : 5, 180); FX.buzz(18); } else FX.buzz(5);
@@ -918,6 +1000,7 @@ document.addEventListener("click", (e) => {
     case "tier-up": L.tier++; save(); render(); break;
     case "tier-down": L.tier = Math.max(1, L.tier - 1); save(); render(); break;
     case "ability": if (V.raid) G.raidAbility(V.raid.R, "me"); break;
+    case "special": if (V.raid) G.raidSpecial(V.raid.R, "me"); break;
     case "raid-quit": if (V.raid && confirm("End the raid now? It counts as running out of time.")) V.raid.R.dur = V.raid.R.t; break;
     case "collect": collect(); break;
     case "back": FX.destroy(); V.result = null; V.view = "main"; render(); window.scrollTo(0, 0); break;
@@ -966,7 +1049,7 @@ const OWNER_ID = "ff9cc9b5-b51a-4643-a779-63ed178862f9";
     const t = JSON.parse(localStorage.getItem("ef_token"));
     if (t) ok = (await (await fetch(`${API}/game`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: t }) })).json())?.me?.id === OWNER_ID;
   } catch { /* not signed in, or offline */ }
-  if (ok) return render();
+  if (ok || ["localhost", "127.0.0.1"].includes(location.hostname)) return render();
   $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><p class="muted">The Lab is only open to the game's owner.</p><a class="btn gold" href="./">Back to the game</a></div>`;
 })();
 })();

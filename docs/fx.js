@@ -237,6 +237,18 @@ const SOUNDS = {
   buy() { tone(1319, { type: "square", dur: 0.06, vol: 0.1 }); tone(1760, { type: "square", dur: 0.12, vol: 0.1, at: 0.06 }); noise({ dur: 0.15, vol: 0.15, freq: 5000, at: 0.02 }); },
   levelup() { [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, { type: "triangle", dur: 0.25, vol: 0.16, at: i * 0.07 })); },
   tap() { tone(900, { type: "triangle", dur: 0.03, vol: 0.08 }); },
+  special() { noise({ dur: 0.5, vol: 0.5, freq: 200, to: 5000, q: 1.2 }); [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, { type: "sawtooth", dur: 0.22, vol: 0.09, at: 0.08 + i * 0.045 })); tone(65, { type: "sine", dur: 0.6, vol: 0.7, to: 40, at: 0.3 }); },
+  stagger() { tone(1700, { type: "square", dur: 0.06, vol: 0.18 }); tone(1100, { type: "triangle", dur: 0.35, vol: 0.2, to: 700 }); noise({ dur: 0.15, vol: 0.4, freq: 3000, q: 2 }); },
+  ooze() { for (let i = 0; i < 3; i++) { tone(180 - i * 30, { type: "sine", dur: 0.18, vol: 0.4, to: 60, at: i * 0.09 }); noise({ dur: 0.12, vol: 0.3, type: "lowpass", freq: 700, at: i * 0.09 }); } },
+  spores() { noise({ dur: 1.1, vol: 0.35, freq: 2600, to: 900, q: 0.8 }); noise({ dur: 0.9, vol: 0.2, type: "highpass", freq: 5000, at: 0.1 }); },
+  vanish() { tone(1600, { type: "sine", dur: 0.6, vol: 0.12, to: 200 }); noise({ dur: 0.6, vol: 0.3, freq: 4000, to: 300, q: 3 }); },
+  appear() { noise({ dur: 0.25, vol: 0.5, freq: 300, to: 5000, q: 3 }); tone(90, { type: "sawtooth", dur: 0.3, vol: 0.25, to: 50, at: 0.05 }); },
+  gust() { noise({ dur: 1.0, vol: 0.55, freq: 400, to: 1600, q: 0.6 }); noise({ dur: 0.8, vol: 0.3, freq: 1500, to: 500, q: 2, at: 0.2 }); },
+  grab() { noise({ dur: 0.2, vol: 0.6, type: "lowpass", freq: 900, to: 200 }); tone(110, { type: "square", dur: 0.25, vol: 0.2, to: 70 }); for (let i = 0; i < 3; i++) tone(240, { type: "sine", dur: 0.08, vol: 0.2, to: 120, at: 0.2 + i * 0.1 }); },
+  release() { [440, 660, 880].forEach((f, i) => tone(f, { type: "triangle", dur: 0.12, vol: 0.16, at: i * 0.05 })); },
+  slam() { tone(55, { type: "sine", dur: 0.9, vol: 1, to: 25 }); noise({ dur: 0.8, vol: 0.9, type: "lowpass", freq: 600, to: 40 }); noise({ dur: 0.3, vol: 0.5, freq: 2500, q: 1, at: 0.02 }); },
+  breath() { noise({ dur: 1.4, vol: 0.7, type: "lowpass", freq: 1800, to: 500 }); tone(120, { type: "sawtooth", dur: 1.2, vol: 0.18, to: 70 }); noise({ dur: 1.2, vol: 0.25, freq: 3500, q: 0.5, at: 0.1 }); },
+  pulse() { tone(880, { type: "sine", dur: 0.18, vol: 0.08 }); tone(1320, { type: "sine", dur: 0.22, vol: 0.06, at: 0.05 }); },
 };
 function play(name) { try { SOUNDS[name]?.(); } catch { /* audio is a nice-to-have */ } }
 function setMuted(v) { muted = v; try { localStorage.setItem("ef_mute", v ? "1" : "0"); } catch { /* ignore */ } if (v && ac) ac.suspend(); }

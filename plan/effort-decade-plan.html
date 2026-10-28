@@ -1,0 +1,291 @@
+<title>Effort Decade Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Rubik:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: one reading column (max 860px) with full-width charts and tables; the game's navy and gold. */
+:root {
+  --bg: #f4f5fb; --surface: #ffffff; --inset: #e9ecf6; --fg: #151b38; --fg-2: #4a5275; --fg-3: #7a82a3; --line: #d9ddec;
+  --gold: #c98a00; --gold-soft: #fff1c9; --blue: #3c6df0; --red: #d63c55; --green: #1f9d5c; --violet: #7b55e0;
+  --display: "Lilita One", "Arial Rounded MT Bold", system-ui, sans-serif;
+  --ui: "Rubik", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b1027; --surface: #141b3d; --inset: #1b2450; --fg: #eef1ff; --fg-2: #b6bfe4; --fg-3: #8590bd; --line: #26305e;
+  --gold: #ffc83d; --gold-soft: #3a3010; --blue: #7aa2ff; --red: #ff6b7e; --green: #4fd68f; --violet: #b59bff; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0b1027; --surface: #141b3d; --inset: #1b2450; --fg: #eef1ff; --fg-2: #b6bfe4; --fg-3: #8590bd; --line: #26305e;
+  --gold: #ffc83d; --gold-soft: #3a3010; --blue: #7aa2ff; --red: #ff6b7e; --green: #4fd68f; --violet: #b59bff; color-scheme: dark; }
+body { background: var(--bg); color: var(--fg); font: 400 15.5px/1.6 var(--ui); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 40px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 44px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 400; letter-spacing: .01em; text-wrap: balance; margin: 0; line-height: 1.1; }
+h1 { font-size: clamp(34px, 6vw, 52px); }
+h2 { font-size: 28px; }
+h3 { font-size: 19px; }
+p { margin: 0; max-width: 66ch; }
+.eyebrow { font: 700 11.5px/1 var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+.lede { font-size: 18px; color: var(--fg-2); }
+section { display: grid; gap: 16px; min-width: 0; }
+.muted { color: var(--fg-2); } .faint { color: var(--fg-3); font-size: 13px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: .92em; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; background: var(--inset); color: var(--fg-2); font: 600 12.5px/1 var(--ui); }
+.chip.live { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.chip.plan { background: var(--gold-soft); color: var(--gold); }
+.hero { display: grid; gap: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--line); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 4px; }
+.stat b { font: 400 30px/1 var(--display); }
+.stat span { color: var(--fg-2); font-size: 13.5px; line-height: 1.4; }
+.table { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 700 11px/1.2 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); background: var(--inset); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td b { font-weight: 600; }
+td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.good { color: var(--green); } .bad { color: var(--red); } .warn { color: var(--gold); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card p { font-size: 14.5px; color: var(--fg-2); }
+.card ul { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: 14.5px; display: grid; gap: 4px; }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 8px; display: grid; gap: 6px; min-width: 0; }
+.chart h3 { font-size: 16px; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: var(--fg-2); }
+.legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.decision { border: 2px solid var(--gold); background: var(--gold-soft); border-radius: 14px; padding: 16px 18px; display: grid; gap: 8px; }
+.decision h3 { color: var(--fg); }
+.decision p { color: var(--fg); font-size: 14.5px; }
+.phase { display: grid; grid-template-columns: 92px 1fr; gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); }
+.phase:first-of-type { border-top: 0; }
+.phase .when { font: 400 18px/1.1 var(--display); color: var(--gold); }
+.phase p { font-size: 14.5px; color: var(--fg-2); }
+@media (max-width: 520px) { .phase { grid-template-columns: 1fr; gap: 4px; } }
+a { color: var(--blue); }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <span class="eyebrow">Effort · game plan · October 2026</span>
+    <h1>Ten years of Effort</h1>
+    <p class="lede">What changed in the fights this week, and a plan that keeps the squad finding new bosses, new gear and new story for a decade. Every number below comes from the real game rules, run through simulated fights and ten simulated years.</p>
+    <div class="chips"><span class="chip live">Live now: specials, rows, boss moves</span><span class="chip plan">Needs your go-ahead: the decade plan</span></div>
+  </header>
+
+  <section>
+    <span class="eyebrow">Live now</span>
+    <h2>The fights got deeper</h2>
+    <div class="stats">
+      <div class="stat"><b>10</b><span>class specials, one per class, charged by tapping, using your ability and taking hits</span></div>
+      <div class="stat"><b>3</b><span>row jobs: the front guards the back, the middle staggers attacks, the back heals as it taps</span></div>
+      <div class="stat"><b>7</b><span>boss signature moves, each with its own attack rhythm, warnings, sounds and 3D effects</span></div>
+      <div class="stat"><b>20,000+</b><span>simulated raids with random squads of every class to set each boss's health</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h3>Class specials</h3>
+    <p class="muted">A ring fills around the special button. When it glows, tap it. At a steady tapping pace a special comes round about once a minute; Brains charges it a little faster.</p>
+    <div class="table"><table>
+      <thead><tr><th>Class</th><th>Special</th><th>What it does</th></tr></thead>
+      <tbody id="specials"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h3>What each row does</h3>
+    <div class="grid2">
+      <div class="card"><h3>Front · Bodyguard</h3><p>Takes 40% of every hit aimed at the back row. Gets 50% more special charge from hits taken. Ability: Shield Wall, which also stops Gale's Gust and shelters the rows behind from Vex's fire.</p></div>
+      <div class="card"><h3>Middle · Interrupt</h3><p>Damage dealt during a wind-up fills a stagger meter shown on the warning bar. Fill it and the attack lands at half strength. Grimm's Ground Slam needs double and is stopped outright. Time your Big Swing to the warning.</p></div>
+      <div class="card"><h3>Back · Support</h3><p>Every 20 taps heals whoever needs it most by 2.5% and clears slime, spores and burns. Patch Up does the same, bigger. Healers decide the Rory and Vex fights.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h3>Every boss fights differently</h3>
+    <div class="table"><table>
+      <thead><tr><th>Boss</th><th>Signature</th><th>How to beat it</th><th class="n">Health</th><th class="n">Gear it expects</th></tr></thead>
+      <tbody id="bosses"></tbody>
+    </table></div>
+    <p class="faint">Health is a multiple of Brett's 800,000. Each boss's health was set so a random squad of four in the gear it expects wins about 85–95% of the time. The table below is the check.</p>
+  </section>
+
+  <section>
+    <h3>Balance check</h3>
+    <p class="muted">Win rate for random four-player squads, 80 fights per cell. "Expected gear" is the gear each boss asks for (see above).</p>
+    <div class="table"><table>
+      <thead><tr><th>Squad</th><th class="n">Brett</th><th class="n">Rory</th><th class="n">Wisp</th><th class="n">Gale</th><th class="n">Kraken</th><th class="n">Grimm</th><th class="n">Vex</th></tr></thead>
+      <tbody id="balance"></tbody>
+    </table></div>
+    <p class="faint">Missing the step goal used to make the boss unbeatable (2.5× health, 1.5× damage). It's now 1.8× and 1.35×: still a loss in the expected gear, and against Gale and beyond, one step better gear wins 15–48% of the time.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">The problem</span>
+    <h2>Today's rules run out in year two</h2>
+    <p class="muted">I simulated a five-person squad (one keen walker at 11k steps a day, three around 7k, one at 4.5k) for ten years under today's rules: real step income, Taxman, XP, shop prices, upgrades, the weekly step goal, and every Sunday raid fought in full. Six different squads, averaged.</p>
+    <div class="grid2">
+      <div class="card"><h3 class="bad">Nothing left to buy</h3><p>Everyone owns the best gear at +10 by the end of year two. After that the average player goes <b class="num">466</b> weeks without a purchase.</p></div>
+      <div class="card"><h3 class="bad">Runaway Efforts</h3><p>Lap rewards multiply by 5.5 each lap. By year ten each player is sitting on <b class="num">5,080,844</b> Efforts with nothing to spend them on. Raids pay 24× what walking does.</p></div>
+      <div class="card"><h3 class="bad">A wall at lap three</h3><p>Lap health doubles, and there's no gear above Mythic. The squad's best boss never moves after year two.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">The plan</span>
+    <h2>Eight changes that make it last</h2>
+    <div class="grid2">
+      <div class="card"><h3>1 · An endless ladder</h3><p>After Vex the ladder keeps going: bosses cycle, and each step adds 7% of Vex's health, 2% damage and 2.5% reward. Steps add a fixed amount rather than compounding, because gear power grows in a straight line with Efforts spent. That's why progress doesn't stall.</p></div>
+      <div class="card"><h3>2 · Raids pay like walking</h3><p>Base raid reward goes from 150 to 70 per player, and lap rewards from ×5.5 to the gentle per-step growth above. Raids end up paying about the same as walking all decade, so steps stay the heart of the game.</p></div>
+      <div class="card"><h3>3 · Four new gear tiers</h3><p>Each one gives 1.45× Mythic's stats, compounding. Every class gets a full set of each, so 30 new items per tier and 120 over the decade.</p>
+        <ul><li>Relic: level 25, 15,000</li><li>Ascendant: level 35, 32,000</li><li>Celestial: level 48, 55,000</li><li>Eternal: level 62, 110,000</li></ul></div>
+      <div class="card"><h3>4 · Seasons of 13 weeks</h3><p>40 seasons in ten years. Each season brings:</p>
+        <ul><li>a stretch of the squad's journey map</li><li>12 weekly story chapters and a finale</li><li>an affix that changes every boss</li><li>a three-piece set with a set bonus</li><li>a free reward track earned by steps</li></ul></div>
+      <div class="card"><h3>5 · The journey map</h3><p>The squad's combined steps move a marker along real routes. Five people at about 7k steps each cover roughly 2,400 km a season. Season one is Land's End to John o' Groats. The whole decade is about 95,000 km, nearly two and a half times round the world, with a landmark unlocking each chapter.</p></div>
+      <div class="card"><h3>6 · Something every day</h3><p>A weekly rhythm:</p>
+        <ul><li>Monday: a new chapter and three squad bounties</li><li>Every evening: the Taxman</li><li>Wednesday: an optional five-minute Midweek Hunt</li><li>Sunday: the raid lobby</li></ul><p>On top of that, a Double Stride weekend each month and six yearly events, each with its own boss: New Year Rush, Spring Sprint, Solstice, Harvest, the Haunted Walk and Krampus.</p></div>
+      <div class="card"><h3>7 · Long goals and sinks</h3><p>The things that stay worth saving for:</p>
+        <ul><li><b>The Den:</b> a squad base with 10 rooms of 10 levels, each a small bonus, about 1.5M Efforts in all</li><li>Cosmetics: outfits, colours and emotes</li><li>One-raid potions</li><li>A bestiary of every boss and affix</li><li>Titles and belt ranks</li><li>A yearly Hall of Fame</li></ul></div>
+      <div class="card"><h3>8 · A new boss every year</h3><p>One new model and signature move joins the ladder each year, so 16 bosses by year ten. Ideas:</p>
+        <ul><li>The Mimic copies your last special</li><li>The Hydra has two health bars</li><li>The Clockwork attacks on a fixed beat you can learn</li><li>The Tide alternates rows</li><li>The Twins must die within 10s of each other</li></ul></div>
+    </div>
+    <div class="table"><table>
+      <thead><tr><th>Season affix</th><th>Effect on every boss that season</th></tr></thead>
+      <tbody id="affixes"></tbody>
+    </table></div>
+    <p class="faint">Twelve affixes cover the first three years. From year four two are combined each season, which gives 66 pairings, enough that no two seasons in the decade play alike.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">The proof</span>
+    <h2>Ten simulated years, side by side</h2>
+    <p class="muted">The same squads under today's rules (A) and the plan (B). Plan B averages eight squads.</p>
+    <div class="grid2">
+      <div class="chart"><h3>Best boss beaten (ladder step)</h3><div id="c-best"></div><div class="legend"><span><i style="background:var(--red)"></i>Today</span><span><i style="background:var(--gold)"></i>Plan, average squad</span><span><i style="background:var(--blue)"></i>Plan, keen squad</span></div></div>
+      <div class="chart"><h3>Efforts sitting unspent per player</h3><div id="c-wallet"></div><div class="legend"><span><i style="background:var(--red)"></i>Today</span><span><i style="background:var(--gold)"></i>Plan</span></div></div>
+      <div class="chart"><h3>Yearly income per player, plan</h3><div id="c-income"></div><div class="legend"><span><i style="background:var(--green)"></i>From walking</span><span><i style="background:var(--violet)"></i>From raids</span></div></div>
+      <div class="chart"><h3>Weeks since the last purchase</h3><div id="c-since"></div><div class="legend"><span><i style="background:var(--red)"></i>Today</span><span><i style="background:var(--gold)"></i>Plan</span></div></div>
+    </div>
+    <div class="table"><table>
+      <thead><tr><th>Year</th><th class="n">Best step</th><th class="n">New bests</th><th class="n">Raids won</th><th class="n">Walk / raid income</th><th class="n">Unspent</th><th>Gear: keen · average · casual</th></tr></thead>
+      <tbody id="years"></tbody>
+    </table></div>
+    <p class="faint">Gear shows the three slots: tier (com, epi, myt, rel, asc, ete) and upgrade level. Late-decade win rates of 38–65% come from squads always trying the next boss up after a win; a squad that repeats bosses wins more.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">Your call</span>
+    <h2>Three decisions before I build it</h2>
+    <div class="decision"><h3>1. Cut raid rewards from 150 to 70 per player</h3><p>This is the change everyone will notice: Sunday pays less. Without it Efforts pile up into the millions and the shop stops meaning anything by year two. With it, raids and walking pay about the same for the whole decade. I'd announce it with the first season so it arrives alongside new things to buy.</p></div>
+    <div class="decision"><h3>2. The step goal for squads that walk less</h3><p>A squad averaging about 5,000 steps a day never makes the goal past Wisp (6,000 a day), so in the simulation it stayed on Brett, Rory and Wisp for ten years. That's the rule doing its job, but it may feel stuck. Options:</p>
+      <ul><li>Keep it as is.</li><li>Cap the goal at 7,000 a day.</li><li>From lap two, set the goal 10% above the squad's own four-week average.</li></ul></div>
+    <div class="decision"><h3>3. Which comes first</h3><p>I'd build the endless ladder, economy changes and Season 1 together, because each needs the others: the ladder needs the new tiers, and the new tiers need the season sets in between. The visual overhaul can run alongside.</p></div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Roadmap</span>
+    <h2>How it gets built</h2>
+    <div>
+      <div class="phase"><span class="when">Done</span><div><h3>Phase 1 · Deeper fights</h3><p>Class specials, row jobs, boss signature moves and patterns, a rebalance using every class, a softer enraged penalty. Live in the app and the Lab.</p></div></div>
+      <div class="phase"><span class="when">Next</span><div><h3>Phase 2 · The long game</h3><p>The endless ladder, the economy changes, the Relic tier, then Season 1:</p><ul><li>the journey map</li><li>12 chapters</li><li>the first affix</li><li>the first set</li><li>the free reward track</li><li>weekly bounties</li></ul><p>Before release, I re-run the decade simulation and the fight checks.</p></div></div>
+      <div class="phase"><span class="when">Then</span><div><h3>Phase 3 · Things to do between Sundays</h3><p>The Den, the cosmetics shop, the Midweek Hunt, and the event calendar with its first event boss.</p></div></div>
+      <div class="phase"><span class="when">Alongside</span><div><h3>Phase 4 · AAA fights</h3><p>Bloom and glow, hit-stop on big hits, camera moves for each signature attack, effects in each boss's own colours, a full sound pass, and new boss models where the current ones are stand-ins.</p></div></div>
+      <div class="phase"><span class="when">Every season</span><div><h3>Content drops</h3><p>A new chapter set, affix and gear set every 13 weeks. Once a year: a new boss and an event. Every couple of years: a new gear tier. Each drop goes through the same simulations before it ships.</p></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h3>How this was tested</h3>
+    <p class="muted">The fights use the game's own rules file, the same one the app and server use, with bots tapping at human pace (3–5 taps a second).</p>
+    <ul class="muted" style="margin:0;padding-left:18px;display:grid;gap:4px">
+      <li>Boss health was calibrated by binary search per boss.</li>
+      <li>Balance tables use 60–80 fights per cell with random squads of four different classes.</li>
+      <li>The decade runs simulate every day of steps, with winter and summer swings and day-to-day noise.</li>
+      <li>Every Taxman, shop decision and Sunday raid is played out, with the squad choosing its boss the way the lobby does: up after a win, down after two losses, avoiding bosses whose step goal it missed.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+const SPECIALS = [
+  ["Bouncer", "Kick Out", "A huge kick, and the boss's next attack comes 4s late"],
+  ["Menace", "Joyride", "10s of double damage, and your combo can't drop"],
+  ["Mad Scientist", "Volatile Brew", "A big blast, then the boss takes 20% more from everyone for 10s"],
+  ["Chaos Gremlin", "Chaos Roll", "A giant crit, a squad heal, or the next attack fizzles"],
+  ["Lollipop Warden", "STOP!", "The squad ignores the boss's next attack completely"],
+  ["Battle Librarian", "SHHH", "The next 2 attacks barely land, and it can't finish a Feast"],
+  ["Pigeon King", "Pigeon Swarm", "10s: pigeons take its Strikes, everything else hits half as hard, and they peck"],
+  ["Rogue Courier", "Express Delivery", "Brings a fallen teammate straight back, or fully heals the most hurt"],
+  ["Pickpocket", "Lift Wallet", "Swipes a chunk of its health, and it hits 25% softer for 15s"],
+  ["Hedge Wizard", "Pound-Shop Prophecy", "12s: the squad crits far more often and abilities recharge twice as fast"],
+];
+const BOSSES = [
+  ["Brett", "Ooze", "Slimes the fullest row: half damage until they move or get healed. Spread out; healers clear it.", "×1.00", "None"],
+  ["Rory", "Spore Cloud", "Everyone takes damage for 8s. Back-row taps and Patch Up clear it.", "×1.45", "Common"],
+  ["Wisp", "Vanish", "Can't be hit for a few seconds, then hits the weakest for 1.8×. Keep everyone topped up.", "×1.15", "Common +3"],
+  ["Gale", "Gust", "Blows the front row back a row. Shield Wall holds; otherwise get back in place fast.", "×1.75", "Rare"],
+  ["The Kraken", "Grab", "Two-tentacle strikes, and it grabs someone. Deal 1.2% of its health to free them.", "×2.25", "Epic"],
+  ["Grimm", "Ground Slam", "A 3.5s wind-up, then a crushing hit on the front two rows. The middle row can stop it.", "×3.30", "Legendary"],
+  ["Vex", "Fire Breath", "Burns everyone, then keeps burning. A raised Shield Wall halves it for the rows behind.", "×4.30", "Mythic"],
+];
+const BAL = [
+  ["Expected gear, best rows", [93, 94, 85, 86, 91, 89, 96]],
+  ["One gear step under", [93, 30, 73, 36, 5, 18, 21]],
+  ["One gear step over", [100, 98, 100, 100, 100, 100, 100]],
+  ["Expected gear, wrong rows", [3, 0, 0, 0, 0, 0, 0]],
+  ["Expected gear, all at the back", [13, 0, 0, 0, 0, 0, 0]],
+  ["Expected gear, step goal missed", [0, 0, 0, 0, 0, 0, 0]],
+  ["One step over, goal missed", [16, 0, 0, 15, 21, 34, 48]],
+];
+const AFFIXES = [
+  ["Fog", "Warnings come a second later"], ["Frost", "Moving rows takes twice as long"], ["Thick Hide", "Crits hit ×2 instead of ×2.5"],
+  ["Haste", "Attacks come 15% faster; reward +15%"], ["Volatile", "Its signature move comes twice as often"], ["Leech", "Heals 1% each time a Strike lands"],
+  ["Minions", "Small adds appear that the back row must clear"], ["Blood Moon", "+20% damage taken and dealt, +20% loot"], ["Silence", "Specials charge 25% slower"],
+  ["Shifting", "Its target row changes every phase"], ["Brittle", "Staggers need half the damage; it hits harder"], ["Echo", "Every third attack repeats a second later"],
+];
+const D = {"A":[{"y":1,"best":16,"nb":16,"win":92,"walk":23387,"raid":163828,"wallet":80201,"since":6},{"y":2,"best":19,"nb":6.3,"win":72,"walk":23511,"raid":452175,"wallet":533534,"since":50},{"y":3,"best":19,"nb":2.7,"win":69,"walk":23442,"raid":548425,"wallet":1105400,"since":102},{"y":4,"best":19,"nb":2.8,"win":68,"walk":23444,"raid":550357,"wallet":1679201,"since":154},{"y":5,"best":19,"nb":2.2,"win":68,"walk":23451,"raid":551482,"wallet":2254133,"since":206},{"y":6,"best":19,"nb":2.2,"win":65,"walk":23514,"raid":541572,"wallet":2819220,"since":258},{"y":7,"best":19,"nb":3,"win":67,"walk":23401,"raid":537532,"wallet":3380153,"since":310},{"y":8,"best":19,"nb":2.8,"win":67,"walk":23392,"raid":538154,"wallet":3941698,"since":362},{"y":9,"best":19,"nb":2.2,"win":66,"walk":23479,"raid":541483,"wallet":4506660,"since":414},{"y":10,"best":19,"nb":2.5,"win":68,"walk":23296,"raid":550888,"wallet":5080844,"since":466}],
+"B":[{"y":1,"best":12,"nb":11.6,"win":74,"walk":23412,"raid":13381,"wallet":1936,"since":2,"gk":"myt+6 epi+10 epi+10","gb":"epi+10 epi+10 epi+10","gc":"epi+8 epi+8 epi+1"},{"y":2,"best":22,"nb":13,"win":68,"walk":23405,"raid":19191,"wallet":2902,"since":4,"gk":"myt+10 myt+9 epi+10","gb":"myt+9 epi+10 epi+10","gc":"myt+0 epi+10 epi+10"},{"y":3,"best":32,"nb":12,"win":67,"walk":23390,"raid":24116,"wallet":3613,"since":4,"gk":"myt+10 myt+10 rel+8","gb":"myt+10 myt+9 epi+10","gc":"myt+7 epi+10 epi+10"},{"y":4,"best":42,"nb":12.5,"win":64,"walk":23449,"raid":27898,"wallet":4952,"since":5,"gk":"asc+2 myt+10 rel+10","gb":"myt+10 myt+10 rel+5","gc":"myt+10 epi+10 epi+10"},{"y":5,"best":50,"nb":10.1,"win":61,"walk":23417,"raid":31295,"wallet":7076,"since":7,"gk":"asc+7 myt+10 rel+10","gb":"myt+10 myt+10 rel+9","gc":"myt+10 myt+5 epi+10"},{"y":6,"best":52,"nb":3.5,"win":40,"walk":23505,"raid":26208,"wallet":13647,"since":14,"gk":"asc+9 myt+10 rel+10","gb":"asc+0 myt+10 rel+10","gc":"myt+10 myt+9 epi+10"},{"y":7,"best":58,"nb":7.9,"win":50,"walk":23381,"raid":30966,"wallet":9322,"since":10,"gk":"asc+10 asc+4 rel+10","gb":"asc+5 myt+10 rel+10","gc":"myt+10 myt+10 epi+10"},{"y":8,"best":67,"nb":12.5,"win":65,"walk":23366,"raid":38858,"wallet":14586,"since":12,"gk":"asc+10 asc+8 rel+10","gb":"asc+7 myt+10 rel+10","gc":"myt+10 myt+10 rel+5"},{"y":9,"best":74,"nb":9.3,"win":51,"walk":23466,"raid":37046,"wallet":21123,"since":18,"gk":"asc+10 asc+10 rel+10","gb":"asc+9 myt+10 rel+10","gc":"myt+10 myt+10 rel+7"},{"y":10,"best":75,"nb":2.6,"win":38,"walk":23387,"raid":32581,"wallet":16211,"since":14,"gk":"asc+10 asc+10 ete+1","gb":"asc+10 asc+2 rel+10","gc":"myt+10 myt+10 rel+9"}],
+"keen":[{"y":1,"best":15},{"y":2,"best":25},{"y":3,"best":30},{"y":4,"best":42},{"y":5,"best":46},{"y":6,"best":52},{"y":7,"best":62},{"y":8,"best":68},{"y":9,"best":72},{"y":10,"best":73}]};
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const fmt = (n) => Math.round(n).toLocaleString("en-GB");
+document.getElementById("specials").innerHTML = SPECIALS.map(([c, n, w]) => `<tr><td>${esc(c)}</td><td><b>${esc(n)}</b></td><td>${esc(w)}</td></tr>`).join("");
+document.getElementById("bosses").innerHTML = BOSSES.map(([b, s, h, hp, g]) => `<tr><td><b>${esc(b)}</b></td><td>${esc(s)}</td><td>${esc(h)}</td><td class="n">${hp}</td><td class="n">${esc(g)}</td></tr>`).join("");
+const cls = (v, i) => v >= 80 ? "good" : v <= 20 ? (i === 0 ? "good" : "bad") : "warn";
+document.getElementById("balance").innerHTML = BAL.map(([l, vs], r) => `<tr><td>${esc(l)}</td>${vs.map((v) => `<td class="n ${r === 0 || r === 2 ? (v >= 80 ? "good" : "warn") : v <= 20 ? "good" : "warn"}">${v}%</td>`).join("")}</tr>`).join("");
+document.getElementById("affixes").innerHTML = AFFIXES.map(([a, w]) => `<tr><td><b>${esc(a)}</b></td><td>${esc(w)}</td></tr>`).join("");
+document.getElementById("years").innerHTML = D.B.map((r) => `<tr><td>${r.y}</td><td class="n">${r.best}</td><td class="n">+${r.nb.toFixed(1)}</td><td class="n">${r.win}%</td><td class="n">${fmt(r.walk / 1000)}k / ${fmt(r.raid / 1000)}k</td><td class="n">${fmt(r.wallet)}</td><td class="num" style="white-space:nowrap">${esc(r.gk)} · ${esc(r.gb)} · ${esc(r.gc)}</td></tr>`).join("");
+
+// Small line charts drawn to one scale. log: true uses a log10 y-axis.
+function lineChart(el, series, { max, log = false, ticks, fmtTick = fmt, bars = false } = {}) {
+  const W = 360, H = 200, L = 44, R = 10, T = 10, B = 26;
+  const ys = (v) => { const a = log ? Math.log10(Math.max(1, v)) : v, m = log ? Math.log10(max) : max; return T + (H - T - B) * (1 - a / m); };
+  const xs = (i) => L + (W - L - R) * (i / 9);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  for (const t of ticks) s += `<line x1="${L}" x2="${W - R}" y1="${ys(t)}" y2="${ys(t)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${ys(t) + 4}" text-anchor="end" font-size="10" fill="var(--fg-3)" font-family="var(--mono)">${fmtTick(t)}</text>`;
+  for (let i = 0; i < 10; i++) s += `<text x="${xs(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="var(--fg-3)" font-family="var(--mono)">${i + 1}</text>`;
+  if (bars) {
+    const bw = (W - L - R) / 10 / (series.length + 1);
+    series.forEach((se, k) => se.data.forEach((v, i) => { const x = xs(i) - (series.length * bw) / 2 + k * bw, y = ys(v); s += `<rect x="${x}" y="${y}" width="${bw - 1}" height="${H - B - y}" fill="${se.color}" rx="1.5"/>`; }));
+  } else for (const se of series) {
+    const pts = se.data.map((v, i) => `${xs(i)},${ys(v)}`).join(" ");
+    s += `<polyline points="${pts}" fill="none" stroke="${se.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = se.data.length - 1;
+    s += `<circle cx="${xs(last)}" cy="${ys(se.data[last])}" r="3.5" fill="${se.color}"/>`;
+  }
+  el.innerHTML = s + "</svg>";
+}
+lineChart(document.getElementById("c-best"), [
+  { color: "var(--red)", data: D.A.map((r) => r.best) }, { color: "var(--gold)", data: D.B.map((r) => r.best) }, { color: "var(--blue)", data: D.keen.map((r) => r.best) },
+], { max: 80, ticks: [0, 20, 40, 60, 80] });
+lineChart(document.getElementById("c-wallet"), [
+  { color: "var(--red)", data: D.A.map((r) => r.wallet) }, { color: "var(--gold)", data: D.B.map((r) => r.wallet) },
+], { max: 1e7, log: true, ticks: [1, 1e2, 1e4, 1e6], fmtTick: (t) => (t >= 1e6 ? "1M" : t >= 1e3 ? `${t / 1e3}k` : String(t)) });
+lineChart(document.getElementById("c-income"), [
+  { color: "var(--green)", data: D.B.map((r) => r.walk) }, { color: "var(--violet)", data: D.B.map((r) => r.raid) },
+], { max: 40000, ticks: [0, 10000, 20000, 30000, 40000], fmtTick: (t) => (t ? `${t / 1000}k` : "0"), bars: true });
+lineChart(document.getElementById("c-since"), [
+  { color: "var(--red)", data: D.A.map((r) => r.since) }, { color: "var(--gold)", data: D.B.map((r) => r.since) },
+], { max: 500, ticks: [0, 100, 200, 300, 400, 500] });
+</script>
