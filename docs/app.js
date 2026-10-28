@@ -585,7 +585,7 @@ function syncChip() {
   if (NATIVE && !S.native?.steps) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps not connected · connect</button>`;
   if (!m.steps_synced_at) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps aren't syncing · set up</button>`;
   if (NATIVE) return `<span class="chip green">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span><button class="chip cyan" data-act="native-sync">${ic("refresh")} Sync now</button>`;
-  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : m.steps_source === "android-app" ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
+  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<button class="chip cyan" data-act="log-steps">${ic("edit")} Type steps</button>` : m.steps_source === "android-app" ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
 }
 function dayTiles() {
   const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll;
@@ -859,7 +859,7 @@ function tabMe() {
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
       <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
-      <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
+      <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} ${m.platform === "ios" ? "Home Screen setup" : "Set up sync"}</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge blue">${ic("phone")}</span><h2 class="ol-sm">Scrolling</h2><span class="side chip">${S.D.today.scroll ?? "–"} min today</span></div>
@@ -928,47 +928,38 @@ function nativeSetup(kind) {
   return `<button class="btn blue block" data-act="native-scroll">${ic("phone")} Allow scroll tracking</button><p class="tiny faint" style="margin:6px 2px 0">Android opens <b>Usage access</b>: tap <b>Effort</b>, switch it on, then come back. It only counts minutes in short-video apps.</p>`;
 }
 
+// Which phone the setup guide is showing.
+const setupPlat = () => S.setupPlatform || me()?.platform || S.platform;
+// iPhone: no App Store app, so Effort lives on the Home Screen; steps and scrolling are typed in.
+function iphoneHome(kind) {
+  const steps = kind === "steps";
+  return `<p class="small" style="margin-top:0">There's no App Store app, so Effort runs from your Home Screen instead. It opens full screen like an app, stays signed in, and it's the only way an iPhone lets the 6:45pm ping through.</p>
+    ${isStandalone() ? `<div class="chip green" style="margin-bottom:10px">${ic("check")} Effort is on your Home Screen</div>` : `<ol class="steps-list">
+      <li>Open this page in <b>Safari</b>. Other browsers can't add it.</li>
+      <li>Tap <b>Share</b>: the square with an arrow at the bottom of the screen.</li>
+      <li>Scroll down, tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+      <li>Close Safari and open <b>Effort</b> from your Home Screen from now on.</li>
+    </ol>`}
+    <p class="small">${steps ? "Then each evening before 7pm, type in today's steps from the Health app." : "Then each evening, type in your short-video minutes from Screen Time."}</p>
+    ${S.D?.today ? `<button type="button" class="btn blue block" data-act="${steps ? "log-steps" : "log-scroll"}">${ic("edit")} ${steps ? "Type today's steps" : "Type today's minutes"}</button>` : ""}`;
+}
 function setupBody(kind) {
   if (NATIVE) return nativeSetup(kind);
-  const p = S.setupPlatform || me()?.platform || S.platform, t = S.token;
+  const p = setupPlat(), t = S.token;
   const toggle = `<div class="seg" style="margin-bottom:12px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Type it in"]].map(([v, l]) => `<button type="button" data-setup="${v}" data-kind="${kind}" aria-pressed="${v === p}">${l}</button>`).join("")}</div>`;
   const box = (url) => `<div class="copybox"><code>${esc(url)}</code><button class="btn xs" data-copy="${esc(url)}">${ic("copy")} Copy</button></div>`;
   let body;
-  if (kind === "steps") {
-    if (p === "ios") body = `<ol class="steps-list">
-        <li>Open <b>Shortcuts</b>, tap <b>+</b>, and name it <b>Effort Steps</b> (exactly that, so the app's Sync button can run it).</li>
-        <li>Add <b>Find Health Samples</b>: Type <b>Steps</b>, filter <b>Start Date is today</b>, <b>Group By: Day</b>.</li>
-        <li>Add <b>Calculate Statistics</b> → <b>Sum</b>.</li>
-        <li>Add <b>Get Contents of URL</b> and paste:${box(`${API}/log?t=${t}&steps=`)}then tap the end of it and insert the <b>Statistics</b> variable.</li>
-        <li>Tap ▶︎ to test. You should see "✅ … steps logged".</li>
-        <li>In the <b>Automation</b> tab: <b>+</b> → <b>Time of Day</b> → <b>18:50</b>, <b>Daily</b>, <b>Run Immediately</b> → <b>Effort Steps</b>. That's your steps in before the Taxman.</li>
-        <li>Make two more for <b>13:00</b> and <b>23:50</b>, so the squad table stays live and the whole day counts.</li>
-      </ol>`;
-    else if (p === "android") body = androidApp(t);
-    else body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
-  } else {
-    if (p === "ios") body = `<p class="small">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>
-      <ol class="steps-list">
-        <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>App</b>.</li>
-        <li>Choose the apps you scroll on. Tick <b>Is Opened</b> only. <b>Run Immediately</b>, <b>Notify When Run</b> off.</li>
-        <li><b>New Blank Automation</b> → <b>Get Contents of URL</b>, paste:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
-        <li>Make a second one the same way, ticking <b>Is Closed</b> and using:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
-      </ol>`;
-    else if (p === "android") body = `${androidApp(t)}<div class="divider"></div><p class="small">Or without the app, free with <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener"><b>MacroDroid</b></a>:</p>
-      <ol class="steps-list">
-        <li>New macro → Trigger <b>Applications → Application Launched/Closed</b> → <b>Launched</b> → pick TikTok, Instagram, YouTube.</li>
-        <li>Action <b>Web Interactions → HTTP Request</b>, GET:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
-        <li>A second macro with <b>Application Closed</b> and:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
-        <li>Allow the permissions it asks for and turn off battery optimisation for MacroDroid.</li>
-      </ol>`;
-    else body = `<p class="small">Each evening, check Screen Time (iPhone) or Digital Wellbeing (Android) and type your short-video minutes into <b>Me → Scrolling → Type it in</b>.</p>`;
-  }
+  if (p === "ios") body = iphoneHome(kind);
+  else if (p === "android") body = androidApp(t);
+  else if (kind === "steps") body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
+  else body = `<p class="small">Each evening, check Screen Time (iPhone) or Digital Wellbeing (Android) and type your short-video minutes into <b>Me → Scrolling → Type it in</b>.</p>`;
   return `${toggle}<div class="guide">${body}</div>`;
 }
 function setupSheet(kind) {
   S.sheetKind = kind;
-  openSheet(`${sheetHead(kind === "steps" ? "Sync your steps" : "Track your scrolling")}${setupBody(kind)}
-    ${NATIVE ? "" : `<button class="btn green block" style="margin-top:12px" data-act="check-sync" data-kind="${kind}">${ic("refresh")} Check it worked</button>
+  const title = setupPlat() === "ios" ? "Put Effort on your Home Screen" : setupPlat() === "android" ? "Get the Effort app" : kind === "steps" ? "Your steps" : "Your scrolling";
+  openSheet(`${sheetHead(title)}${setupBody(kind)}
+    ${NATIVE || setupPlat() !== "android" ? "" : `<button class="btn green block" style="margin-top:12px" data-act="check-sync" data-kind="${kind}">${ic("refresh")} Check it worked</button>
     <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0 0"></p>`}`);
 }
 function logSheet(kind) {
@@ -1301,11 +1292,11 @@ function viewSetup() {
       <p class="muted">Two taps. Your steps and scrolling count by themselves from then on.</p>
       <section class="panel"><span class="field-label">Steps</span>${nativeSetup("steps")}<span class="field-label">Scrolling (optional)</span>${nativeSetup("scroll")}</section>
       <div class="btn-row" style="margin-top:12px"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
-    : step === "steps" ? `<h1 class="ol disp ob-title">Sync your steps</h1>
-      <p class="muted">Set it up once and your steps flow in on their own. About three minutes.</p>
+    : step === "steps" ? `<h1 class="ol disp ob-title">${setupPlat() === "ios" ? "Put Effort on your Home Screen" : setupPlat() === "android" ? "Get the Effort app" : "Your steps"}</h1>
+      <p class="muted">${setupPlat() === "ios" ? "Four taps, once. Then it works like an app." : setupPlat() === "android" ? "One download. Your steps and scrolling count by themselves from then on." : "Type them in each day."}</p>
       ${setupBody("steps")}
-      <button class="btn green block" style="margin-top:14px" data-act="check-sync" data-kind="steps">${ic("refresh")} Check it worked</button>
-      <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>
+      ${setupPlat() === "android" ? `<button class="btn green block" style="margin-top:14px" data-act="check-sync" data-kind="steps">${ic("refresh")} Check it worked</button>
+      <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss 7pm</h1>
       <p class="muted">The Taxman is only around for five minutes a day, and the raid for fifteen on Sunday. We'll ping you at 6:45pm.</p>
