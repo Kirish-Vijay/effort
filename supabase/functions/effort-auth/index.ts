@@ -1,6 +1,6 @@
 // Effort sign-in: get back into your account on a new phone (or after being signed out). Three ways:
 //   password  squad code → tap your name → password (set under Me)
-//   email     a 6-digit code from Supabase Auth proves the email; the email must already be on the account
+//   email     an 8-digit code from Supabase Auth proves the email; the email must already be on the account
 //   passkey   fingerprint / Face ID (WebAuthn), synced to new phones by Google or Apple
 // Routes:
 //   GET  /people?code=ABC123                       the squad's players (name, look, whether they've set a password)

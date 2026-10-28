@@ -344,8 +344,8 @@ function viewMain() {
   if (!tabs[S.tab]) S.tab = "today";
   $("#app").innerHTML = `
     <header class="header">
-      <button class="avatar" data-tab="me" aria-label="Your profile">${face(me().id)}<span class="lvl" title="Level">${p.lvl}</span></button>
-      <div class="who"><b>${esc(me().name)}</b><div class="cls">${esc(cls.name)} · <span class="faint">${fmt(p.into)}/${fmt(p.need)} XP</span></div><div class="xp"><i style="width:${p.pct * 100}%"></i></div></div>
+      <button class="avatar" data-tab="me" aria-label="Your profile">${face(me().id)}</button>
+      <div class="who"><div class="nm"><b>${esc(me().name)}</b><span class="lvl" title="Level">Lv ${p.lvl}</span></div><div class="cls">${esc(cls.name)} · <span class="faint">${fmt(p.into)}/${fmt(p.need)} XP</span></div><div class="xp"><i style="width:${p.pct * 100}%"></i></div></div>
       ${walletHtml()}
     </header>
     <div class="stack">${tabs[S.tab]()}</div>
@@ -371,14 +371,14 @@ function weekPanel() {
   const today = (id) => squad().members.find((m) => m.id === id)?.todaySteps ?? 0;
   return `<section class="panel" id="week-panel">
       <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">This week</h2><span class="side chip">Avg ${fmt(T.avg)}</span></div>
-      <div class="wtable">${T.rows.map((r, i) => `<div class="wrow ${r.you ? "me" : ""} ${r.title || ""}">
+      <div class="wtable">${T.rows.map((r, i) => `<button class="wrow ${r.you ? "me" : ""} ${r.title || ""}" data-profile="${r.id}" aria-label="${esc(r.you ? "Your" : `${r.name}'s`)} profile">
           <span class="wn">${r.title === "top" ? ic("crown") : i + 1}</span>
           <span class="grow"><b>${esc(r.you ? "You" : r.name)}</b>${r.title === "top" ? '<span class="chip gold">Top walker</span>' : r.title === "last" ? '<span class="chip red">Dead weight</span>' : r.fresh ? '<span class="chip">New</span>' : ""}
             <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i>
             <small class="pw ${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} raid power</small></span>
           <span class="ws"><span><b class="num">${fmt(today(r.id))}</b><small>today</small></span><span><b class="num">${fmt(r.weekSteps)}</b><small>week</small></span></span>
-        </div>`).join("")}</div>
-      <p class="tiny faint" style="margin:10px 0 0">Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
+        </button>`).join("")}</div>
+      <p class="tiny faint" style="margin:10px 0 0">Tap anyone to see their walker and stats. Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
     </section>`;
 }
 function noSquadPanel() {
@@ -462,8 +462,8 @@ function tabToday() {
 }
 
 // ---------- Raid ----------
-function statRows(st) {
-  const { g } = G.loadout(st, me().gear, S.D.inv);
+function statRows(st, gear = me().gear, inv = S.D.inv) {
+  const { g } = G.loadout(st, gear, inv);
   const max = Math.max(20, ...Object.values(g));
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
@@ -653,7 +653,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge blue">${ic("squad")}</span><h2 class="ol-sm">${sq ? esc(sq.name) : "Squad"}</h2>${sq ? `<span class="side chip">${sq.code}</span>` : ""}</div>
-      ${sq ? `<div class="mates">${sq.members.map((x) => `<div class="mate">${face(x.id, 40)}<div class="grow"><b>${esc(x.id === m.id ? "You" : x.name)}</b><small>Lv ${x.level} · ${x.synced ? `synced ${ago(x.synced)}` : "steps not syncing"}</small></div><span class="num small">${fmt(x.todaySteps)}<small class="faint"> today</small></span></div>`).join("")}</div>
+      ${sq ? `<div class="mates">${sq.members.map((x) => `<button class="mate pick" data-profile="${x.id}">${face(x.id, 40)}<div class="grow"><b>${esc(x.id === m.id ? "You" : x.name)}</b><small>Lv ${x.level} · ${x.synced ? `synced ${ago(x.synced)}` : "steps not syncing"}</small></div><span class="num small">${fmt(x.todaySteps)}<small class="faint"> today</small></span>${ic("arrowRight")}</button>`).join("")}</div>
         <div class="btn-row" style="margin-top:12px"><button class="btn sm green" data-act="invite">${ic("share")} Invite</button><button class="btn sm" data-act="squad-sheet">Switch</button></div>
         <button class="btn xs red" style="margin-top:10px" data-act="leave">Leave squad</button>`
         : `<p class="small muted" style="margin:0 0 10px">You're not in a squad.</p><button class="btn green block" data-act="squad-sheet">${ic("squad")} Make or join a squad</button>`}
@@ -760,6 +760,34 @@ function logSheet(kind) {
     </form>
     ${kind === "steps" ? `<p class="tiny faint" style="margin:10px 0 0">The number from your phone's Health or Fit app. A synced total for the same day replaces it.</p>` : ""}`);
 }
+// Anyone in the squad: their walker, class, raid spot, steps and stats with gear (all from the squad data /game sends).
+function profileSheet(id) {
+  const x = squad()?.members.find((m) => m.id === id);
+  if (!x) return;
+  const you = id === me().id, st = G.stats(x.character || {}), cls = G.classOf(st), pos = G.posOf(you ? me().pos : x.pos);
+  const row = weekRows().rows.find((r) => r.id === id), gear = you ? me().gear : x.gear || {};
+  const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
+  openSheet(`${sheetHead(esc(you ? "You" : x.name))}
+    <div class="profile">
+      <div class="walker-big has-fallback"><span class="fb">${Walker.svg(ANS[id], { mood: "fresh", label: `${x.name}'s walker` })}</span>${portraitImg("walker", id, { w: 340, h: 400 })}</div>
+      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span><span class="chip">Level ${x.level}</span><span class="chip">${pos.e} ${pos.label} in raids</span></div>
+      <p class="tiny faint" style="text-align:center;margin:8px 0 12px">${esc(cls.blurb)}</p>
+    </div>
+    <div class="tiles">
+      <div class="tile green"><div class="k">${ic("steps")} Today</div><div class="v num">${fmt(x.todaySteps)}<small>steps</small></div></div>
+      <div class="tile"><div class="k">${ic("calendar")} This week</div><div class="v num">${fmt(x.weekSteps)}<small>steps</small></div></div>
+      <div class="tile gold"><div class="k">${ic("bolt")} Raid power</div><div class="v">×${(row?.stride ?? 1).toFixed(2)}<small>${row?.title === "top" ? "top walker" : row?.title === "last" ? "dead weight" : "this week"}</small></div></div>
+      <div class="tile cyan"><div class="k">${ic("refresh")} Steps synced</div><div class="v" style="font-size:16px">${x.synced ? ago(x.synced) : "Never"}</div></div>
+    </div>
+    <span class="field-label" style="margin-top:14px">Stats</span>
+    ${statRows(st, gear, you ? S.D.inv : {})}
+    <span class="field-label" style="margin-top:14px">Gear</span>
+    <div class="loadout">${G.SLOTS.map((sl) => {
+      const it = G.itemById(gear[sl]);
+      return it ? `<div class="slot full" style="--rc:${G.tierOf(it.tier).color};cursor:default"><div class="art">${itemArt(it)}</div><span class="slab">${esc(it.name)}</span></div>`
+        : `<div class="slot" style="cursor:default"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[sl])}<span>${slotName[sl]}</span></div></div>`;
+    }).join("")}</div>`);
+}
 function squadSheet() {
   const sq = squad();
   openSheet(`${sheetHead(sq ? "Switch squad" : "Your squad")}
@@ -805,11 +833,11 @@ function viewSignin() {
       <p class="tiny faint" style="margin:8px 0 0">It's on Me → your squad, on any squad-mate's phone.</p></form>
     <form class="panel" data-form="signin-link"><span class="field-label">Or paste your restore link</span><div class="row"><input type="text" name="link" required placeholder="https://…?me=…" class="grow" autocomplete="off"><button class="btn sm">Go</button></div></form>`;
   else if (st.step === "email") body = `<h1 class="ol disp ob-title">Email me a code</h1>
-    <p class="muted">Use the email you added under Me. We'll send a 6-digit code.</p>
+    <p class="muted">Use the email you added under Me. We'll send you a code.</p>
     <form class="panel" data-form="email-send" data-mode="signin"><input type="email" name="email" required autocomplete="email" placeholder="you@example.com" value="${esc(st.email || "")}"><button class="btn gold block" style="margin-top:12px">${ic("mail")} Send code</button></form>`;
   else if (st.step === "emailcode") body = `<h1 class="ol disp ob-title">Check your email</h1>
     <p class="muted">Type the code we sent to <b>${esc(st.email)}</b>. It can take a minute, and might be in spam.</p>
-    <form class="panel" data-form="email-verify" data-mode="signin" data-email="${esc(st.email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="123456" class="code"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`;
+    <form class="panel" data-form="email-verify" data-mode="signin" data-email="${esc(st.email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="12345678" class="code"><button class="btn gold block" style="margin-top:12px">Sign in</button></form>`;
   else if (st.step === "who") body = `<h1 class="ol disp ob-title">Which one's you?</h1><p class="muted">${esc(st.squad.name)}</p>
     <div class="mates">${st.people.map((x) => `<button class="mate pick" data-signin="${x.id}"><div class="face has-fallback" style="width:40px;height:40px"><span class="fb">${head2d(answersOf(x))}</span></div><div class="grow"><b>${esc(x.name)}</b><small>${x.has_password ? "Password set" : "No password yet"}</small></div>${ic("arrowRight")}</button>`).join("")}</div>`;
   else {
@@ -883,9 +911,9 @@ async function passkeySignin() {
   } catch (e) { passkeyFailed(e); }
 }
 
-// Email: Supabase Auth sends a 6-digit code; entering it proves the email, and the server takes it from there.
+// Email: Supabase Auth sends a code (8 digits); entering it proves the email, and the server takes it from there.
 async function sendEmailCode(email, forSignin) {
-  // The email should carry a 6-digit code; if it carries a link instead, the link comes back here (see boot).
+  // The email should carry a code; if it carries a link instead, the link comes back here (see boot).
   // Adding an email, the link carries a one-use ticket too, because it often opens in Chrome rather than the app.
   const back = forSignin ? APP_URL : `${APP_URL}?eticket=${(await callAuth("email_ticket", { token: S.token, email })).ticket}`;
   const { error } = await realtime().auth.signInWithOtp({ email, options: { shouldCreateUser: !forSignin, emailRedirectTo: back } });
@@ -898,10 +926,10 @@ async function checkEmailCode(email, code) {
 }
 function emailSheet(email) {
   openSheet(`${sheetHead(S.auth?.email ? "Change your email" : "Add your email")}
-    ${!email ? `<p class="small muted" style="margin:-4px 0 12px">We'll send a 6-digit code to check it's yours. If you ever forget your password or lose your phone, a code to this email gets you back in.</p>
+    ${!email ? `<p class="small muted" style="margin:-4px 0 12px">We'll send a code to check it's yours. If you ever forget your password or lose your phone, a code to this email gets you back in.</p>
       <form data-form="email-send" data-mode="link"><input type="email" name="email" required autocomplete="email" placeholder="you@example.com"><button class="btn green block" style="margin-top:12px">${ic("mail")} Send code</button></form>`
     : `<p class="small muted" style="margin:-4px 0 12px">Type the code we sent to <b>${esc(email)}</b>, or tap the link in it. It can take a minute, and might be in spam.</p>
-      <form data-form="email-verify" data-mode="link" data-email="${esc(email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="123456" class="code"><button class="btn green block" style="margin-top:12px">Confirm</button></form>
+      <form data-form="email-verify" data-mode="link" data-email="${esc(email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="12345678" class="code"><button class="btn green block" style="margin-top:12px">Confirm</button></form>
       <button class="btn xs" style="margin-top:10px" data-act="email-again">Use a different email</button>`}`);
   setTimeout(() => $("#sheet input")?.focus(), 50);
 }
@@ -1812,6 +1840,7 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (d.shoptab) { S.shopTab = d.shoptab; render(); return; }
+  if (d.profile) { profileSheet(d.profile); FX.play("tap"); return; }
   if (d.item) { itemSheet(d.item, d.deal === "1"); FX.play("tap"); return; }
   if (d.buy) { const item = G.itemById(d.buy); return shopAction("buy", { item: d.buy, deal: d.deal === "1" }, () => { FX.play("buy"); itemSheet(item.id, false); toast(`${item.name} equipped`); }); }
   if (d.upgrade) return shopAction("upgrade", { item: d.upgrade }, () => { FX.play("levelup"); itemSheet(d.upgrade, false); });
@@ -1924,7 +1953,7 @@ setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
   // Back from an email link rather than a code: #access_token=… proves the email, same as a code does.
   const hash = new URLSearchParams(location.hash.slice(1)), emailAccess = hash.get("access_token"), ticket = params.get("eticket");
   if (location.hash || ticket) { params.delete("eticket"); history.replaceState(null, "", location.pathname + (String(params) ? `?${params}` : "")); }
-  if (hash.get("error_description")) toast(`That email link didn't work (${hash.get("error_description")}). Use the 6-digit code instead`);
+  if (hash.get("error_description")) toast(`That email link didn't work (${hash.get("error_description")}). Use the code in the email instead`);
   const emailPage = (title, sub, extra = "") => { $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><h2 class="ol-sm disp" style="margin:0">${title}</h2><p class="muted" style="margin:0;max-width:300px">${sub}</p>${extra}</div>`; };
   if (emailAccess && ticket) {
     // Adding an email: the ticket says whose account, so this works in any browser.

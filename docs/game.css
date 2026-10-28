@@ -69,8 +69,10 @@ svg.ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.15em
 .avatar { position: relative; width: 52px; height: 52px; flex: none; }
 .avatar .face { width: 52px; height: 52px; border-radius: 16px; overflow: hidden; background: radial-gradient(circle at 50% 30%, #3a4f9a, #1d2a5e); border: 2px solid var(--ink); box-shadow: inset 0 0 0 2px rgba(255,255,255,.14), 0 3px 0 var(--ink); display: grid; place-items: center; }
 .avatar .face svg { width: 120%; height: 120%; margin-top: 16%; }
-.avatar .lvl { position: absolute; right: -6px; bottom: -6px; min-width: 24px; height: 24px; padding: 0 5px; border-radius: 8px; display: grid; place-items: center;
-  font: 400 13px/1 var(--display); color: #fff; background: linear-gradient(180deg, var(--blue-hi), var(--blue) 55%, var(--blue-lo)); border: 2px solid var(--ink); }
+.who .nm { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.who .nm b { min-width: 0; }
+.who .lvl { flex: none; height: 20px; padding: 0 6px; border-radius: 7px; display: grid; place-items: center;
+  font: 400 12px/1 var(--display); color: #fff; background: linear-gradient(180deg, var(--blue-hi), var(--blue) 55%, var(--blue-lo)); border: 2px solid var(--ink); }
 .who { min-width: 0; flex: 1; }
 .who b { display: block; font: 400 17px/1.1 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .who .cls { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 4px; margin-top: 1px; }
@@ -603,3 +605,9 @@ input[type=password]:focus { border-color: var(--cyan); }
 .meth small { display: block; font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
 input[type=email] { width: 100%; border-radius: 12px; border: 2px solid var(--ink); background: var(--inset); box-shadow: inset 0 2px 4px rgba(0,0,0,.45); color: var(--text); padding: 10px 12px; font: 600 16px/1.2 var(--ui); outline: none; }
 input[type=email]:focus { border-color: var(--cyan); }
+
+/* Squad-mate profiles: the weekly table and squad list open them */
+button.wrow { width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+button.wrow:active, button.mate.pick:active { transform: translateY(1px); }
+button.mate.pick > svg:last-child { flex: none; opacity: .5; }
+.profile .walker-big { height: 220px; width: 190px; border-radius: 18px; overflow: hidden; background: radial-gradient(circle at 50% 35%, #3a4f9a, #152049); border: 2px solid var(--ink); box-shadow: inset 0 0 0 2px rgba(255,255,255,.1), 0 4px 0 var(--ink); }
