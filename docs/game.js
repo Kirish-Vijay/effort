@@ -407,9 +407,9 @@ function weekTable(members) {
 // The ladder: beat a boss and next Sunday you face the next one. After the last, it loops with
 // everything twice as tough (and twice as rich) each lap, so it never stops getting harder. hp/dmg/reward are multipliers; speed scales the gap between attacks.
 const BOSSES = [
-  { id: "notification", name: "Brett", title: "A slime. Doesn't go away", hp: 1, dmg: 1, speed: 1, reward: 1,
+  { id: "notification", name: "Brett", title: "A big fat round slime monster. Defeat it.", hp: 1, dmg: 1, speed: 1, reward: 1,
     attacks: { swipe: "Slap", stomp: "Belly Flop", scream: "Screech", feast: "Gorge" } },
-  { id: "autoplay", name: "Rory", title: "All teeth, no manners", hp: 1.12, dmg: 1.05, speed: 0.97, reward: 1.4,
+  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 1.12, dmg: 1.05, speed: 0.97, reward: 1.4,
     attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Spore Cloud", feast: "Gorge" } },
   { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.25, dmg: 1.1, speed: 0.94, reward: 1.9,
     attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain" } },

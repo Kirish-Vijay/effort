@@ -242,7 +242,7 @@ function tabRaid() {
   return `
     <section class="panel hero">
       <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #5a4bb0 0%, #24306e 45%, #121a44 100%)"></div>
-        <div class="label"><span class="chip red">${ic("raid")} Sunday · Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}</span><h3 class="ol">${esc(boss.name)}</h3><p>${esc(boss.title)}.</p></div>
+        <div class="label"><span class="chip red">${ic("raid")} Sunday · Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}</span><h3 class="ol">${esc(boss.name)}</h3><p>${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p></div>
         <div class="portrait">${portraitImg("boss", boss.id, { w: 300, h: 320 })}</div></div>
       <div class="body">
         <div class="tiles">
