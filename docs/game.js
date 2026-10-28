@@ -1096,7 +1096,7 @@ function endRaid(R, how) {
 
 // ---------- the calendar ----------
 // Everything new switches itself on by date (UK days), so the game keeps changing without anyone deploying.
-const FEATURES = { wardrobe: "2026-11-16", hunt: "2026-11-18", den: "2027-02-01" };
+const FEATURES = { wardrobe: "2026-11-16", hunt: "2026-11-18", events: "2026-12-01", den: "2027-02-01" };
 const featureOn = (f, day) => !!FEATURES[f] && day >= FEATURES[f];
 
 // Season twists. Numbers are mods the fight reads (see modsFor). Later seasons pair two of them.
@@ -1285,7 +1285,7 @@ const EVENTS = [
   { id: "haunted", name: "The Haunted Walk", from: "10-24", to: "11-01" },
   { id: "krampus", name: "Krampus Night", from: "12-10", to: "12-31" },
 ];
-const eventOn = (day) => { const md = String(day).slice(5); return EVENTS.find((e) => md >= e.from && md <= e.to) || null; };
+const eventOn = (day) => { if (String(day) < FEATURES.events) return null; const md = String(day).slice(5); return EVENTS.find((e) => md >= e.from && md <= e.to) || null; };
 const EVENT_TIER = 100000;
 const eventTier = (eventId, base) => EVENT_TIER + EVENTS.findIndex((e) => e.id === eventId) * 1000 + Math.max(1, Math.min(999, base || 1));
 const isEventTier = (t) => Number(t) >= EVENT_TIER;
