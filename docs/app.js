@@ -11,7 +11,7 @@ const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push"
 const AUTH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-auth";
 // On Android in a browser: the Effort app does steps, scrolling and the evening pings with a tap each.
 function androidApp(t) {
-  return `<p class="small" style="margin-top:0">The Effort app does it all: steps and scrolling with one tap each, and a ping when the Taxman's in.</p>
+  return `<p class="small" style="margin-top:0">The Effort app syncs your steps and scrolling, and pings you when the Taxman's in.</p>
     <a class="btn gold block" href="${STEPS_APK}">${ic("phone")} 1. Get the Effort app</a>
     <p class="tiny faint" style="margin:6px 2px 12px">Free, under 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
     <a class="btn green block" href="${stepsAppLink(t)}">${ic("arrowRight")} 2. Open Effort in the app</a>
@@ -215,6 +215,7 @@ async function load() {
   ANS[D.me.id] = answersOf(D.me);
   nat("setToken", S.token);
   if (D.fight?.finished_at) nat("taxDone", D.today.day);
+  if (D.squad) setTimeout(chatPrefetch, 800);
   for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
   return D;
 }
@@ -357,7 +358,7 @@ function pushBlock() {
   switch (S.push) {
     case "on": return `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("bell")} Pings on</span><span class="row" style="gap:6px"><button class="btn xs" data-act="push-test">Send a test</button><button class="btn xs" data-act="push-off">Turn off</button></span></div>`;
     case "install": return `<div class="guide small">On iPhone, notifications only work from the Home Screen app: tap <b>Share</b> → <b>Add to Home Screen</b>, open Effort from there, then turn them on.</div>`;
-    case "denied": return `<div class="guide small">Notifications are blocked for Effort. Allow them in your phone's settings (or the browser's site settings), then come back here.</div>`;
+    case "denied": return `<div class="guide small">Notifications are blocked. Allow them in your phone's settings, then come back.</div>`;
     case "unsupported": return `<p class="small muted" style="margin:0">This browser can't do notifications. Use the calendar below.</p>`;
     default: return `<button class="btn gold block" data-act="push-on">${ic("bell")} Ping me when the Taxman's in</button>`;
   }
@@ -478,14 +479,15 @@ function msgHtml(m, prev) {
         ${grouped ? "" : `<div class="chead"><b>${esc(nameOf(m.by))}</b><span>${dayKey(m.at) === dayKey(Date.now()) ? "Today" : ""} ${timeOf(m.at)}</span></div>`}
         <div class="ctext">${m.deleted ? `<i class="faint">Message deleted</i>` : richText(m.text ?? "")}${m.edited && !m.deleted ? `<span class="cedited">(edited)</span>` : ""}</div>
       </div>
-      ${m.deleted ? "" : `<div class="cacts"><button data-cact="reply" data-id="${m.id}" aria-label="Reply">${ic("back")}</button>${m.by === me().id ? `<button data-cact="edit" data-id="${m.id}" aria-label="Edit">${ic("edit")}</button><button data-cact="del" data-id="${m.id}" aria-label="Delete">${ic("close")}</button>` : ""}</div>`}
+      ${m.deleted ? "" : `<div class="cacts"><button data-cact="reply" data-id="${m.id}" aria-label="Reply">${ic("back")}</button>${m.by === me().id ? `<button data-cact="edit" data-id="${m.id}" aria-label="Edit">${ic("edit")}</button><button data-cact="del" data-id="${m.id}" aria-label="Delete">${ic("trash")}</button>` : ""}</div>`}
     </div>`;
 }
 function chatPaint({ keep = false, toBottom = false } = {}) {
   const list = $("#clist"); if (!list) return;
   const h0 = list.scrollHeight, t0 = list.scrollTop;
   const items = CH.order.map((id) => CH.msgs.get(id));
-  list.innerHTML = `${CH.more ? `<div class="cmore">${CH.loadingOld ? "Loading…" : "Scroll up for older messages"}</div>` : `<div class="cstart"><b>This is the start of ${esc(squad()?.name || "your squad")}'s chat.</b><span>${ic("lock")} Messages are encrypted before they're stored, and only your squad can read them.</span></div>`}
+  if (!CH.loaded) { list.innerHTML = `<div class="cmore">Loading messages…</div>`; return; }
+  list.innerHTML = `${CH.more ? `<div class="cmore">${CH.loadingOld ? "Loading…" : "Scroll up for older messages"}</div>` : `<div class="cstart"><b>This is the start of ${esc(squad()?.name || "your squad")}'s chat.</b><span>${ic("lock")} Encrypted. Only your squad can read these.</span></div>`}
     ${items.map((m, i) => msgHtml(m, items[i - 1])).join("")}`;
   for (const img of list.querySelectorAll("img[data-portrait]")) void img;
   hydratePortraits();
@@ -493,12 +495,32 @@ function chatPaint({ keep = false, toBottom = false } = {}) {
   else if (keep) list.scrollTop = t0 + (list.scrollHeight - h0);
   $("#cjump").hidden = CH.live && list.scrollHeight - list.scrollTop - list.clientHeight < 200;
 }
-function chatAdd(msgs, { replace = false } = {}) {
+function chatAdd(msgs, { replace = false, read = true } = {}) {
   if (replace) { CH.msgs.clear(); CH.order = []; }
   for (const m of msgs) { if (!CH.msgs.has(m.id)) CH.order.push(m.id); CH.msgs.set(m.id, m); }
   CH.order.sort((a, b) => a - b);
+  if (read) chatMarkRead();
+}
+function chatMarkRead() {
   const newest = CH.order[CH.order.length - 1];
   if (CH.live && newest && newest > chatRead()) { store.set("chatRead", newest); if (S.D.chat) S.D.chat.latest = Math.max(S.D.chat.latest, newest); }
+  if (S.view === "chat" && !chatUnread()) $("#app > .dock [data-tab=chat] .ping")?.remove();
+}
+// The squad's latest messages are fetched in the background once the game's loaded, and kept between visits,
+// so the chat opens straight away and only asks for what's new. They live in memory only, never on the phone.
+function chatForSquad() {
+  const code = squad()?.code || null;
+  if (CH.code !== code) { CH.code = code; CH.msgs.clear(); CH.order = []; CH.loaded = false; CH.more = true; CH.live = true; }
+}
+async function chatPrefetch() {
+  chatForSquad();
+  if (!CH.code || CH.loaded || CH.prefetching) return;
+  CH.prefetching = true;
+  try {
+    const r = await call("chat_list", { token: S.token });
+    if (!CH.loaded) { CH.more = r.more; CH.live = true; chatAdd(r.messages, { replace: true, read: false }); CH.loaded = true; }
+  } catch { /* the chat loads when it's opened instead */ }
+  CH.prefetching = false;
 }
 const nearBottom = () => { const l = $("#clist"); return !l || l.scrollHeight - l.scrollTop - l.clientHeight < 120; };
 async function chatNewer() {
@@ -516,7 +538,7 @@ async function chatNewer() {
 async function chatLoad() {
   try {
     const r = await call("chat_list", { token: S.token });
-    CH.more = r.more; CH.live = true;
+    CH.more = r.more; CH.live = true; CH.loaded = true;
     chatAdd(r.messages, { replace: true });
     chatPaint({ toBottom: true });
   } catch (e) { toast(e.message); }
@@ -666,7 +688,9 @@ function viewChat() {
     for (const x of list.querySelectorAll(".cmsg.sel")) if (x !== m) x.classList.remove("sel");
     if (m && !e.target.closest("button, a")) m.classList.toggle("sel");
   });
-  chatLoad();
+  chatForSquad();
+  if (CH.loaded && CH.live) { chatPaint({ toBottom: true }); chatMarkRead(); chatNewer(); }
+  else { chatPaint(); chatLoad(); }
 }
 function openChat() {
   if (!squad()) return toast("Join a squad to chat");
@@ -785,7 +809,7 @@ function tabJourney() {
       <p class="small muted" style="margin:0">${esc(C.blurb)}</p>
       <div class="chips" style="margin-top:8px"><span class="chip">${ic("flag")} ${esc(Z.route)}</span>${affixLine(Z)}</div>
     </section>`;
-  if (Z.upcoming) return `${updateBanner()}${hero}<section class="panel">${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">On ${longDate(Z.start)} your squad sets off from ${esc(C.landmarks[0].name)}. A new chapter of the story opens each week as you reach each landmark. Every boss fights in fog this season, and three bounties land every Monday.</p></section>`;
+  if (Z.upcoming) return `${updateBanner()}${hero}<section class="panel">${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">Starts ${longDate(Z.start)} from ${esc(C.landmarks[0].name)}. A chapter a week and three bounties every Monday.${G.affixInfo(Z.affix) ? ` This season's twist: ${esc(G.affixInfo(Z.affix).name)}.` : ""}</p></section>`;
   const firstLocked = C.chapters.findIndex((_, i) => !Z.chapters.includes(i + 1));
   const hidden = firstLocked < 0 ? 0 : C.chapters.length - firstLocked - 1;
   const chapters = C.chapters.slice(0, firstLocked < 0 ? undefined : firstLocked + 1).map((ch, i) => {
@@ -811,17 +835,17 @@ function tabJourney() {
     <section class="panel">${sq ? journeyMap(Z, C) : `${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">Join a squad to walk the route together.</p>`}</section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("receipt")}</span><h2 class="ol-sm">The story</h2><span class="side chip">${Z.chapters.length} of 13 open</span></div>
-      <p class="small muted" style="margin:-4px 0 10px">One chapter a week, once the squad reaches its landmark. ${G.RULES.chapterReward} Efforts for reading each one.</p>
+      <p class="small muted" style="margin:-4px 0 10px">One a week, once you reach its landmark. ${G.RULES.chapterReward} Efforts each.</p>
       <div class="chaps">${chapters}${hidden ? `<div class="chap locked more"><span class="n">${ic("lock")}</span><span class="grow"><b>${hidden} more to come</b><small>${esc(C.landmarks.slice(-hidden).map((l) => l.name).join(", "))}</small></span></div>` : ""}</div>
     </section>
     ${sq ? `<section class="panel">
       <div class="ptitle"><span class="ic-badge red">${ic("target")}</span><h2 class="ol-sm">This week's bounties</h2><span class="side chip">New on Monday</span></div>
-      <p class="small muted" style="margin:-4px 0 10px">Squad goals. When one's done, everyone claims ${G.RULES.bountyReward} Efforts.</p>
+      <p class="small muted" style="margin:-4px 0 10px">Squad goals. ${G.RULES.bountyReward} Efforts each when done.</p>
       <div class="bounties">${bounties.map(bounty).join("")}</div>
     </section>` : ""}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge gold">${ic("trophy")}</span><h2 class="ol-sm">Season track</h2><span class="side chip">Tier ${Z.track} of ${G.RULES.trackTiers}</span></div>
-      <p class="small muted" style="margin:-4px 0 10px">A tier for every ${fmt(G.RULES.trackSteps)} of your own steps this season. Every fifth tier pays more and gives you a title.</p>
+      <p class="small muted" style="margin:-4px 0 10px">A tier every ${fmt(G.RULES.trackSteps)} steps. Every fifth pays more and gives a title.</p>
       <div class="track">${Array.from({ length: G.RULES.trackTiers }, (_, j) => { const k = j + 1, r = G.trackReward(k); return `<span class="tt ${k <= Z.track ? (got.has(`${Z.id}:tr:${k}`) ? "got" : "ready") : ""} ${r.title ? "big" : ""}" title="Tier ${k}: ${r.efforts} Efforts${r.title ? `, ${r.title}` : ""}">${r.title ? ic("crown") : k}</span>`; }).join("")}</div>
       ${Z.track < G.RULES.trackTiers ? `<div class="bar" style="margin-top:10px"><i style="width:${(into / G.RULES.trackSteps) * 100}%"></i></div><p class="tiny muted" style="margin:6px 0 0">${fmt(G.RULES.trackSteps - into)} steps to tier ${nextTier}${G.trackReward(nextTier).title ? ` and the title ${G.trackReward(nextTier).title}` : ""}. ${fmt(Z.mySteps)} steps this season.</p>` : `<p class="small" style="margin:8px 0 0">Every tier done. End to Ender.</p>`}
       ${titles.length ? `<div class="chips" style="margin-top:8px">${titles.map((t) => `<span class="chip gold">${ic("crown")} ${esc(t)}</span>`).join("")}</div>` : ""}
@@ -835,7 +859,7 @@ function tabJourney() {
 }
 function setNote() {
   const Z = season(), set = Z && I.SETS[Z.set];
-  return set ? `<p class="small muted" style="margin:0 0 10px">Any class can wear it. ${esc(set.what)}. On sale until ${longDate(Z.end)}, then it's gone.</p>` : "";
+  return set ? `<p class="small muted" style="margin:0 0 10px">Any class. ${esc(set.what)}. On sale until ${longDate(Z.end)}.</p>` : "";
 }
 function chapterSheet(k) {
   const Z = season(), C = seasonContent(); if (!Z || !C?.chapters[k - 1]) return;
@@ -879,7 +903,7 @@ function denPanel() {
   if (!squad()) return "";
   const F = S.D.features || {}, D = S.D.squad.den;
   if (!F.den || !D) return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">Opens ${G.FEATURES.den ? new Date(G.FEATURES.den + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : "soon"}</span></div>
-      <p class="small muted" style="margin:0">A base your squad builds together. Ten rooms, ten levels each, every one a small bonus for the whole squad: more loot, harder hits, earlier warnings, cheaper upgrades.</p></section>`;
+      <p class="small muted" style="margin:0">Your squad's base: ten rooms, ten levels each. Every level is a small bonus for everyone.</p></section>`;
   const rows = G.DEN_ROOMS.map((r) => {
     const L = D.levels[r.id] || 0, nx = G.denNext(D.totals[r.id] || 0), got = D.totals[r.id] || 0;
     const pct = nx ? Math.max(0, Math.min(1, 1 - nx.need / G.denCost(nx.level))) : 1;
@@ -911,7 +935,7 @@ async function denGive(room, amount) {
 function wardrobePanel() {
   const F = S.D.features || {};
   if (!F.wardrobe) return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("star")}</span><h2 class="ol-sm">Wardrobe</h2><span class="side chip">Opens ${new Date(G.FEATURES.wardrobe + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long" })}</span></div>
-      <p class="small muted" style="margin:0">Suit and headband colours for your ninja, and titles. Some only come from beating event bosses.</p></section>`;
+      <p class="small muted" style="margin:0">Colours for your ninja, and titles. Some are only won from event bosses.</p></section>`;
   const owned = new Set(me().owned || []), wear = me().wear || {};
   const card = (w) => {
     const on = wear[w.kind] === w.id, have = owned.has(w.id);
@@ -941,10 +965,10 @@ const titleOf = (p) => G.wardrobeById(p?.wear?.title)?.name || null;
 // ---------- the Midweek Hunt ----------
 function huntCard() {
   const H = S.D.hunt; if (!H) return "";
-  if (!H.open) return H.done ? "" : `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Next one ${new Date(H.next + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}, noon to 11pm: five minutes against your squad's boss, with your squad-mates' gear fighting beside you.</p></section>`;
+  if (!H.open) return H.done ? "" : `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Next one ${new Date(H.next + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}, noon to 11pm.</p></section>`;
   if (H.done) return `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Done for this week. Next Wednesday.</p></section>`;
   return `<section class="panel huntcard"><div class="caps">Midweek Hunt · today until 11pm</div><h2 class="ol disp">${esc(H.boss)}</h2>
-    <p class="small" style="margin:0">Five minutes. You and ${H.roster.length - 1} squad-mate${H.roster.length === 2 ? "" : "s"} (their gear, fighting as bots) against your squad's ladder boss. You keep your share.</p>
+    <p class="small" style="margin:0">Five minutes against your squad's boss, with ${H.roster.length - 1} squad-mate${H.roster.length === 2 ? "" : "s"} as bots. You keep your share.</p>
     <button class="btn gold block" style="margin-top:10px" data-act="hunt">${ic("target")} Start the Hunt</button></section>`;
 }
 function startHunt() {
@@ -983,7 +1007,7 @@ function weekPanel() {
 function noSquadPanel() {
   return `<section class="panel">
       <div class="ptitle"><span class="ic-badge blue">${ic("squad")}</span><h2 class="ol-sm">No squad yet</h2></div>
-      <p class="small muted" style="margin:0 0 12px">The game is about out-walking your mates. Make a squad and send the link to the group chat, or join theirs with a code.</p>
+      <p class="small muted" style="margin:0 0 12px">Make a squad and share the link, or join one with a code.</p>
       <div class="btn-row"><button class="btn green" data-act="squad-sheet">${ic("squad")} Make or join</button></div>
     </section>`;
 }
@@ -1023,14 +1047,14 @@ function taxHero() {
     chip = `<span class="chip">${ic("check")} Done for today</span>`;
     line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : k >= 0.05 ? `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.` : `He took the full ${Math.round(Number(f.rate) * 100)}%.`;
     btn = `<div class="rline total" style="margin-top:12px"><span>Banked today</span><span class="rv">${paid ? signedEfforts(paid.amount + Math.max(0, pendingToday().n)) : "–"}</span></div>
-      <p class="tiny faint" style="margin:6px 0 0">These terms cover all of today, midnight to midnight: keep walking and it keeps going in.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
+      <p class="tiny faint" style="margin:6px 0 0">This covers all of today's steps, so keep walking.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
   } else if (st === "soon") {
     chip = `<span class="chip gold">${ic("clock")} Tonight · 6pm to 9pm</span>`;
-    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Turn up any time from 6 to 9: five minutes to knock him out.`;
+    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Fight him any time from 6 to 9pm.`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${NATIVE ? (S.native?.reminders ? "" : `<button class="btn xs block" style="margin-top:10px" data-act="native-reminders-on">${ic("bell")} Ping me when he's in</button>`) : S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me when he's in</button>` : ""}`;
   } else {
     chip = `<span class="chip red">${ic("warning")} Missed tonight</span>`;
-    line = `No fight, so he takes the full ${Math.round(T.taxRate * 100)}% of today's walking, midnight to midnight. The rest goes straight into your wallet.`;
+    line = `No fight, so he takes ${Math.round(T.taxRate * 100)}% of today. The rest goes straight in.`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span></button>`;
   }
   return `<section class="panel hero">
@@ -1054,7 +1078,7 @@ function tabToday() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort, up to ${G.RULES.dailyEffortCap} a day. ${PER_E()} Efforts make 1 Endeavour, which is what gear costs.</span></div></div>
         <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: five minutes to fight</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it; knock him out to keep everything, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra. Miss it and he takes the lot.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: five minutes to fight</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it. Knock him out to keep it all, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra.</span></div></div>
         <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>When he Audits you only the moving target takes damage. Golden receipts knock 3% off his health.</span></div></div>
       </div>
     </section>`;
@@ -1093,7 +1117,7 @@ function goalPanel() {
         ? `${esc(boss.name)} stays normal on Sunday. Every step past this still raises your raid power.`
         : frozen ? `The squad missed the goal, so ${esc(boss.name)} is enraged: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder.`
         : `Between you, average ${fmt(g.perDay)} steps a day each, Monday to Saturday (Sunday's count too). Miss it and ${esc(boss.name)} is <b>enraged</b> on Sunday: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder. About ${fmt(left / g.players / daysLeft)} a day each from here.`}</p>
-      <p class="tiny faint" style="margin:6px 0 0">${fmt(g.perDay)} × ${g.days ?? g.players * 6} player-days (Monday to Saturday, counted from the day each of you joined). Each boss up the ladder asks 500 more a day; it's back to 5,000 at the start of every lap.</p>
+      <p class="tiny faint" style="margin:6px 0 0">${fmt(g.perDay)} × ${g.days ?? g.players * 6} player-days, Monday to Saturday. Each boss up the ladder asks 500 more a day.</p>
     </section>`;
 }
 const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
@@ -1130,7 +1154,7 @@ function raidHero() {
           <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(P))}<small>squad</small></div></div>
           <div class="tile ${mine.stride > 1 ? "green" : mine.stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${mine.stride.toFixed(2)}<small>from steps</small></div></div>
         </div>${btn}
-        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–9pm: join the lobby, pick the boss, and when ${G.RULES.raidSquadSize} or more of you are in and everyone's ready, the 15-minute fight starts. The boss is the same however many come: gear, positions and steps decide it.</p>
+        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–9pm. When ${G.RULES.raidSquadSize} or more of you are in the lobby and ready, the 15-minute fight starts.</p>
       </div>
     </section>`;
 }
@@ -1145,7 +1169,7 @@ function tabRaid() {
         const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
         return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.style || b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
-      <p class="small muted" style="margin:10px 0 0">Each Sunday the lobby picks: last week's boss again, one up, or one down. Each step up is tougher, so climbing before your gear's ready can lose. After Vex the ladder keeps going: the bosses come round again, each step a little tougher and a little richer.</p>
+      <p class="small muted" style="margin:10px 0 0">Each Sunday: last week's boss, one up or one down. Climb before your gear's ready and you'll lose. After Vex the bosses come round again, tougher and richer.</p>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2><span class="side chip gold">Best: ${G.posOf(sug).label}</span></div>
@@ -1169,14 +1193,14 @@ function howRaids() {
   return `<section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
       <div class="how">
-        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad average set how hard you hit, and how big your ninja stands in the fight, so everyone can see who walked. Half the loot is split by steps, half by what you did in the fight. The lowest walker gets hunted by the boss and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit and how big you stand. Half the loot goes by steps, half by the fight. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
         <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, ${p.ability}`).join(". ")}. Out of your best row you hit weaker, take more and heal less; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder. Moving takes a few seconds.</span></div></div>
         <div class="hrow"><span class="hic">${ic("guard")}</span><div><b>Each row has a job</b><span>${G.POSITIONS.map((p) => `${p.label}, ${p.passive}: ${p.passiveWhat.charAt(0).toLowerCase() + p.passiveWhat.slice(1)}`).join(". ")}.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>Every class has its own. It charges as you tap, use your ability and take hits; when the button glows, fire it. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early. Each boss also has a move of its own: Brett slimes a row, Rory gasses you, Wisp vanishes, Gale blows you out of place, The Kraken grabs people, Grimm's Ground Slam has to be stopped, and Vex breathes fire.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>It charges as you tap, use your ability and take hits. Fire it when it glows. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
         <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear wins it</b><span>The boss doesn't change with your gear or how many turn up. Better weapons hit harder and better armour takes the hits; tougher bosses need better gear.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>The lobby</b><span>Sunday 6–9pm. At least ${G.RULES.raidSquadSize} of you, everyone taps Ready, then it starts. Only one raid a week.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear wins it</b><span>The boss is the same however many turn up. Tougher bosses need better gear.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>The lobby</b><span>Sunday 6–9pm. ${G.RULES.raidSquadSize} or more of you, everyone ready. One raid a week.</span></div></div>
       </div>
     </section>`;
 }
@@ -1268,12 +1292,12 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
-      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Your steps are the whole game. Set up the sync once and forget about it."}</p>
+      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Set it up once and your steps sync by themselves."}</p>
       <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge blue">${ic("phone")}</span><h2 class="ol-sm">Scrolling</h2><span class="side chip">${S.D.today.scroll ?? "–"} min today</span></div>
-      <p class="small muted" style="margin:0 0 10px">Short-video scrolling over your budget (${G.RULES.scrollMinPer1kSteps} min per 1,000 steps) adds to the Taxman's cut. No data means we assume ${S.D.today.noScrollMin} min.</p>
+      <p class="small muted" style="margin:0 0 10px">Scrolling over your budget (${G.RULES.scrollMinPer1kSteps} min per 1,000 steps) adds to the Taxman's cut. No data counts as ${S.D.today.noScrollMin} min.</p>
       <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} Track it</button><button class="btn sm" data-act="log-scroll">${ic("edit")} Type it in</button></div>
     </section>
     ${wardrobePanel()}
@@ -1293,7 +1317,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("lock")}</span><h2 class="ol-sm">Signing in</h2>${needsAccount() ? `<span class="side chip red">Needs ${S.auth.email ? "a password" : S.auth.has_password ? "an email" : "email + password"}</span>` : ""}</div>
-      <p class="small muted" style="margin:-4px 0 12px">How you get back in on a new phone, or if you're ever signed out. Set up at least one.</p>
+      <p class="small muted" style="margin:-4px 0 12px">How you get back in on a new phone. Set up at least one.</p>
       <div class="meths">${signinMethods()}</div>
       <button class="btn sm block" style="margin-top:12px" data-act="signout">${ic("door")} Sign out</button>
     </section>
@@ -1335,7 +1359,7 @@ function nativeSetup(kind) {
       <p class="tiny faint" style="margin:8px 0 0">${st.syncedAt ? `Synced ${ago(new Date(st.syncedAt).toISOString())}. ` : ""}It syncs every 15 minutes by itself.${st.error ? ` <span style="color:var(--red)">${esc(st.error)}</span>` : ""}</p>`;
     return `<button class="btn gold block" data-act="native-steps">${ic("steps")} Allow steps</button><p class="tiny faint" style="margin:6px 2px 0">Android asks once. Effort only reads your step count. Samsung Health? Also turn on <b>Settings → Health Connect</b> in Samsung Health.</p>`;
   }
-  if (st.scroll) return `${done("Scroll tracking on")}</div><p class="tiny faint" style="margin:8px 0 0">Counts minutes in TikTok, Instagram, YouTube, Snapchat and Facebook.</p>`;
+  if (st.scroll) return `${done("Scroll tracking on")}</div><p class="tiny faint" style="margin:8px 0 0">Counts minutes in TikTok, Instagram, Snapchat and Facebook. YouTube doesn't count.</p>`;
   return `<button class="btn blue block" data-act="native-scroll">${ic("phone")} Allow scroll tracking</button><p class="tiny faint" style="margin:6px 2px 0">Android opens <b>Usage access</b>: tap <b>Effort</b>, switch it on, then come back. It only counts minutes in short-video apps.</p>`;
 }
 
@@ -1344,14 +1368,14 @@ const setupPlat = () => S.setupPlatform || me()?.platform || S.platform;
 // iPhone: no App Store app, so Effort lives on the Home Screen, and a Shortcut sends the steps by itself.
 function iphoneHome(kind) {
   const t = S.token, box = (url) => `<div class="copybox"><code>${esc(url)}</code><button class="btn xs" data-copy="${esc(url)}">${ic("copy")} Copy</button></div>`;
-  if (kind !== "steps") return `<p class="small" style="margin-top:0">Two automations tell Effort when TikTok, Instagram or YouTube opens and closes, and Effort works out the minutes.</p>
+  if (kind !== "steps") return `<p class="small" style="margin-top:0">Two automations tell Effort when TikTok or Instagram opens and closes, and Effort works out the minutes.</p>
       <ol class="steps-list">
         <li>Open <b>Shortcuts</b> → <b>Automation</b> → <b>+</b> → <b>App</b>.</li>
         <li>Choose the apps you scroll on. Tick <b>Is Opened</b> only. <b>Run Immediately</b>, <b>Notify When Run</b> off.</li>
         <li><b>New Blank Automation</b> → <b>Get Contents of URL</b>, paste:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
         <li>Make a second one the same way, ticking <b>Is Closed</b> and using:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
       </ol>`;
-  return `<p class="small" style="margin-top:0">There's no App Store app, so Effort runs from your Home Screen instead: full screen like an app, signed in, with the evening pings. A Shortcut sends your steps by itself.</p>
+  return `<p class="small" style="margin-top:0">On iPhone, Effort runs from your Home Screen like an app, with the evening pings. A Shortcut sends your steps.</p>
     <span class="field-label">1 · Put Effort on your Home Screen</span>
     ${isStandalone() ? `<div class="chip green" style="margin-bottom:6px">${ic("check")} Done: you're in the Home Screen app</div>` : `<ol class="steps-list">
       <li>Open <b>effort-game.vercel.app</b> in <b>Safari</b>. Other browsers can't add it.</li>
@@ -1368,7 +1392,7 @@ function iphoneHome(kind) {
       <li>Add <b>Calculate Statistics</b> → <b>Sum</b>.</li>
       <li>Add <b>Get Contents of URL</b> and paste:${box(`${API}/log?t=${t}&steps=`)}then tap the end of it and insert the <b>Statistics</b> variable.</li>
       <li>Tap ▶︎ to test. You should see "✅ … steps logged".</li>
-      <li>In the <b>Automation</b> tab: <b>+</b> → <b>Time of Day</b> → <b>18:50</b>, <b>Daily</b>, <b>Run Immediately</b> → <b>Effort Steps</b>. That's your steps in before the Taxman.</li>
+      <li>In the <b>Automation</b> tab: <b>+</b> → <b>Time of Day</b> → <b>17:50</b>, <b>Daily</b>, <b>Run Immediately</b> → <b>Effort Steps</b>. That's your steps in before the Taxman opens.</li>
       <li>Make two more for <b>13:00</b> and <b>23:50</b>, so the squad table stays live and the whole day counts.</li>
     </ol>`;
 }
@@ -1397,7 +1421,7 @@ function logSheet(kind) {
     <form data-form="log-${kind}">
       <span class="field-label">Day</span>
       <select name="date" class="select">${days.map(([d, l]) => `<option value="${d}">${l}</option>`).join("")}</select>
-      <span class="field-label">${kind === "steps" ? "Steps" : "Minutes of TikTok, Reels and Shorts"}</span>
+      <span class="field-label">${kind === "steps" ? "Steps" : "Minutes on TikTok and Reels"}</span>
       <input type="number" name="n" inputmode="numeric" min="0" max="${kind === "steps" ? 200000 : 1440}" required placeholder="${kind === "steps" ? "8421" : "45"}">
       <button class="btn green block" style="margin-top:14px">Save</button>
     </form>
@@ -1439,11 +1463,11 @@ function walletSheet() {
   const P = pendingToday(), w = S.D.wallet + (P.taxed ? P.n : 0), R = G.RULES;
   openSheet(`${sheetHead("Your money")}
     <div class="money">
-      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut of the day's unless you beat him (6pm to 9pm).</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : w % PER_E()}</b></div>
+      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut each day unless you beat him.</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : w % PER_E()}</b></div>
       <div class="mrow"><span class="mic">${gem(44)}</span><div class="grow"><b>Endeavours</b><span>${PER_E()} Efforts make 1 Endeavour, automatically. Gear in the shop costs Endeavours.</span></div><b class="num">${fmt(Math.max(0, Math.floor(w / PER_E())))}</b></div>
     </div>
-    ${P.taxed ? `<div class="pendrow">${coin(22)}<span><b>Today's walking goes straight in</b> ${P.steal ? `with the ${Math.round(P.steal * 100)}% you stole on top` : P.rate > 0 ? `after the Taxman's ${Math.round(P.rate * 100)}%` : "with no tax"}. That's every step today, midnight to midnight, so keep walking.</span></div>`
-      : P.n ? `<div class="pendrow">${coin(22)}<span><b>+${fmt(P.n)} Effort${P.n === 1 ? "" : "s"} from today's walking</b> so far. Once you've faced the Taxman (6pm to 9pm), his cut or your bonus applies to the whole day and they go straight into your wallet.</span></div>` : ""}
+    ${P.taxed ? `<div class="pendrow">${coin(22)}<span><b>Today's walking goes straight in</b> ${P.steal ? `with the ${Math.round(P.steal * 100)}% you stole on top` : P.rate > 0 ? `after the Taxman's ${Math.round(P.rate * 100)}%` : "with no tax"}. That covers all of today's steps.</span></div>`
+      : P.n ? `<div class="pendrow">${coin(22)}<span><b>+${fmt(P.n)} Effort${P.n === 1 ? "" : "s"} from today's walking</b> so far. Once you've faced the Taxman they go straight in, after his cut.</span></div>` : ""}
     ${w < 0 ? `<p class="small" style="color:#ff9aa3;margin:12px 0 0">You're in debt: your next ${fmt(-w)} Efforts pay it off before you keep any.</p>` : `<p class="tiny faint" style="margin:12px 0 0">So ${fmt(w)} Efforts in total: ${fmt(Math.floor(w / PER_E()))} Endeavour${Math.floor(w / PER_E()) === 1 ? "" : "s"} and ${w % PER_E()} Effort${w % PER_E() === 1 ? "" : "s"} towards the next.</p>`}
     <button class="btn gold block" style="margin-top:14px" data-tab="shop">${ic("bag")} Spend them in the shop</button>`);
 }
@@ -1458,7 +1482,7 @@ function squadSheet() {
 function inviteSheet() {
   const sq = squad(), link = `${APP_URL}?g=${sq.code}`;
   openSheet(`${sheetHead("Invite your mates")}
-    <p class="small muted" style="margin:-4px 0 12px">Send this to the group chat. They make their walker and land straight in ${esc(sq.name)}.</p>
+    <p class="small muted" style="margin:-4px 0 12px">Send this to the group chat to bring them into ${esc(sq.name)}.</p>
     <div class="codebig ol">${sq.code}</div>
     <div class="copybox"><code>${esc(link)}</code><button class="btn xs" data-copy="${esc(link)}">${ic("copy")} Copy</button></div>
     <button class="btn green block" style="margin-top:12px" data-act="share-invite">${ic("share")} Share the link</button>`);
@@ -1594,7 +1618,7 @@ async function checkEmailCode(email, code) {
 }
 function emailSheet(email) {
   openSheet(`${sheetHead(S.auth?.email ? "Change your email" : "Add your email")}
-    ${!email ? `<p class="small muted" style="margin:-4px 0 12px">We'll send a code to check it's yours. If you ever forget your password or lose your phone, a code to this email gets you back in.</p>
+    ${!email ? `<p class="small muted" style="margin:-4px 0 12px">We'll send a code to check it's yours. It's how you get back in if you lose your phone.</p>
       <form data-form="email-send" data-mode="link"><input type="email" name="email" required autocomplete="email" placeholder="you@example.com"><button class="btn green block" style="margin-top:12px">${ic("mail")} Send code</button></form>`
     : `<p class="small muted" style="margin:-4px 0 12px">Type the code we sent to <b>${esc(email)}</b>, or tap the link in it. It can take a minute, and might be in spam.</p>
       <form data-form="email-verify" data-mode="link" data-email="${esc(email)}"><input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required placeholder="12345678" class="code"><button class="btn green block" style="margin-top:12px">Confirm</button></form>
@@ -1623,12 +1647,12 @@ function accountRows() {
     ${need("lock", "Password", a.has_password, "Set. Squad code, your name, then this", "Signs you in on any phone", "password")}</div>`;
 }
 const authNudge = () => !needsAccount() ? "" : `<section class="panel update">
-    <div class="row"><span class="ic-badge">${ic("lock")}</span><div class="grow"><b class="disp">Make your account permanent</b><span class="small muted" style="display:block">Add an email and a password, so you can get back in on a new phone or if you're ever signed out.</span></div></div>
+    <div class="row"><span class="ic-badge">${ic("lock")}</span><div class="grow"><b class="disp">Make your account permanent</b><span class="small muted" style="display:block">Add an email and password so you can get back in on a new phone.</span></div></div>
     <div style="margin-top:12px">${accountRows()}</div>
   </section>`;
 function accountSheet() {
   openSheet(`${sheetHead("Make your account permanent")}
-    <p class="small muted" style="margin:-4px 0 12px">Every Effort account needs an email and a password, so you can get back in on a new phone or if you're ever signed out. Takes a minute.</p>
+    <p class="small muted" style="margin:-4px 0 12px">Every account needs an email and password, so you can get back in on a new phone.</p>
     ${accountRows()}`);
 }
 // Pops up when the game opens (and when you come back to it after half an hour), between fights only.
@@ -1650,7 +1674,7 @@ function viewWelcome() {
     <section class="panel">
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Your steps are money</b><span>Every 100 steps is an Effort. Walk more than the squad and you hit harder, earn more and get taxed less.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: the Taxman</b><span>Five minutes, any time in that window, every day. Tap him into the ground or he takes his cut.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: the Taxman</b><span>Five minutes, once a day. Beat him or he takes his cut.</span></div></div>
         <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Fifteen minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
       </div>
     </section>
@@ -1704,7 +1728,7 @@ function viewSquad() {
   $("#app").innerHTML = `<section class="onboard">
     <div class="dots"><i class="on"></i><i></i><i></i></div>
     <h1 class="ol disp ob-title">Your squad</h1>
-    <p class="muted">The whole game is you lot against each other, and together on Sunday. Make a squad and send the link, or join one.</p>
+    <p class="muted">Make a squad and send the link, or join one.</p>
     <form class="panel" data-form="squad-create"><span class="field-label">Make a squad</span><input type="text" name="name" maxlength="40" required placeholder="The Lads, Uni Flat, Office 4…"><button class="btn green block" style="margin-top:12px">${ic("squad")} Make it</button></form>
     <form class="panel" data-form="squad-join"><span class="field-label">Or join one</span><div class="row"><input type="text" name="code" maxlength="6" required placeholder="ABC123" class="grow code" autocomplete="off" autocapitalize="characters"><button class="btn blue sm">Join</button></div></form>
     <button class="btn block" data-act="skip-squad">Do it later</button>
@@ -1715,7 +1739,7 @@ function viewSetup() {
   $("#app").innerHTML = `<section class="onboard">
     <div class="dots"><i class="on"></i><i class="${step === "account" ? "" : "on"}"></i><i class="${step === "remind" ? "on" : ""}"></i></div>
     ${step === "account" ? `<h1 class="ol disp ob-title">Make it permanent</h1>
-      <p class="muted">Add an email and a password so you can always get back in: a new phone, getting signed out, anything.</p>
+      <p class="muted">Add an email and password so you can always get back in.</p>
       <section class="panel">${accountRows()}</section>
       <button class="btn gold xl block" style="margin-top:14px" data-act="account-next" ${needsAccount() ? "disabled" : ""}>Next ${ic("arrowRight")}</button>
       <p class="tiny faint" style="text-align:center;margin:10px 0 0">Both are needed to carry on. The code can take a minute, and might be in spam.</p>`
@@ -1730,7 +1754,7 @@ function viewSetup() {
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss the Taxman</h1>
-      <p class="muted">The Taxman's only in from 6pm to 9pm, and the raid lobby's Sunday 6 to 9. We'll ping you at 6, and again at 8:30 if you haven't fought.</p>
+      <p class="muted">The Taxman's in from 6 to 9pm, and the raid's Sunday 6 to 9pm. We'll ping you at 6, and at 8:30 if you haven't fought.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -2528,7 +2552,7 @@ function renderResult() {
         <div class="rline minus"><span>Taxman took · ${Math.round(r.taxRate * (1 - r.knocked) * 100)}%</span><span class="rv">−${effortTag(r.taxed)}</span></div>
         <div class="rline plus"><span>Stolen back · ${Math.round(r.stealPct * 100)}%</span><span class="rv">+${effortTag(r.stolen)}</span></div>
         <div class="rline total"><span class="disp" style="font-size:18px">Banked</span><span class="rv">${coin(26)}<span id="count">${res.net == null ? "…" : "0"}</span></span></div>
-        <p class="tiny faint" style="margin:8px 0 0">These terms cover every step today, midnight to midnight: keep walking and it keeps going into your wallet.</p>
+        <p class="tiny faint" style="margin:8px 0 0">This covers all of today's steps, so keep walking.</p>
       </section>`;
   } else {
     const out = res.out, my = me().id, mine = out.shares.find((s) => s.id === my), T = res.R?.lastTrivia;

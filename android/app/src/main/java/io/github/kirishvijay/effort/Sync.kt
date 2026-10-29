@@ -40,10 +40,11 @@ object Sync {
     val STEPS = HealthPermission.getReadPermission(StepsRecord::class)
     // Background reading lets the sync carry on with the app closed.
     val PERMISSIONS = setOf(STEPS, HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)
-    // Short-video apps: TikTok (two package names), Instagram, YouTube, Snapchat, Facebook.
+    // Feed-scrolling apps: TikTok (two package names), Instagram, Snapchat, Facebook. Not YouTube: time there is
+    // mostly watching, not scrolling.
     private val SCROLL_APPS = setOf(
         "com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.instagram.android",
-        "com.google.android.youtube", "com.snapchat.android", "com.facebook.katana",
+        "com.snapchat.android", "com.facebook.katana",
     )
 
     fun prefs(c: Context) = c.getSharedPreferences("effort", Context.MODE_PRIVATE)
