@@ -191,8 +191,10 @@ function dressTaxman(obj) {
 // One shared offscreen renderer, one render at a time; results are cached for the session.
 let pRenderer = null, pQueue = Promise.resolve();
 const pCache = new Map();
+// What a walker is wearing (wardrobe colours and equipped gear), so a change of outfit renders a fresh portrait.
+const wearKey = (a) => (a ? ["_suit", "_band", "_weapon", "_armour", "_trinket"].map((k) => a[k] || "").join(",") : "");
 function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) {
-  const key = `${kind}:${id}:${w}x${h}:${frame}`;
+  const key = `${kind}:${id}:${w}x${h}:${frame}${kind === "walker" ? ":" + wearKey(answers) : ""}`;
   if (pCache.has(key)) return pCache.get(key);
   const job = pQueue.then(async () => {
     if (!pRenderer) {

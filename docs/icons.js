@@ -951,12 +951,17 @@ const ITEM_ART = {
   "s2-weapon": "blade steel", "s2-armour": "hoodie red", "s2-trinket": "bottle steel", "s3-weapon": "staff green", "s3-armour": "cloak white", "s3-trinket": "crown pink", "s4-weapon": "staff orange", "s4-armour": "coat green", "s4-trinket": "gem orange",
 };
 const SLOT_MOTIF = { weapon: "blade", armour: "plate", trinket: "gem" };
+const LOOK_MOTIF = { sword: "blade", club: "bat", staff: "staff", wand: "wand", umbrella: "umbrella", bat: "bat", book: "book", spoon: "spork", bag: "sack", hammer: "hammer", fan: "shuriken", whip: "rope",
+  vest: "vest", plate: "plate", robe: "cloak", hoodie: "hoodie", coat: "coat", amulet: "gem", badge: "badge", orb: "orb", bell: "bell", feather: "star", charm: "clover" };
+const STYLE_TINT = { power: "red", guard: "steel", speed: "green", brains: "purple", luck: "yellow" };
 const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
 
 function resolve(item) {
   const id = typeof item === "string" ? item : (item && item.id) || "";
   const row = ITEM_ART[id];
   if (row) { const [motif, tint, variant] = row.split(" "); return { motif, tint, variant }; }
+  // Open-market gear: drawn from what it looks like, coloured by its style.
+  if (item && item.look && LOOK_MOTIF[item.look]) return { motif: LOOK_MOTIF[item.look], tint: STYLE_TINT[item.market] || "gold", variant: "" };
   const slot = (item && item.slot) || "trinket";
   return { motif: SLOT_MOTIF[slot] || "gem", tint: TINT_ORDER[hash(id) % TINT_ORDER.length], variant: "" };
 }

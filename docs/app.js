@@ -187,6 +187,7 @@ window.onEffortSteps = (n) => {
 };
 // The Android back button: close a sheet, step back through the quiz, or go back to Today; otherwise leave the app.
 window.effortBack = () => {
+  if (window.EffortStory?.isOpen?.()) { EffortStory.close(); return true; }
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   // In chat: close the search, then a reply or edit, then go to Today like the other tabs do.
   if (S.view === "chat") {
@@ -251,7 +252,8 @@ function signOut(msg) {
 const ANS = {}; // player id -> walker answers (for portraits and the 3D team)
 // A player's walker answers, plus any wardrobe colours they wear (_suit, _band).
 const wearOf = (w) => { const s = G.wardrobeById(w?.suit), b = G.wardrobeById(w?.band); return { ...(s ? { _suit: s.color } : {}), ...(b ? { _band: b.color } : {}) }; };
-const answersOf = (p) => ({ ...(p?.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x")), ...wearOf(p?.wear) });
+const gearLook = (g) => Object.fromEntries(G.SLOTS.filter((s) => g?.[s]).map((s) => [`_${s}`, g[s]]));
+const answersOf = (p) => ({ ...(p?.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x")), ...wearOf(p?.wear), ...gearLook(p?.gear || p?.equipped) });
 const me = () => S.D.me;
 const myStats = () => G.stats(me().character || {});
 const myClass = () => G.classOf(myStats());
@@ -868,6 +870,27 @@ function chapterSheet(k) {
     <div class="story"><div class="caps gold-t">${esc(C.landmarks[k - 1].name)}</div><h2 class="ol-sm disp">${esc(ch.title)}</h2>${ch.text.map((p) => `<p>${esc(p)}</p>`).join("")}</div>
     ${read ? `<button class="btn block" data-act="close-sheet">Close</button>` : `<button class="btn gold block xl" data-act="claim" data-what="chapter" data-k="${k}">Done reading · +${G.RULES.chapterReward}</button>`}`);
 }
+// A chapter plays as a click-through scene (story.js + stories.js); finishing it claims the chapter's reward.
+// Without the story files (an old cached copy), it falls back to the plain text sheet.
+async function playChapter(k) {
+  const Z = season(); if (!Z) return;
+  const mates = (squad()?.members || []).filter((m) => m.id !== me().id);
+  const mate = mates.length ? mates[Math.floor(Math.random() * mates.length)].name : "your mate";
+  const ctx = { you: me().name, squad: squad()?.name || "your squad", mate, mates: mates.map((m) => m.name), steps: fmt(S.D.today.steps), season: Z.name, cls: myClass().name };
+  const script = window.EffortStories?.chapter?.(Z.id, k, ctx);
+  if (!script?.length || !window.EffortStory?.play) return chapterSheet(k);
+  const portrait = (who) => {
+    if (who === "you") return face(me().id, 96);
+    if (who.startsWith("mate:")) { const m = squad()?.members.find((x) => x.name === who.slice(5)); return m ? face(m.id, 96) : ""; }
+    if (who.startsWith("boss:")) return `<div class="has-fallback" style="width:120px;height:130px">${portraitImg("boss", who.slice(5), { w: 240, h: 260 })}</div>`;
+    return "";
+  };
+  FX.play("tap");
+  const hydrate = setInterval(hydratePortraits, 400);
+  try { await EffortStory.play(script, { ctx, portrait, title: window.EffortStories.title?.(Z.id, k) }); }
+  finally { clearInterval(hydrate); }
+  if (!claimedSet().has(`${Z.id}:ch:${k}`) && Z.chapters.includes(k)) claim("chapter", k);
+}
 async function claim(what, k, ref) {
   if (S.busy) return;
   S.busy = true;
@@ -995,6 +1018,7 @@ function weekPanel() {
       <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">This week</h2><span class="side chip">Avg ${fmt(T.avg)}</span></div>
       <div class="wtable">${T.rows.map((r, i) => `<button class="wrow ${r.you ? "me" : ""} ${r.title || ""}" data-profile="${r.id}" aria-label="${esc(r.you ? "Your" : `${r.name}'s`)} profile">
           <span class="wn">${r.title === "top" ? ic("crown") : i + 1}</span>
+          <span class="wface">${face(r.id, 36)}</span>
           <span class="grow"><b>${esc(r.you ? "You" : r.name)}</b>${r.title === "top" ? '<span class="chip gold">Top walker</span>' : r.title === "last" ? '<span class="chip red">Dead weight</span>' : r.fresh ? '<span class="chip">New</span>' : ""}
             <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i>
             <small class="pw ${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} raid power</small></span>
@@ -1145,7 +1169,7 @@ function raidHero() {
   }
   return `<section class="panel hero">
       <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #5a4bb0 0%, #24306e 45%, #121a44 100%)"></div>
-        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}${boss.enraged ? ` <span class="chip red">${ic("bolt")} ${S.D.raid?.goal ? "Enraged" : "Rage risk"}</span>` : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p></div>
+        <div class="label">${chip}${w.test ? ' <span class="chip cyan">Test</span>' : ""}${boss.enraged ? ` <span class="chip red">${ic("bolt")} ${S.D.raid?.goal ? "Enraged" : "Rage risk"}</span>` : ""}<h3 class="ol">${esc(boss.name)}</h3><p>Boss ${boss.tier}${boss.lap > 1 ? ` · Lap ${boss.lap}` : ""}. ${esc(boss.title)}${/[.!?]$/.test(boss.title) ? "" : "."}</p><p class="bstyle">${esc(boss.style || "")}</p></div>
         <div class="portrait">${portraitImg("boss", boss.id, { w: 300, h: 320 })}</div></div>
       <div class="body">
         <div class="tiles">
@@ -1167,7 +1191,7 @@ function tabRaid() {
       <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${lap}</span></div>
       <div class="ladder">${G.BOSSES.map((b, i) => {
         const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
-        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.style || b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
+        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small><small class="bstyle">${esc(b.style || "")}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
       <p class="small muted" style="margin:10px 0 0">Each Sunday: last week's boss, one up or one down. Climb before your gear's ready and you'll lose. After Vex the bosses come round again, tougher and richer.</p>
     </section>
@@ -1178,7 +1202,7 @@ function tabRaid() {
       ${statRows(st)}
       <span class="field-label">Where you start on Sunday</span>
       <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
-      <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. ${pos === sug ? "That's your best spot." : `Out of your best spot you hit ${Math.round((1 - G.posFit(G.loadout(st, me().gear, S.D.inv).g, pos) ** 1.5) * 100)}% weaker and take more damage.`} You can move rows during the fight.</p>
+      <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. ${pos === sug ? `The ${G.posOf(sug).label.toLowerCase()} is every ${esc(cls.name)}'s home row.` : `Every ${esc(cls.name)}'s home row is the ${G.posOf(sug).label.toLowerCase()}. Here you hit ${Math.round((1 - G.posFit(G.loadout(st, me().gear, S.D.inv).g, pos, sug) ** 1.5) * 100)}% weaker and take more damage.`} You can move rows during the fight.</p>
     </section>
     ${denPanel()}
     ${S.D.lastRaid && S.D.raid?.status !== "done" ? lastRaidPanel(S.D.lastRaid) : ""}
@@ -1194,7 +1218,7 @@ function howRaids() {
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit and how big you stand. Half the loot goes by steps, half by the fight. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ×${p.mult} damage, ${p.ability}`).join(". ")}. Out of your best row you hit weaker, take more and heal less; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder. Moving takes a few seconds.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ${p.ability}`).join(". ")}. Each row pulls about the same weight in a fight. Every class has a home row (yours is the ${G.posOf(G.suggestedPosition(myStats())).label.toLowerCase()}); out of it you hit weaker, take more and heal less; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder. Moving takes a few seconds.</span></div></div>
         <div class="hrow"><span class="hic">${ic("guard")}</span><div><b>Each row has a job</b><span>${G.POSITIONS.map((p) => `${p.label}, ${p.passive}: ${p.passiveWhat.charAt(0).toLowerCase() + p.passiveWhat.slice(1)}`).join(". ")}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>It charges as you tap, use your ability and take hits. Fire it when it glows. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
@@ -1227,7 +1251,8 @@ function tabShop() {
   const sort = (a, b) => tierRank(a) - tierRank(b) || G.SLOTS.indexOf(a.slot) - G.SLOTS.indexOf(b.slot);
   const lists = {
     class: I.ITEMS.filter((i) => i.cls === cls.id).sort(sort),
-    all: I.ITEMS.filter((i) => !i.cls && !i.season).sort(sort),
+    all: I.ITEMS.filter((i) => !i.cls && !i.season && (S.shopSlot === "any" || !S.shopSlot || i.slot === S.shopSlot) && (!S.shopStyle || S.shopStyle === "any" || i.market === S.shopStyle)
+      && G.tierOut(G.tierOf(i.tier), S.D.today.day) && (G.tierOf(i.tier).lvl <= lvl || G.tierOf(i.tier) === I.TIERS.find((t) => t.lvl > lvl && !t.season) || i.id in inv)).sort(sort),
     season: I.ITEMS.filter((i) => i.season && (G.onSale(i, S.D.today.day) || i.id in inv)).sort(sort),
     deals: dealsToday().map(G.itemById).filter(Boolean),
     bag: I.ITEMS.filter((i) => i.id in inv).sort(sort),
@@ -1244,9 +1269,12 @@ function tabShop() {
           : `<div class="slot"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[s])}<span>${slotName[s]}</span></div></div>`;
       }).join("")}</div>
     </section>
-    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Everyone", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
+    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
       `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
     ${tab === "season" ? setNote() : ""}
+    ${tab === "all" ? `<p class="small muted" style="margin:0">Gear any class can wear. Five styles in every tier, each with its own perk. Your class gear is a slightly better fit for you; these let you build your own way.</p>
+      <div class="chips-row">${[["any", "All"], ["weapon", "Weapons"], ["armour", "Armour"], ["trinket", "Trinkets"]].map(([k, l]) => `<button class="fchip" data-shopslot="${k}" aria-pressed="${(S.shopSlot || "any") === k}">${l}</button>`).join("")}</div>
+      <div class="chips-row">${[["any", "Any style"], ["power", "Power"], ["guard", "Guard"], ["speed", "Speed"], ["brains", "Brains"], ["luck", "Luck"]].map(([k, l]) => `<button class="fchip" data-shopstyle="${k}" aria-pressed="${(S.shopStyle || "any") === k}">${l}</button>`).join("")}</div>` : ""}
     ${tab === "deals" ? `<p class="small muted" style="margin:0">Three picks for your class each day, about ${Math.round(G.RULES.dealDiscount * 100)}% off. New ones at midnight.</p>` : ""}
     <div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i, { deal: tab === "deals" })).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`;
 }
@@ -1269,6 +1297,20 @@ function itemSheet(id, deal) {
            ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
     </div>
     ${!own && !locked && wallet < price ? `<p class="small muted" style="text-align:center;margin:10px 0 0">You need ${fmt(Math.ceil((price - wallet) / PER_E()))} more Endeavour${price - wallet > PER_E() ? "s" : ""}. Walk.</p>` : ""}`, { rc: t.color });
+}
+// Everything you own for one slot, to swap in (the raid lobby and the shop's loadout use it).
+function gearPicker(slot) {
+  const owned = I.ITEMS.filter((i) => i.slot === slot && i.id in S.D.inv).sort((a, b) => I.TIERS.findIndex((t) => t.id === b.tier) - I.TIERS.findIndex((t) => t.id === a.tier));
+  const on = me().gear?.[slot];
+  openSheet(`${sheetHead(`Your ${slot}`)}
+    ${owned.length ? `<div class="gearpick">${owned.map((it) => {
+      const st = G.itemStats(it, S.D.inv[it.id] || 0), t = G.tierOf(it.tier);
+      return `<button class="gp ${it.id === on ? "on" : ""}" style="--rc:${t.color}" data-act="gear-wear" data-id="${it.id}">
+        <span class="art">${itemArt(it)}</span>
+        <span class="grow"><b>${esc(it.name)}${S.D.inv[it.id] ? ` +${S.D.inv[it.id]}` : ""}</b><small>${Object.entries(st).map(([k, v]) => `+${v} ${statLabel(k).toLowerCase()}`).join(" · ")}${it.perk ? ` · ${esc(perkText(it.perk))}` : ""}</small></span>
+        ${it.id === on ? `<span class="chip green">${ic("check")} On</span>` : ""}</button>`;
+    }).join("")}</div>` : `<p class="small muted">You don't own a ${slot} yet. The shop has plenty.</p>`}
+    ${on ? `<button class="btn block" style="margin-top:10px" data-act="gear-off" data-slot="${slot}">Take it off</button>` : ""}`);
 }
 async function shopAction(action, body, done) {
   if (S.busy) return;
@@ -1323,6 +1365,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("link")}</span><h2 class="ol-sm">This phone</h2>${NATIVE ? `<span class="side chip">App ${esc(S.native?.version || "?")}</span>` : ""}</div>
+      <button class="btn sm block" style="margin-bottom:12px" data-act="check-updates">${ic("refresh")} Check for updates</button>
       <label class="row spread" style="margin-bottom:12px"><span><b>Sound</b></span><input class="switch" type="checkbox" data-toggle="sound" ${FX.muted ? "" : "checked"} aria-label="Sound"></label>
       <label class="row spread" style="margin-bottom:12px"><span><b>3D battles</b><span class="small muted" style="display:block">Switch off on older phones</span></span><input class="switch" type="checkbox" data-toggle="3d" ${store.get("no3d") ? "" : "checked"} aria-label="3D battles"></label>
       <p class="small muted" style="margin:0 0 8px">Your restore link also signs you in on another phone. Keep it private: it's your account.</p>
@@ -1434,7 +1477,7 @@ function profileSheet(id) {
   const you = id === me().id, st = G.stats(x.character || {}), cls = G.classOf(st);
   const row = weekRows().rows.find((r) => r.id === id), gear = you ? me().gear : x.gear || {};
   // Best spot from their stats with gear on; if they've picked somewhere else, say so too.
-  const best = G.posOf(G.suggestedPosition(G.loadout(st, gear, you ? S.D.inv : {}).g)), picked = (you ? me().pos : x.pos) || null;
+  const best = G.posOf(G.suggestedPosition(st)), picked = (you ? me().pos : x.pos) || null;
   const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
   openSheet(`${sheetHead(esc(you ? "You" : x.name))}
     <div class="profile">
@@ -2031,10 +2074,10 @@ function viewLobby() {
     const tag = G.isEventTier(t) ? `Event · ${b.eventName}` : !last ? "First raid" : t === last ? "Same as last week" : t > last ? "One up" : "One down";
     return `<button class="bossopt ${sel ? "on" : ""}" data-act="lobby-boss" data-tier="${t}" aria-pressed="${sel}">
         <span class="bp has-fallback"><span class="fb">${ic("raid")}</span>${portraitImg("boss", b.id, { w: 120, h: 130 })}</span>
-        <span class="grow"><small>${tag}</small><b>${esc(b.name)}</b><span class="tiny faint" style="display:block;margin-bottom:2px">${esc(b.style || "")}</span><span class="tiny ${g.met ? "" : "red-t"}">${g.met ? "Step goal made" : "Step goal missed: enraged"}</span></span>
+        <span class="grow"><small>${tag}</small><b>${esc(b.name)}</b><span class="tiny" style="display:block">${esc(b.title)}</span><span class="tiny faint" style="display:block;margin-bottom:2px">${esc(b.style || "")}</span><span class="tiny ${g.met ? "" : "red-t"}">${g.met ? "Step goal made" : "Step goal missed: enraged"}</span></span>
       </button>`;
   };
-  const st = myStats(), g = G.loadout(st, me().gear, S.D.inv).g, pos = me().pos || G.suggestedPosition(g), best = G.suggestedPosition(g);
+  const st = myStats(), best = G.suggestedPosition(st), pos = me().pos || best;
   const noGear = G.SLOTS.filter((sl) => !me().gear?.[sl]);
   $("#app").innerHTML = `<section class="onboard rlobby">${head}
     <h1 class="ol disp ob-title">Raid lobby</h1>
@@ -2049,8 +2092,14 @@ function viewLobby() {
     }).join("")}</div>
     <span class="field-label">You</span>
     <div class="panel flat" style="margin:0">
+      <div class="loadout">${G.SLOTS.map((sl) => {
+        const it = G.itemById(me().gear?.[sl]);
+        return it ? `<button class="slot full" style="--rc:${G.tierOf(it.tier).color}" data-act="gear-pick" data-slot="${sl}" aria-label="Change your ${sl}: ${esc(it.name)}"><div class="art">${itemArt(it)}</div><span class="slab">${esc(it.name)}</span></button>`
+          : `<button class="slot" data-act="gear-pick" data-slot="${sl}" aria-label="Pick a ${sl}"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[sl])}<span>${sl[0].toUpperCase() + sl.slice(1)}</span></div></button>`;
+      }).join("")}</div>
+      <p class="tiny faint" style="margin:6px 0 10px">Tap a slot to swap in anything you own.</p>
       <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
-      <p class="tiny ${pos === best ? "faint" : "red-t"}" style="margin:8px 0 0">${pos === best ? `${G.posOf(pos).label} is your best spot.` : `Your best spot is the ${G.posOf(best).label.toLowerCase()}. Here you hit weaker and take more.`}${noGear.length ? ` <span class="red-t">Nothing in your ${noGear.join(", ")} slot${noGear.length > 1 ? "s" : ""}.</span>` : ""}</p>
+      <p class="tiny ${pos === best ? "faint" : "red-t"}" style="margin:8px 0 0">${pos === best ? `${G.posOf(pos).label} is your home row.` : `Your home row is the ${G.posOf(best).label.toLowerCase()}. Here you hit weaker and take more.`}${noGear.length ? ` <span class="red-t">Nothing in your ${noGear.join(", ")} slot${noGear.length > 1 ? "s" : ""}.</span>` : ""}</p>
     </div>
     <button class="btn ${mine?.ready ? "" : "gold"} xl block" style="margin-top:14px" data-act="lobby-ready">${mine?.ready ? "Not ready" : `${ic("check")} Ready`}</button>
   </section>`;
@@ -2750,6 +2799,8 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (d.shoptab) { S.shopTab = d.shoptab; render(); return; }
+  if (d.shopslot) { S.shopSlot = d.shopslot; render(); return; }
+  if (d.shopstyle) { S.shopStyle = d.shopstyle; render(); return; }
   if (d.profile) { profileSheet(d.profile); FX.play("tap"); return; }
   if (d.item) { itemSheet(d.item, d.deal === "1"); FX.play("tap"); return; }
   if (d.buy) { const item = G.itemById(d.buy); return shopAction("buy", { item: d.buy, deal: d.deal === "1" }, () => { FX.play("buy"); itemSheet(item.id, false); toast(`${item.name} equipped`); }); }
@@ -2841,13 +2892,17 @@ document.addEventListener("click", async (e) => {
     case "ability": raidAct("ab"); break;
     case "hunt": startHunt(); break;
     case "chat-close": closeChat(); break;
+    case "check-updates": checkUpdatesNow(t); break;
+    case "gear-wear": { const it = G.itemById(d.id); if (it && me().gear?.[it.slot] !== it.id) await shopAction("equip", { slot: it.slot, item: it.id }, () => { closeSheet(); FX.play("buy"); }); else closeSheet(); break; }
+    case "gear-off": await shopAction("equip", { slot: d.slot, item: null }, closeSheet); break;
+    case "gear-pick": gearPicker(d.slot); break;
     case "chat-search": { const sr = $("#csearch"); sr.hidden = !sr.hidden; if (!sr.hidden) $("#cq").focus(); else closeChatSearch(); break; }
     case "chat-latest": if (!CH.live) chatLoad(); else { const l = $("#clist"); l.scrollTop = l.scrollHeight; $("#cjump").hidden = true; } break;
     case "den-room": denSheet(d.room); break;
     case "den-give": denGive(d.room, Number(d.amount)); break;
     case "wear-buy": { const w = G.wardrobeById(d.id); if (w) wardrobe({ buy: w.id }, `Bought the ${w.name}`); break; }
     case "wear": wardrobe({ [d.kind]: d.id || null }, d.id ? "Looking sharp" : null); break;
-    case "chapter": chapterSheet(Number(d.k)); break;
+    case "chapter": playChapter(Number(d.k)); break;
     case "claim": claim(d.what, Number(d.k), d.ref); break;
     case "claim-track": claimTrack(); break;
     case "special": raidAct("sp"); break;
@@ -2885,6 +2940,27 @@ async function checkForUpdate() {
   } catch { /* offline: try again later */ }
 }
 setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);
+// The Check for updates button: a newer version of the game loads straight away; on Android, a newer app is offered too.
+async function checkUpdatesNow(btn) {
+  if (btn.disabled) return;
+  btn.disabled = true; btn.innerHTML = `${ic("refresh")} Checking…`;
+  let web = false;
+  try {
+    const res = await fetch("app.js", { method: "HEAD", cache: "no-store" });
+    const tag = res.headers.get("etag") || res.headers.get("last-modified");
+    web = updateReady || !!(tag && releaseTag && tag !== releaseTag);
+  } catch { /* offline */ }
+  if (web) {
+    toast("Updating…");
+    try { const reg = await navigator.serviceWorker?.getRegistration(); await reg?.update(); } catch { /* reload anyway */ }
+    location.reload();
+    return;
+  }
+  if (NATIVE) { store.set("appLatest", null); store.set("appUpdateLater", 0); await checkAppUpdate(); }
+  btn.disabled = false; btn.innerHTML = `${ic("refresh")} Check for updates`;
+  if (S.appUpdate) { S.tab = "today"; render(); scrollTo(0, 0); toast("There's a new version of the app. Tap Update to install it"); }
+  else toast(navigator.onLine === false ? "You're offline. Try again with signal" : "You're up to date");
+}
 
 // ---------- boot ----------
 (async function boot() {

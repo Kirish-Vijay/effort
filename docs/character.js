@@ -75,6 +75,113 @@ const SHAPES = {
 
 const signature = (a) => QUESTIONS.filter((q) => q.id !== "name").map((q) => String(a[q.id] ?? "").trim().toLowerCase()).join("|");
 
+// ---------- gear you can see: weapon, armour, trinket ----------
+// The app merges equipped item ids into the answers as _weapon, _armour, _trinket. Each becomes a "look" the 2D and
+// 3D ninjas know how to draw, plus the tier's colour and a rank (0 = common ... 8 = eternal) for how fancy it gets.
+// An item's own `look` (and `color`) win; otherwise keywords in its id and name, then its emoji, pick the look.
+const GEAR_LOOKS = {
+  weapon: ["sword", "club", "staff", "wand", "umbrella", "bat", "book", "spoon", "bag", "hammer", "fan", "whip"],
+  armour: ["vest", "plate", "robe", "hoodie", "coat"],
+  trinket: ["amulet", "badge", "orb", "bell", "feather", "charm"],
+};
+const GEAR_DEFAULT = { weapon: "club", armour: "vest", trinket: "charm" };
+// [look, words in id + name, emoji]: rules are tried in order (all words first, then all emoji); the first match wins.
+const GEAR_WORDS = {
+  weapon: [
+    ["club", /rolled.up|truncheon|cudgel|\bclub\b/, null],
+    ["umbrella", /umbrella|brolly|parasol/, /☂|☔|🌂/u],
+    ["bat", /\bbat\b|cricket|baseball|paddle|racket/, /🏏|🏓/u],
+    ["spoon", /spork|spoon|ladle|whisk/, /🍴|🥄/u],
+    ["sword", /sword|blade|knife|katana|sabre|saber|dagger|scissors|skewer|slicer|cutlass|machete/, /🗡|⚔|✂|🔪|🍢|🧀/u],
+    ["bag", /\bbag\b|sack|purse|handbag|tote|satchel|backpack/, /🛍|🎒|👜|💰/u],
+    ["fan", /\bfan\b|shuriken|scratchcard|tarot|playing card|pigeon|flock|feather/, /🪭|🃏|🎴|🕊/u],
+    ["whip", /whip|rope|chain|nunchuck|nunchuk|jump lead|lash|shoelace|bungee|lasso|flail/, /🪢|🔗|⛓/u],
+    ["book", /book|dictionary|encyclop|atlas|tome|ledger|clipboard|guest list|receipt|ticket|notice|\bbill\b|catalogue|dewey|pricing|surcharge|scroll|\bmenu\b/, /📕|📗|📘|📙|📚|📖|📒|📓|📔|📋|🧾|🗃|📜/u],
+    ["wand", /wand|divining|\brod\b|sceptre|scepter|baton|ray gun|blaster|beaker|test tube|blender|microwave/, /🪄|✨|🧪/u],
+    ["staff", /staff|\bpole\b|pike|lance|spear|fence post|\bpost\b|stave|\bcane\b|lollipop|stop sign|\bsign\b|\bbo\b|maypole/, /🦯|🥢|🍭|🛑/u],
+    ["hammer", /hammer|mallet|\bmace\b|gavel|\bram\b|wrecking|stamp|meteor|scooter|magnet/, /🔨|⚒|🪓|☄|🛴|🧲/u],
+  ],
+  armour: [
+    ["hoodie", /hood|onesie|jumper|sweater|sweatshirt|tracksuit|shell suit|pyjama|knit|scarf/, /🥷|🦖|🧶|🧣/u],
+    ["robe", /robe|gown|cloak|mantle|poncho|cape|towel|aura|field|wizard|\bhat\b|druid/, /🧙|🌀|🤫|🚿|🧖/u],
+    ["coat", /coat|jacket|anorak|puffer|bomber|parka|blazer|duffel|leathers|cardigan|\bcap\b/, /🧥|🥼/u],
+    ["plate", /plate|armou?r|exo|helmet|buckler|shield|mail|cube|pads|crown|beacon|bubble/, /🛡|🤖|⛑|🧱|🚪|👑|🗿|🟠|🧊/u],
+    ["vest", /vest|tabard|\bhi-?vis\b|waistcoat|gilet|shorts|\bbag\b/, /🦺/u],
+  ],
+  trinket: [
+    ["charm", /dice|rubber duck|gnome/, null],
+    ["orb", /\borb\b|\bball\b|sphere|crystal|gobstopper|globe|marble|\brock\b|\bgem\b|pearl|black hole|brain|\bjar\b|petri|soup|amber|8-ball/, /🔮|🎱|🌑|💎|🫧|🧠|🫙|🧫|🍲|🟠/u],
+    ["bell", /bell|whistle|horn|megaphone|radio|alarm|earpiece|phone|calculator|torch|remote|notification|bottle|drink|squash|thermos|coffee|bunsen|burner/, /🔔|📯|📣|📻|📱|📲|🔦|🚨|🧃|🥤|☕|🔥|🎧|📡/u],
+    ["badge", /badge|\bpin\b|\bcard\b|licence|license|ticket|stamp|\bpass\b|medal|tarot|scratchcard|sudoku|horoscope|newspaper|\bmap\b|shortcut|ledger|edition|notice|hubcap|green man/, /🏅|🎖|🪪|💳|🎫|🎟|🚦|⭐|🌟|🎴|🃏|🧩|📰|🗺|📒|📜|📕|📅|🛞|🖐/u],
+    ["feather", /feather|quill|plume|\bleaf\b|leaves|clover|flower|crown|\bchip\b|pigeon|advisor/, /🪶|🍀|🌸|🌼|🍃|🐦|🍵|🍟/u],
+    ["amulet", /amulet|necklace|pendant|locket|glasses|chain|medallion|talisman|lanyard/, /📿|👓/u],
+    ["charm", /charm|horseshoe|\bkeys?\b|keyring|wallet|purse|sweet|candy|crust|bread|\broll\b|flapjack|snack/, /🎲|🦆|🗝|👛|🍬|🍡|🍞|🥖|🍫|🧌/u],
+  ],
+};
+// Each look's own colour, and which looks take a colour from the item's words (hi-vis, black, gold...).
+const GEAR_BASE = {
+  sword: "#dfe7ee", club: "#a0703f", staff: "#8a5a2b", wand: "#4a3426", umbrella: "#2f3b52", bat: "#e2c88f", book: "#b8423a",
+  spoon: "#eef1f4", bag: "#4f9a6a", hammer: "#8b96a1", fan: "#f3e9d2", whip: "#7a3b2e",
+  vest: "#7a5a3a", plate: "#c4ced8", robe: "#5b4b8a", hoodie: "#6d7685", coat: "#9a7444",
+  amulet: "#e8b43a", badge: "#eef1f4", orb: "#bfe3ff", bell: "#d9a92c", feather: "#f4f1e8", charm: "#e8b43a",
+};
+const GEAR_HUED = new Set(["club", "umbrella", "book", "bag", "fan", "whip", "vest", "robe", "hoodie", "coat"]);
+const GEAR_HUES = [
+  [/\bhi[- ]?vis\b|visibility|fluorescent|belisha|beacon/, "#d4f23c"],
+  [/gold|golden|\bsun\b/, "#e8b43a"],
+  [/black|dark|night|void|shadow|midnight|bomber|nowhere|invisible|bin bag|moustache/, "#3b3f4c"],
+  [/white|lab coat|ghost|towel|hazmat|shower/, "#e6eaee"],
+  [/tinfoil|foil|chain|steel|metal|\btin\b|exo|vacuum|trolley|buckler|bin lid/, "#c4ced8"],
+  [/velvet|candy|sweet|pink/, "#d9609a"],
+  [/purple|cosmic|nebula|galaxy|crystal|wizard|muttering/, "#6a4fb0"],
+  [/\bred\b|fire|bunsen|kebab|dictionary/, "#c8463b"],
+  [/hedge|clover|green|zebra|crumb/, "#4f8f5a"],
+  [/waxed|leather|loden|duffel|tweed|cardigan|fence|cricket|feather/, "#8b6a44"],
+  [/rain|anorak|denim|blue|shell suit|tracksuit/, "#3f78c8"],
+];
+const RANK_LVL = [1, 3, 6, 11, 18, 25, 35, 48, 62]; // tier lvl → rank: common, rare, epic, legendary, mythic, relic, ascendant, celestial, eternal
+function gearLook(slot, item) {
+  const L = GEAR_LOOKS[slot];
+  if (!L) return null;
+  if (item && L.includes(item.look)) return item.look;
+  const text = `${item?.id || ""} ${item?.name || ""}`.toLowerCase().replace(/[-_]/g, " ").replace(/hi vis/g, "hi-vis");
+  for (const [look, re] of GEAR_WORDS[slot]) if (re && re.test(text)) return look;
+  const e = String(item?.e || "");
+  for (const [look, , re] of GEAR_WORDS[slot]) if (re && re.test(e)) return look;
+  return GEAR_DEFAULT[slot];
+}
+const gearCache = new Map();
+function gearPiece(slot, id) {
+  if (!id) return null;
+  id = String(id);
+  const ck = slot + ":" + id;
+  if (gearCache.has(ck)) return gearCache.get(ck);
+  const G = typeof window !== "undefined" ? window.Game : null, CAT = typeof window !== "undefined" ? window.EffortItems : null;
+  let item = null;
+  try { item = G?.itemById?.(id) || CAT?.ITEMS?.find((i) => i.id === id) || null; } catch { item = null; }
+  const tierId = item?.tier || (/^s\d+-/.test(id) ? id.split("-")[0] : "common");
+  let tier = null;
+  try { tier = (G?.tierOf && item ? G.tierOf(tierId) : null) || CAT?.TIERS?.find((x) => x.id === tierId) || null; } catch { tier = null; }
+  if (!tier && /^s\d+$/.test(tierId)) tier = { id: tierId, color: "#5fd0a8", lvl: Math.min(60, 6 + 4 * (Number(tierId.slice(1)) - 1)) };
+  tier = tier || { id: "common", color: "#9aa6c4", lvl: 1 };
+  const look = gearLook(slot, item || { id });
+  const text = `${id} ${item?.name || ""}`.toLowerCase().replace(/[-_]/g, " ");
+  const hue = GEAR_HUED.has(look) ? GEAR_HUES.find(([re]) => re.test(text))?.[1] : null;
+  const lvl = Number(tier.lvl) || 1;
+  let rank = 0;
+  for (let i = 0; i < RANK_LVL.length; i++) if (lvl >= RANK_LVL[i]) rank = i;
+  const hex = (c) => (/^#[0-9a-f]{6}$/i.test(String(c || "")) ? String(c).toLowerCase() : null);
+  const piece = { id, slot, look, tier: tier.id, color: hex(tier.color) || "#9aa6c4", rank, base: hex(item?.color) || hue || GEAR_BASE[look], name: item?.name || id, e: item?.e || "" };
+  if (item) gearCache.set(ck, piece); // unknown ids aren't cached: the catalogue may still be loading
+  return piece;
+}
+/** gear(answers) → { weapon, armour, trinket, key }: each null or { id, slot, look, tier, color, rank, base, name, e }. */
+function gear(a) {
+  a = a || {};
+  const weapon = gearPiece("weapon", a._weapon), armour = gearPiece("armour", a._armour), trinket = gearPiece("trinket", a._trinket);
+  return { weapon, armour, trinket, key: [a._weapon || "", a._armour || "", a._trinket || ""].join(",") };
+}
+
 function traits(a) {
   const sig = signature(a);
   const r = rng(hash(sig));
@@ -83,7 +190,7 @@ function traits(a) {
   const hue = Number.isFinite(Number(a.hue)) ? Number(a.hue) : Math.floor(r() * 360);
   const pal = (PALETTES[a.time] || PALETTES.noon)(hue);
   return {
-    sig, hue, num, time: a.time, wear: { suit: a._suit || null, band: a._band || null },
+    sig, hue, num, time: a.time, wear: { suit: a._suit || null, band: a._band || null }, gear: gear(a),
     pal: { ...pal, accent: hsl(hue + 150 + num * 3, 72, 54), accent2: hsl(hue + 200 + num * 5, 68, 62), cheek: "#ff8a8a" },
     shape: SHAPES[a.pace] ? a.pace : "stroll",
     pattern: a.land || "forest", carry: a.carry || "none", feature: a.creature || "bear",
@@ -122,6 +229,53 @@ function ninjaPalette(t) {
   const [s, l] = SUIT[t.time] || SUIT.noon, W = t.wear || {};
   return { suit: W.suit || hsl(t.hue, s, l), dark: W.suit ? darker(W.suit) : hsl(t.hue, s, Math.max(10, l - 12)), band: W.band || t.pal.accent, sash: t.pal.accent2,
     wrap: "#ece6d6", skin: SKIN[t.num % SKIN.length], metal: "#cfd8e0", straw: "#d9b46a", wood: "#3a2a22" };
+}
+
+// ---------- 2D gear ----------
+// A held weapon, drawn with its grip at 0,0 and its business end pointing up (-y). Rare+ gets tier-colour trims,
+// legendary+ a soft halo in the tier colour.
+const star5 = (x, y, R, r) => Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + (i * Math.PI) / 5, k = i % 2 ? r : R; return `${i ? "L" : "M"}${f(x + Math.cos(a) * k)},${f(y + Math.sin(a) * k)}`; }).join("") + "Z";
+function weapon2d(g) {
+  const b = g.base, tc = g.color, r = g.rank, trim = r >= 1 ? tc : darker(b, 0.7), s = `stroke="${INK}" stroke-width="2.4" stroke-linejoin="round"`;
+  const grip = (y0, h, col = "#3a2a22") => `<rect x="-3" y="${y0}" width="6" height="${h}" rx="2.5" fill="${col}" ${s}/>`;
+  const halo = (y, rr = 15) => (r >= 3 ? `<circle cx="0" cy="${y}" r="${rr}" fill="${tc}" opacity="${r >= 5 ? 0.34 : 0.24}"/>` : "");
+  switch (g.look) {
+    case "sword": return halo(-32) + grip(-4, 14) + `<path d="M-4.5,-7 V-40 L0,-50 L4.5,-40 V-7Z" fill="${b}" ${s}/>` + (r >= 1 ? `<path d="M0,-11 V-40" stroke="${tc}" stroke-width="2.2"/>` : "") + `<rect x="-10" y="-10" width="20" height="5" rx="2.5" fill="${trim}" ${s}/><circle cy="12" r="3.5" fill="${trim}" ${s}/>`;
+    case "staff": return halo(-52, 12) + `<rect x="-3" y="-50" width="6" height="74" rx="3" fill="${b}" ${s}/><rect x="-4" y="-7" width="8" height="12" rx="2" fill="${trim}" ${s}/>` +
+      (r >= 2 ? `<path d="M0,-62 L6,-53 L0,-44 L-6,-53Z" fill="${tc}" ${s}/>` : `<rect x="-4" y="-53" width="8" height="6" rx="2" fill="${trim}" ${s}/>`);
+    case "wand": return halo(-38, 11) + `<path d="M-2.6,6 L-1.8,-33 H1.8 L2.6,6Z" fill="${b}" ${s}/><path d="${star5(0, -38, 8, 3.4)}" fill="${r >= 1 ? tc : "#fff3b0"}" ${s}/>`;
+    case "umbrella": return halo(-30) + `<path d="M0,2 v7 q0,6 -6,6 q-5,0 -5,-5" fill="none" stroke="${INK}" stroke-width="6.4" stroke-linecap="round"/><path d="M0,2 v7 q0,6 -6,6 q-5,0 -5,-5" fill="none" stroke="#3a2a22" stroke-width="3" stroke-linecap="round"/>` +
+      `<rect x="-1.6" y="-54" width="3.2" height="58" fill="#c9cfd6" ${s}/><path d="M0,-52 L8.5,-14 Q0,-9 -8.5,-14Z" fill="${b}" ${s}/><path d="M-6.5,-27 H6.5" stroke="${trim}" stroke-width="3"/>`;
+    case "bat": return halo(-32) + grip(-12, 20) + (r >= 1 ? `<rect x="-3.5" y="-2" width="7" height="6" fill="${tc}" ${s}/>` : "") + `<rect x="-7" y="-50" width="14" height="40" rx="5" fill="${b}" ${s}/>` + (r >= 1 ? `<path d="M-5,-40 H5 M-5,-35 H5" stroke="${tc}" stroke-width="2.4"/>` : "");
+    case "book": return halo(-16, 18) + `<rect x="-12" y="-32" width="24" height="32" rx="3" fill="${b}" ${s}/><path d="M-7,-4 H9 V-28" stroke="#f4ecd8" stroke-width="3" fill="none"/><rect x="-12" y="-32" width="5" height="32" rx="2" fill="${trim}" ${s}/>` +
+      (r >= 2 ? `<circle cx="2" cy="-17" r="4" fill="${tc}" ${s}/>` : "");
+    case "spoon": return halo(-38, 12) + `<rect x="-2.3" y="-31" width="4.6" height="36" rx="2" fill="${r >= 1 ? tc : b}" ${s}/><ellipse cx="0" cy="-38" rx="7" ry="9.5" fill="${b}" ${s}/><path d="M-3,-46 V-41 M0,-47.5 V-42 M3,-46 V-41" stroke="${INK}" stroke-width="1.4"/>`;
+    case "bag": return halo(20, 18) + `<path d="M-7,10 Q-7,-5 0,-5 Q7,-5 7,10" fill="none" stroke="${INK}" stroke-width="5.6"/><path d="M-7,10 Q-7,-5 0,-5 Q7,-5 7,10" fill="none" stroke="${trim}" stroke-width="2.6"/>` +
+      `<path d="M-12,8 H12 L14,34 Q0,38 -14,34Z" fill="${b}" ${s}/>` + (r >= 1 ? `<rect x="-6" y="16" width="12" height="9" rx="2" fill="${tc}" ${s}/>` : "");
+    case "hammer": return halo(-41) + grip(-36, 44, "#8a5a2b") + `<rect x="-13" y="-48" width="26" height="15" rx="3" fill="${b}" ${s}/>` +
+      (r >= 1 ? `<rect x="-14.5" y="-49.5" width="5.5" height="18" rx="2" fill="${tc}" ${s}/><rect x="9" y="-49.5" width="5.5" height="18" rx="2" fill="${tc}" ${s}/>` : "");
+    case "fan": return halo(-20, 20) + `<path d="M0,2 L-29.4,-17 A34,34 0 0,1 29.4,-17 Z" fill="${b}" ${s}/>` +
+      [-50, -25, 0, 25, 50].map((a) => `<path d="M0,0 L${f(31 * Math.sin((a * Math.PI) / 180))},${f(-31 * Math.cos((a * Math.PI) / 180))}" stroke="${INK}" stroke-width="1.2" opacity=".55"/>`).join("") +
+      (r >= 1 ? `<path d="M-25.5,-14.7 A29.5,29.5 0 0,1 25.5,-14.7" fill="none" stroke="${tc}" stroke-width="4"/>` : "") + `<circle r="3.5" fill="${trim}" ${s}/>`;
+    case "whip": return halo(-20, 16) + grip(-13, 20) + `<path d="M0,-12 C8,-46 32,-42 28,-14 S16,18 30,26" fill="none" stroke="${INK}" stroke-width="6.4" stroke-linecap="round"/><path d="M0,-12 C8,-46 32,-42 28,-14 S16,18 30,26" fill="none" stroke="${b}" stroke-width="3.2" stroke-linecap="round"/>` +
+      (r >= 1 ? `<circle cx="30" cy="26" r="3.6" fill="${tc}" ${s}/>` : "");
+    default: return halo(-30) + grip(-6, 16) + `<path d="M-3.5,-6 L-8.5,-40 Q0,-51 8.5,-40 L3.5,-6Z" fill="${b}" ${s}/>` + (r >= 1 ? `<path d="M-7,-30 H7" stroke="${tc}" stroke-width="4"/>` : ""); // club
+  }
+}
+// A trinket at x,y (its own anchor: chest, belt, head or by the shoulder).
+function trinket2d(g, x, y) {
+  const tc = g.color, b = g.base, r = g.rank, s = `stroke="${INK}" stroke-width="2" stroke-linejoin="round"`;
+  const halo = (hx, hy, rr) => (r >= 3 ? `<circle cx="${f(hx)}" cy="${f(hy)}" r="${rr}" fill="${tc}" opacity="${r >= 5 ? 0.38 : 0.26}"/>` : "");
+  switch (g.look) {
+    case "amulet": return `<path d="M${f(x - 13)},${f(y - 18)} L${f(x)},${f(y - 3)} L${f(x + 13)},${f(y - 18)}" fill="none" stroke="${b}" stroke-width="1.8"/>` + halo(x, y + 1, 9) + `<circle cx="${f(x)}" cy="${f(y + 1)}" r="5" fill="${tc}" ${s}/><circle cx="${f(x - 1.4)}" cy="${f(y - 0.5)}" r="1.4" fill="#fff" opacity=".8"/>`;
+    case "badge": return halo(x, y, 12) + `<circle cx="${f(x)}" cy="${f(y)}" r="8.6" fill="${tc}" ${s}/><circle cx="${f(x)}" cy="${f(y)}" r="6.2" fill="${b}"/>` +
+      (g.e ? `<text x="${f(x)}" y="${f(y + 0.5)}" font-size="8" text-anchor="middle" dominant-baseline="central">${esc(g.e)}</text>` : "");
+    case "orb": return halo(x, y, 13) + (r >= 2 ? `<ellipse cx="${f(x)}" cy="${f(y)}" rx="13" ry="4" fill="none" stroke="${INK}" stroke-width="3.6"/><ellipse cx="${f(x)}" cy="${f(y)}" rx="13" ry="4" fill="none" stroke="${b}" stroke-width="1.6"/>` : "") +
+      `<circle cx="${f(x)}" cy="${f(y)}" r="8" fill="${tc}" ${s}/><circle cx="${f(x - 2.6)}" cy="${f(y - 2.6)}" r="2.4" fill="#fff" opacity=".85"/>`;
+    case "bell": { const c = r >= 1 ? tc : b; return halo(x, y + 6, 10) + `<path d="M${f(x)},${f(y - 3)} V${f(y)}" stroke="${INK}" stroke-width="2"/><path d="M${f(x - 6)},${f(y + 9)} Q${f(x - 6)},${f(y)} ${f(x)},${f(y)} Q${f(x + 6)},${f(y)} ${f(x + 6)},${f(y + 9)} L${f(x + 8)},${f(y + 12)} H${f(x - 8)}Z" fill="${c}" ${s}/><circle cx="${f(x)}" cy="${f(y + 13.5)}" r="2.2" fill="${INK}"/>`; }
+    case "feather": return halo(x - 6, y - 16, 10) + `<g transform="translate(${f(x)},${f(y)}) rotate(-28)"><path d="M0,2 C-6,-10 -3,-26 4,-32 C9,-20 7,-8 0,2Z" fill="${b}" ${s}/><path d="M4,-32 C7,-27 7.5,-22 6.5,-18 L1.5,-22 C2,-26 2.6,-29 4,-32Z" fill="${tc}"/><path d="M0,2 L3.5,-28" stroke="${INK}" stroke-width="1.2"/></g>`;
+    default: return `<path d="M${f(x)},${f(y - 6)} V${f(y)}" stroke="${INK}" stroke-width="2"/>` + halo(x, y + 6, 10) + `<path d="M${f(x)},${f(y)} L${f(x + 6)},${f(y + 6)} L${f(x)},${f(y + 12)} L${f(x - 6)},${f(y + 6)}Z" fill="${tc}" ${s}/><circle cx="${f(x)}" cy="${f(y - 6)}" r="2" fill="${b}" stroke="${INK}" stroke-width="1.2"/>`; // charm
+  }
 }
 
 function ninjaEyes(t, cx, ey, gap, top, mood) {
@@ -170,19 +324,52 @@ function svg(input, opts = {}) {
   }
   // legs + split-toe boots
   out += [-1, 1].map((d) => `<rect x="${f(cx + d * 17 - 8)}" y="170" width="16" height="30" rx="7" fill="${C.suit}" ${o}/><rect x="${f(cx + d * 17 - 8.5)}" y="186" width="17" height="6" rx="2" fill="${C.wrap}" stroke="${INK}" stroke-width="2"/><path d="M${f(cx + d * 17 - 11)},208 Q${f(cx + d * 17 - 11)},197 ${f(cx + d * 17)},197 Q${f(cx + d * 17 + 12)},197 ${f(cx + d * 17 + 12)},208Z" fill="${C.dark}" ${o}/><path d="M${f(cx + d * 17 + d * 5)},199 V207" stroke="${INK}" stroke-width="1.8"/>`).join("");
-  // torso: gi with a crossed collar, sash, knot and chest badge
-  out += `<path d="M${f(cx - tw)},${126} Q${f(cx - tw - 5)},${180} ${f(cx - tw + 8)},${182} H${f(cx + tw - 8)} Q${f(cx + tw + 5)},${180} ${f(cx + tw)},${126} Q${cx},${114} ${f(cx - tw)},${126}Z" fill="${C.suit}" ${o}/>`;
-  out += `<path d="M${cx - 18},${124} L${cx + 6},${160} M${cx + 18},${124} L${cx - 2},${152}" stroke="${C.dark}" stroke-width="4" stroke-linecap="round"/>`;
+  // gear (weapon in your right hand = viewer's left, armour over the gi, a trinket)
+  const GR = t.gear || {}, A = GR.armour, WP = GR.weapon, TR = GR.trinket;
+  const look = A ? A.look : null, ac = A ? A.base : null, at = A ? (A.rank >= 1 ? A.color : darker(A.base, 0.72)) : null;
+  // robes and coats hang below the gi
+  if (look === "robe") out += `<path d="M${f(cx - tw + 2)},148 L${f(cx - tw - 12)},195 Q${cx},201 ${f(cx + tw + 12)},195 L${f(cx + tw - 2)},148Z" fill="${ac}" ${o}/>` +
+    `<path d="M${f(cx - tw - 10)},191 Q${cx},197 ${f(cx + tw + 10)},191" fill="none" stroke="${at}" stroke-width="4"/><path d="M${cx},150 V197" stroke="${at}" stroke-width="3.4"/>`;
+  else if (look === "coat") out += [-1, 1].map((d) => `<path d="M${f(cx + d * (tw - 2))},148 L${f(cx + d * (tw + 8))},190 Q${f(cx + d * 14)},193 ${f(cx + d * 4)},190 L${f(cx + d * 4)},148Z" fill="${ac}" ${o}/>`).join("") +
+    (A.rank >= 1 ? [-1, 1].map((d) => `<path d="M${f(cx + d * 5)},176 V188" stroke="${at}" stroke-width="3"/>`).join("") : "");
+  // torso: gi with a crossed collar, sash, knot and chest badge (a vest, coat, robe or hoodie recolours it)
+  const torsoFill = A && look !== "plate" ? ac : C.suit;
+  out += `<path d="M${f(cx - tw)},${126} Q${f(cx - tw - 5)},${180} ${f(cx - tw + 8)},${182} H${f(cx + tw - 8)} Q${f(cx + tw + 5)},${180} ${f(cx + tw)},${126} Q${cx},${114} ${f(cx - tw)},${126}Z" fill="${torsoFill}" ${o}/>`;
+  if (look === "vest" || look === "coat") { // open down the front, the gi showing through
+    out += `<path d="M${cx - 9},119 L${cx - 7},181 H${cx + 7} L${cx + 9},119Z" fill="${C.suit}"/>`;
+    if (look === "vest" && ac === "#d4f23c") out += `<path d="M${f(cx - tw + 1)},146 H${cx - 9} M${cx + 9},146 H${f(cx + tw - 1)}" stroke="#eef2f4" stroke-width="4"/>`;
+    if (A.rank >= 1) out += `<path d="M${cx - 9},120 L${cx - 7},180 M${cx + 9},120 L${cx + 7},180" stroke="${at}" stroke-width="3"/>`;
+    if (look === "coat") out += [-1, 1].map((d) => `<path d="M${cx + d * 9},119 L${f(cx + d * 21)},121 L${cx + d * 10},140Z" fill="${darker(ac, 0.8)}" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>`).join("");
+  }
+  if (!A || look === "vest" || look === "coat") out += `<path d="M${cx - 18},${124} L${cx + 6},${160} M${cx + 18},${124} L${cx - 2},${152}" stroke="${C.dark}" stroke-width="4" stroke-linecap="round"/>`;
+  if (look === "hoodie") out += `<path d="M${cx - 15},146 H${cx + 15} L${cx + 19},158 H${cx - 19}Z" fill="${darker(ac, 0.82)}" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/><path d="M${cx - 6},123 V138 M${cx + 6},123 V136" stroke="${at}" stroke-width="2.6" stroke-linecap="round"/>`;
+  if (look === "robe") out += `<path d="M${cx - 15},121 L${cx},140 L${cx + 15},121" fill="none" stroke="${at}" stroke-width="4" stroke-linejoin="round"/>`;
+  if (look === "plate") out += `<path d="M${f(cx - tw + 4)},128 Q${cx},116 ${f(cx + tw - 4)},128 L${f(cx + tw - 7)},154 Q${cx},162 ${f(cx - tw + 7)},154Z" fill="${ac}" ${o}/><path d="M${cx},121 V157" stroke="${darker(ac, 0.7)}" stroke-width="2.4"/>` +
+    (A.rank >= 1 ? `<path d="M${f(cx - tw + 8)},151 Q${cx},158 ${f(cx + tw - 8)},151" fill="none" stroke="${at}" stroke-width="3.4"/>` : "");
   out += `<rect x="${f(cx - tw - 2)}" y="156" width="${f(2 * tw + 4)}" height="12" rx="5" fill="${C.sash}" ${o}/><circle cx="${cx - 14}" cy="162" r="5.5" fill="${C.sash}" ${o}/><path d="M${cx - 16},166 l-5,15 l6,-1 Z M${cx - 12},166 l3,15 l5,-3 Z" fill="${C.sash}" stroke="${INK}" stroke-width="2.2" stroke-linejoin="round"/>`;
   out += `<circle cx="${cx + 14}" cy="140" r="8.5" fill="${C.wrap}" stroke="${INK}" stroke-width="2"/>${SIGILS[t.month % 12](cx + 14, 140, C.band)}`;
   if (t.carry === "backpack" || t.carry === "camera") out += `<rect x="${f(cx + tw - 14)}" y="162" width="16" height="14" rx="4" fill="${C.dark}" stroke="${INK}" stroke-width="2.4"/>`;
-  // arms: up and ready when fresh, hanging when not
+  if (TR && TR.look === "amulet") out += trinket2d(TR, cx - 2, 138);
+  else if (TR && TR.look === "badge") out += trinket2d(TR, cx - 13, 141);
+  else if (TR && TR.look === "bell") out += trinket2d(TR, cx + tw - 7, 169);
+  else if (TR && TR.look === "charm") out += trinket2d(TR, f(cx - tw + 5), 172);
+  // arms: up and ready when fresh, hanging when not (in sleeves under a coat, robe or hoodie)
+  const sleeve = look === "coat" || look === "robe" || look === "hoodie" ? ac : C.suit;
+  const fist = {};
   const arm = (d) => {
     const sx = cx + d * (tw - 4), sy = 132, ex = cx + d * (tw + (mood === "fresh" ? 16 : 10)), ey = mood === "fresh" ? 140 : 166;
-    return `<path d="M${f(sx)},${sy} Q${f(sx + d * 12)},${f((sy + ey) / 2)} ${f(ex)},${f(ey)}" fill="none" stroke="${INK}" stroke-width="15" stroke-linecap="round"/><path d="M${f(sx)},${sy} Q${f(sx + d * 12)},${f((sy + ey) / 2)} ${f(ex)},${f(ey)}" fill="none" stroke="${C.suit}" stroke-width="9" stroke-linecap="round"/>` +
+    fist[d] = [ex, ey];
+    return `<path d="M${f(sx)},${sy} Q${f(sx + d * 12)},${f((sy + ey) / 2)} ${f(ex)},${f(ey)}" fill="none" stroke="${INK}" stroke-width="15" stroke-linecap="round"/><path d="M${f(sx)},${sy} Q${f(sx + d * 12)},${f((sy + ey) / 2)} ${f(ex)},${f(ey)}" fill="none" stroke="${sleeve}" stroke-width="9" stroke-linecap="round"/>` +
       `<circle cx="${f(ex)}" cy="${f(ey)}" r="7.5" fill="${C.dark}" ${o}/><path d="M${f(ex - 6)},${f(ey - 6)} l${f(d * 3)},-4" stroke="${C.wrap}" stroke-width="4" stroke-linecap="round"/>`;
   };
   out += arm(-1) + arm(1);
+  // shoulder trims: plate pauldrons, or tier-coloured epaulettes on rare+ armour
+  if (look === "plate") out += [-1, 1].map((d) => `<circle cx="${f(cx + d * (tw - 3))}" cy="129" r="10.5" fill="${ac}" ${o}/>` + (A.rank >= 1 ? `<circle cx="${f(cx + d * (tw - 3))}" cy="129" r="6.5" fill="none" stroke="${at}" stroke-width="2.6"/>` : "")).join("");
+  else if (A && A.rank >= 1) out += [-1, 1].map((d) => `<rect x="${f(cx + d * (tw - 5) - 8)}" y="121" width="16" height="7" rx="3.5" fill="${at}" stroke="${INK}" stroke-width="2.2"/>`).join("");
+  // the weapon, gripped in the right fist (bags hang, everything else leans out)
+  if (WP) { const [wx, wy] = fist[-1]; out += `<g transform="translate(${f(wx)},${f(wy)}) rotate(${WP.look === "bag" ? 0 : -18})">${weapon2d(WP)}</g><circle cx="${f(wx)}" cy="${f(wy)}" r="7.5" fill="${C.dark}" ${o}/>`; }
+  // a hoodie's hood bunches up behind the head
+  if (look === "hoodie") out += `<ellipse cx="${cx}" cy="${f(hy + R * 0.78)}" rx="${f(R * 0.98)}" ry="16" fill="${ac}" ${o}/>`;
   // hood ears from your pet (behind the head)
   if (t.feature === "fox" || t.feature === "cat") out += [-1, 1].map((d) => `<path d="M${f(cx + d * R * 0.35)},${f(hy - R * 0.82)} L${f(cx + d * R * 0.72)},${f(hy - R - 22)} L${f(cx + d * R * 0.92)},${f(hy - R * 0.45)}Z" fill="${C.suit}" ${o}/>`).join("");
   else if (t.feature === "bear") out += [-1, 1].map((d) => `<circle cx="${f(cx + d * R * 0.66)}" cy="${f(hy - R * 0.8)}" r="11" fill="${C.suit}" ${o}/>`).join("");
@@ -213,6 +400,9 @@ function svg(input, opts = {}) {
     else if (t.hat === "flowers") out += `<g transform="translate(${f(cx - R * 0.5)},${f(by - 1)})">${[0, 72, 144, 216, 288].map((a) => `<circle cx="${f(5 * Math.cos((a * Math.PI) / 180))}" cy="${f(5 * Math.sin((a * Math.PI) / 180))}" r="4.2" fill="#ff9ec7" stroke="${INK}" stroke-width="1.6"/>`).join("")}<circle r="3" fill="#ffd34d" stroke="${INK}" stroke-width="1.6"/></g>`;
     else if (t.hat === "beanie") out += `<circle cx="${cx}" cy="${f(hy - R - 6)}" r="10" fill="${C.dark}" ${o}/><rect x="${cx - 7}" y="${f(hy - R + 1)}" width="14" height="6" rx="2" fill="${C.band}" stroke="${INK}" stroke-width="2"/>`;
   }
+  // head and shoulder trinkets
+  if (TR && TR.look === "feather") out += t.hat === "wizard" || t.hat === "bucket" ? trinket2d(TR, f(cx - R * 0.78), f(hy - R * 0.52)) : trinket2d(TR, f(cx - R + 8), f(by - 3));
+  else if (TR && TR.look === "orb") out += trinket2d(TR, f(cx + tw + 20), 106);
   // mood extras
   if (mood === "foggy") out += `<rect x="${cx + tw + 2}" y="148" width="15" height="24" rx="3" fill="${INK}" transform="rotate(-14 ${cx + tw + 9} 160)"/><rect x="${cx + tw + 4}" y="151" width="11" height="17" rx="1.5" fill="#bfe9ff" transform="rotate(-14 ${cx + tw + 9} 160)"/>`;
   if (mood === "fresh") out += [[-1, 0], [1, 1]].map(([d, k]) => `<path d="M${f(cx + d * (R + 30))},${f(hy + 6 + k * 22)} v-10 M${f(cx + d * (R + 25))},${f(hy + 1 + k * 22)} h10" stroke="#f2a01c" stroke-width="3" stroke-linecap="round"/>`).join("");
@@ -292,5 +482,5 @@ function sceneSvg(biome, seed = 1) {
 // Rough count of distinct walkers the quiz can produce (shown on the reveal screen).
 const COMBOS = QUESTIONS.reduce((n, q) => n * (q.type === "choice" ? q.options.length : q.type === "hue" ? 360 : q.type === "number" ? 99 : 1), 1);
 
-window.Walker = { QUESTIONS, traits, svg, boss: bossSvg, scene: sceneSvg, signature, fallbackAnswers, hash, rng, COMBOS };
+window.Walker = { QUESTIONS, traits, svg, boss: bossSvg, scene: sceneSvg, signature, fallbackAnswers, hash, rng, COMBOS, gear, gearLook, GEAR_LOOKS };
 })();

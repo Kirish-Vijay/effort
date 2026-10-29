@@ -39,9 +39,9 @@ const DEFAULT_RULES = {
   auditFor: 6,
   auditBlock: 0.15,         // damage that gets through the Audit shield (weak spot hits ×2.5)
   stealDmgPerPct: 0.07,     // extra damage (as a share of his health) for each 1% stolen
-  comboWindowMs: 320,
+  comboWindowMs: 400,       // a combo survives a gap this long (plus a little per point of speed), so a steady 3 taps a second holds one
   comboMax: 50,
-  raidHpBase: 800000,       // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for four)
+  raidHpBase: 1400000,       // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for four)
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
   noFrontDmg: 1.3,          // with nobody at the front, every hit lands this much harder
   lapHp: 2,                 // after the last boss the ladder loops: each lap has this much more health…
@@ -184,22 +184,35 @@ function classOf(st) {
   return CAT().CLASSES.find((c) => c.stats.includes(top[0]) && c.stats.includes(top[1])) || CAT().CLASSES[0];
 }
 const POSITIONS = [
-  { id: "front", label: "Front", e: "🛡️", ability: "Shield Wall", abilityWhat: "Front row takes 60% less damage for 8s", mult: 1.15, aggro: 70,
+  { id: "front", label: "Front", e: "🛡️", ability: "Shield Wall", abilityWhat: "Front row takes 60% less damage for 8s", mult: 1.65, aggro: 70,
     passive: "Bodyguard", passiveWhat: "Takes 40% of every hit aimed at the back row" },
-  { id: "mid", label: "Middle", e: "⚔️", ability: "Big Swing", abilityWhat: "Your next 8 taps hit 3× as hard", mult: 1.3, aggro: 25,
+  { id: "mid", label: "Middle", e: "⚔️", ability: "Big Swing", abilityWhat: "Your next 8 taps hit 3× as hard", mult: 1, aggro: 25,
     passive: "Interrupt", passiveWhat: "Hit hard during a wind-up to stagger it to half damage (and stop a Ground Slam)" },
-  { id: "back", label: "Back", e: "🩹", ability: "Patch Up", abilityWhat: "Heal the most hurt teammate 35%", mult: 0.85, aggro: 5,
+  { id: "back", label: "Back", e: "🩹", ability: "Patch Up", abilityWhat: "Heal the most hurt teammate 35%", mult: 1.5, aggro: 5,
     passive: "Support", passiveWhat: "Every 20 taps patches up whoever needs it and clears slime, spores and burns" },
 ];
 const posOf = (id) => POSITIONS.find((p) => p.id === id) || POSITIONS[1];
 const posScores = (st) => ({ front: st.guard * 2 + st.power * 0.5, mid: st.power + st.speed, back: st.brains + st.luck * 0.8 + st.speed * 0.3 });
-function suggestedPosition(st) {
-  return Object.entries(posScores(st)).sort((a, b) => b[1] - a[1])[0][0];
+// Every class has a home row, so everyone in a class gets the same advice. Pass base stats (not ones with
+// gear on): gear can shift your top two stats, but it never changes your class.
+const HOME_ROW = { bouncer: "front", lollipop: "front", pigeon: "front", menace: "mid", mad: "mid", gremlin: "mid", pickpocket: "mid", librarian: "back", courier: "back", hedge: "back" };
+const homeRow = (cls) => HOME_ROW[cls] || "mid";
+// How hard you hit: the average of your class's two stats, plus whatever power your gear adds. So every class
+// starts out hitting about as hard as any other, and weapons are what make you hit harder.
+function attackOf(st, g) {
+  const [a, b] = classOf(st).stats;
+  return ((st[a] || 0) + (st[b] || 0)) / 2 + Math.max(0, (g.power || 0) - (st.power || 0));
 }
-// 1 in your best spot, less elsewhere. Out of position you hit weaker, take more and heal less.
-function posFit(st, pos) {
-  const sc = posScores(st), best = Math.max(...Object.values(sc));
-  return best > 0 ? Math.max(0.3, (sc[pos] ?? 0) / best) : 1;
+function suggestedPosition(st) {
+  return homeRow(classOf(st).id);
+}
+// 1 in your home row. Elsewhere your stats decide how well you cope (at most 0.75): out of position you hit
+// weaker, take more and heal less. st can include gear; home is your class's row.
+function posFit(st, pos, home) {
+  home = home || suggestedPosition(st);
+  if (pos === home) return 1;
+  const sc = posScores(st);
+  return clamp((sc[pos] ?? 0) / Math.max(1, sc[home]), 0.3, 0.75);
 }
 
 // ---------- gear ----------
@@ -259,11 +272,11 @@ function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, 
     level,
     // He keeps pace with you: every level you gain, he gets tougher (and you can steal a bit more).
     hp: Math.round((RULES.taxmanBaseHp + efforts * RULES.taxmanHpPerEffort + over * RULES.taxmanHpPerOverMin) * (1 + RULES.taxmanPerLevel * (level - 1))),
-    tapDmg: (10 + (g.power || 0) * 0.8) * (1 + efforts / Math.max(1, RULES.taxmanStepBoost)),
+    tapDmg: (10 + attackOf(st, g) * 0.8) * (1 + efforts / Math.max(1, RULES.taxmanStepBoost)),
     stepBoost: 1 + efforts / Math.max(1, RULES.taxmanStepBoost),
     critChance: (g.luck || 0) * 0.02 + (perks.critChance || 0),
     critMult: 3 + (perks.critDmg || 0),
-    comboWindow: RULES.comboWindowMs + (g.speed || 0) * 12,
+    comboWindow: RULES.comboWindowMs + (g.speed || 0) * 5,
     comboGain: 1 + (perks.combo || 0),
     stealCap: RULES.stealCap + (perks.steal || 0) + Math.min(0.15, RULES.stealPerLevel * (level - 1)) + (denMods(den).steal || 0),
     seconds: RULES.dailyWindowMin * 60,
@@ -451,33 +464,33 @@ function weekTable(members) {
 // everything twice as tough (and twice as rich) each lap, so it never stops getting harder. hp/dmg/reward are multipliers; speed scales the gap between attacks.
 // Each boss has its own signature move and its own rhythm: `pattern` is the pool it draws from in phases 1, 2 and 3.
 const BOSSES = [
-  { id: "notification", name: "Brett", title: "A big fat round slime monster. Defeat it.", hp: 1, dmg: 1, speed: 1, reward: 1,
+  { id: "notification", name: "Brett", title: "A slime made of every unread buzz. First through the seam when a town sits down.", hp: 1, dmg: 1, speed: 1, reward: 1,
     sig: "ooze", style: "Slow and heavy. Slimes a whole row at a time",
     pattern: [["swipe", "swipe", "stomp", "stomp", "ooze"], ["swipe", "stomp", "stomp", "ooze", "scream", "feast"], ["swipe", "stomp", "ooze", "scream", "feast"]],
     attacks: { swipe: "Slap", stomp: "Belly Flop", scream: "Screech", feast: "Gorge", ooze: "Ooze" } },
-  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 1.45, dmg: 1.0, speed: 0.97, reward: 1.4,
+  { id: "autoplay", name: "Rory", title: "Crawled out of the swamp of 'next episode in 5'. Its spores sit you back down.", hp: 1.32, dmg: 1.0, speed: 0.97, reward: 1.4,
     sig: "spores", style: "Stampedes and clouds of spores that keep on hurting",
     pattern: [["swipe", "swipe", "stomp", "spores", "scream"], ["swipe", "stomp", "stomp", "spores", "spores", "feast"], ["stomp", "spores", "scream", "scream", "feast"]],
     attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Bellow", feast: "Gorge", spores: "Spore Cloud" } },
-  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.15, dmg: 1.15, speed: 0.94, reward: 1.9,
+  { id: "leftonread", name: "Wisp", title: "Every message nobody answered. It knows exactly what it's like to be left behind.", hp: 1.08, dmg: 1.15, speed: 0.94, reward: 1.9,
     sig: "vanish", style: "Fades out where you can't hit it, then picks off the weakest",
     pattern: [["swipe", "swipe", "scream", "vanish"], ["swipe", "scream", "vanish", "vanish", "feast"], ["swipe", "scream", "scream", "vanish", "feast"]],
     attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain", vanish: "Vanish" } },
-  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.75, dmg: 1.3, speed: 0.91, reward: 2.5,
+  { id: "scroll", name: "Gale", title: "The endless scroll made into weather. It never stops spinning, so you can't either.", hp: 1.52, dmg: 1.3, speed: 0.91, reward: 2.5,
     sig: "gust", style: "Fast, and blows the front row out of position",
     pattern: [["swipe", "swipe", "gust", "stomp", "scream"], ["swipe", "gust", "stomp", "scream", "feast", "gust"], ["swipe", "gust", "scream", "scream", "feast"]],
     attacks: { swipe: "Slice", stomp: "Downdraft", scream: "Howl", feast: "Siphon", gust: "Gust" } },
-  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 2.25, dmg: 1.45, speed: 0.88, reward: 3.2,
+  { id: "kraken", name: "The Kraken", title: "Lives at the bottom of the feed, where it's always three in the morning.", hp: 1.69, dmg: 1.45, speed: 0.88, reward: 3.2,
     sig: "grab", style: "Two tentacles hit at once, and it grabs people",
     swipeHits: 2, swipeMult: 0.65,
     pattern: [["swipe", "swipe", "grab", "stomp", "scream"], ["swipe", "swipe", "grab", "stomp", "feast"], ["swipe", "grab", "scream", "stomp", "feast", "grab"]],
     attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour", grab: "Grab" } },
-  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 3.3, dmg: 1.6, speed: 0.85, reward: 4,
+  { id: "algorithm", name: "Grimm", title: "The Algorithm. Decides what everyone sees, and wants the Long Count switched off.", hp: 2.6, dmg: 1.6, speed: 0.85, reward: 4,
     sig: "slam", style: "Slow, crushing club swings. Stop the Ground Slam or it flattens you",
     swipeMult: 1.3,
     pattern: [["swipe", "swipe", "stomp", "slam"], ["swipe", "stomp", "slam", "scream", "feast"], ["swipe", "slam", "slam", "scream", "feast"]],
     attacks: { swipe: "Club Swing", stomp: "Boot Stomp", scream: "War Cry", feast: "Feast", slam: "Ground Slam" } },
-  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 4.3, dmg: 1.9, speed: 0.82, reward: 5,
+  { id: "dragon", name: "Vex", title: "Sleeps on a hoard of every hour ever lost to the glow. The last one before dawn.", hp: 2.94, dmg: 1.9, speed: 0.82, reward: 5,
     sig: "breath", style: "Fire that keeps burning. Only a Shield Wall covers the rows behind",
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
@@ -549,10 +562,10 @@ const SPECIALS = {
   menace: { name: "Joyride", short: "Joyride", what: "10s of double damage, and your combo can't drop", icon: "speed" },
   mad: { name: "Volatile Brew", short: "Brew", what: "A big blast, then the boss takes 20% more from everyone for 10s", icon: "fire" },
   gremlin: { name: "Chaos Roll", short: "Chaos", what: "Something good happens: a giant crit, a squad heal, or the next attack fizzles", icon: "star" },
-  lollipop: { name: "STOP!", short: "STOP!", what: "The squad ignores the boss's next attack completely", icon: "flag" },
-  librarian: { name: "SHHH", short: "SHHH", what: "The boss's next 2 attacks barely land, and it can't finish a Feast", icon: "brains" },
+  lollipop: { name: "STOP!", short: "STOP!", what: "A sign to the face, and the squad ignores the boss's next attack completely", icon: "flag" },
+  librarian: { name: "SHHH", short: "SHHH", what: "A crushing SHHH, then the boss's next 2 attacks barely land and it can't finish a Feast", icon: "brains" },
   pigeon: { name: "Pigeon Swarm", short: "Swarm", what: "For 10s the pigeons take its Strikes, everything else hits half as hard, and they peck", icon: "crown" },
-  courier: { name: "Express Delivery", short: "Delivery", what: "Brings a fallen teammate straight back, or fully heals the most hurt", icon: "heart" },
+  courier: { name: "Express Delivery", short: "Delivery", what: "A parcel to the face, then brings a fallen teammate straight back (or fully heals the most hurt)", icon: "heart" },
   pickpocket: { name: "Lift Wallet", short: "Lift", what: "Swipes a chunk of its health, and it hits 25% softer for 15s", icon: "coin" },
   hedge: { name: "Pound-Shop Prophecy", short: "Prophecy", what: "12s: the squad crits far more often and abilities recharge twice as fast", icon: "eye" },
 };
@@ -563,8 +576,8 @@ const specialOf = (m) => SPECIALS[m.cls] || SPECIALS.bouncer;
 function makeMember(m, row) {
   const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
   const maxHp = Math.round(80 + g.guard * 10);
-  const pos = m.pos || suggestedPosition(g);
-  return { ...m, g, perks, gearPts: points, cls: classOf(m.stats || {}).id, weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
+  const cls = classOf(m.stats || {}).id, best = homeRow(cls), pos = m.pos || best;
+  return { ...m, g, perks, gearPts: points, cls, best, atk: attackOf(m.stats || {}, g), weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
     pos, home: pos, hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0, sp: 0, specials: 0, supTaps: 0,
     cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
@@ -662,7 +675,7 @@ const attackName = (R, type) => R.boss.attacks?.[type] || ATTACKS[type]?.label |
 // One ordinary tap's damage before combo, crits and buffs.
 // How big a walker stands in the raid: their week's steps against the squad (stride), 0.78× to 1.4×.
 const stepScale = (stride) => Math.max(0.78, Math.min(1.4, 1 + ((Number(stride) || 1) - 1) * 0.6));
-const tapBase = (m) => (20 + m.g.power * 4) * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos) ** 1.5;
+const tapBase = (m) => (20 + m.atk * 4) * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos, m.best) ** 1.5;
 const charge = (m, n) => { m.sp = Math.min(RULES.spMax, (m.sp || 0) + n * (1 + m.g.brains * 0.015) * (1 + (m.perks.spCharge || 0))); };
 // How much the middle row has to deal during a wind-up to stagger it.
 const interruptNeed = (R, type) => Math.round(RULES.interruptShare * R.boss.max * (ATTACKS[type]?.stop ? 2 : 1) * (1 + (R.mods?.stagger || 0)));
@@ -703,7 +716,7 @@ function raidTap(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m)) return null;
   const B = R.boss, joy = R.t < m.joyUntil;
-  m.combo = joy || R.t - m.lastTap <= (RULES.comboWindowMs + m.g.speed * 12) / 1000 ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
+  m.combo = joy || R.t - m.lastTap <= (RULES.comboWindowMs + m.g.speed * 5) / 1000 ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
   m.lastTap = R.t;
   charge(m, RULES.spPerTap);
   // Back row, Support: every so many taps patches up whoever needs it most.
@@ -711,7 +724,7 @@ function raidTap(R, id) {
     m.supTaps = 0;
     const who = mostHurt(R);
     if (who && (who.hp < who.max || R.t < who.slimeUntil || R.t < who.dotUntil)) {
-      const amt = mend(R, m, who, who.max * RULES.supportHeal * posFit(m.g, m.pos));
+      const amt = mend(R, m, who, who.max * RULES.supportHeal * posFit(m.g, m.pos, m.best));
       fx(R, { type: "pulse", by: m.id, id: who.id, amt });
     }
   }
@@ -744,7 +757,7 @@ function raidAbility(R, id) {
   } else {
     const hurt = mostHurt(R);
     if (!hurt) return false;
-    const heal = mend(R, m, hurt, hurt.max * (0.35 + (m.perks.heal || 0)) * posFit(m.g, m.pos));
+    const heal = mend(R, m, hurt, hurt.max * (0.35 + (m.perks.heal || 0)) * posFit(m.g, m.pos, m.best));
     fx(R, { type: "heal", by: m.id, id: hurt.id, amt: heal });
     say(R, `${nm(m)} ${vb(m, "patches", "patch")} up ${hurt === m ? vb(m, "themself", "yourself") : nm(hurt).replace(/^You$/, "you")} (+${heal})`, "good");
   }
@@ -769,16 +782,17 @@ function raidSpecial(R, id) {
     if (roll === "crit") { dmgBoss(R, m, base * 60); extra = " A giant crit"; }
     else if (roll === "heal") { for (const x2 of alive(R)) mend(R, m, x2, x2.max * 0.3); extra = " The squad's healed"; }
     else { R.blockNext = 1; extra = " Its next attack will fizzle"; }
-  } else if (m.cls === "lollipop") R.blockNext = 1;
-  else if (m.cls === "librarian") { R.feeble = 2; if (B.feast) B.feast.dealt = Math.max(B.feast.dealt, B.feast.need); }
+  } else if (m.cls === "lollipop") { dmgBoss(R, m, base * 25); R.blockNext = 1; }
+  else if (m.cls === "librarian") { dmgBoss(R, m, base * 40); R.feeble = 2; if (B.feast) B.feast.dealt = Math.max(B.feast.dealt, B.feast.need); }
   else if (m.cls === "pigeon") { R.swarmUntil = R.t + 10; R.swarmBy = m.id; R.peckAcc = 0; }
   else if (m.cls === "courier") {
+    dmgBoss(R, m, base * 20);
     const down = R.members.find((x) => !x.alive && !x.away);
     if (down) {
       down.alive = true; down.hp = Math.round(down.max * 0.6); down.dotUntil = 0; down.slimeUntil = 0;
       fx(R, { type: "revive", ids: [down.id] }); extra = ` ${nm(down)} ${vb(down, "is", "are")} back`;
     } else { const who = mostHurt(R); if (who) { const amt = mend(R, m, who, who.max); fx(R, { type: "heal", by: m.id, id: who.id, amt }); } }
-  } else if (m.cls === "pickpocket") { dmgBoss(R, m, base * 15); R.weakUntil = R.t + 15; }
+  } else if (m.cls === "pickpocket") { dmgBoss(R, m, base * 30); R.weakUntil = R.t + 15; }
   else if (m.cls === "hedge") R.prophecyUntil = R.t + 12;
   m.sp = 0; m.specials = (m.specials || 0) + 1;
   fx(R, { type: "special", id: m.id, cls: m.cls, roll });
@@ -796,7 +810,7 @@ function raidMove(R, id, pos) {
 
 // What a hit of `base` does to someone, after guard, position, shields and specials.
 function dmgTo(R, m, base) {
-  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - Math.min(0.6, m.g.guard * 0.02)) / posFit(m.g, m.pos);
+  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - Math.min(0.6, m.g.guard * 0.02)) / posFit(m.g, m.pos, m.best);
   if (!alive(R).some((x) => x.pos === "front")) d *= RULES.noFrontDmg;
   if (R.t < m.shieldUntil) d *= 0.4;
   if (R.t < R.weakUntil) d *= 0.75;
@@ -994,8 +1008,9 @@ function botAct(R, m) {
   // Knocked out of place: get back after a moment, like a person would.
   if (m.pos !== m.home && m.botBackAt && R.t >= m.botBackAt) { m.botBackAt = 0; raidMove(R, m.id, m.home); return; }
   if (R.t >= m.botNext) {
-    // Bots tap at 3–5 taps a second, about what a person keeps up.
-    const rate = 3 + (m.g.speed / 10) * 2 * (0.6 + 0.4 * R.r());
+    // Bots tap at 3–5 taps a second, about what a person keeps up (the same for every class: people don't tap
+    // faster because their ninja's quick).
+    const rate = 3 + 2 * R.r();
     raidTap(R, m.id);
     m.botNext = R.t + 1 / rate;
   }
@@ -1362,7 +1377,7 @@ root.Game = {
   hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
   pace, weekTable,
-  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit,
+  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, attackOf,
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
   taxmanSetup, taxmanStart, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,

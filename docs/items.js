@@ -294,6 +294,106 @@ const ITEMS = [
   { id: "first-hedge-cloak", cls: "hedge", slot: "armour", tier: "eternal", name: "Cloak of the First Ever Hedge", e: "🌿", stats: { guard: 62, luck: 22 }, perk: ["heal", 0.7], text: "Before forests, before gardens, there was a wizard behind it." },
   { id: "shows-everything-ball", cls: "hedge", slot: "trinket", tier: "eternal", name: "The Crystal Ball That Shows Everything", e: "🔮", stats: { luck: 44 }, perk: ["loot", 0.8], text: "All of time and space. Mostly you, squinting into it." },
 ];
+// ---------- The open market: gear any class can wear ----------
+// Every tier has five styles for each slot (power, guard, speed, brains, luck), on the same stat budget as that
+// tier's class gear, so they're sidegrades with different perks rather than upgrades. Class gear keeps a slightly
+// stronger perk, so it stays the natural pick for its own class. Each entry: [name, emoji, look, text].
+// look: what the item looks like on your ninja (weapons: sword club staff wand umbrella bat book spoon bag hammer
+// fan whip; armour: vest plate robe hoodie coat; trinkets: amulet badge orb bell feather charm).
+const MARKET_STYLES = ["power", "guard", "speed", "brains", "luck"];
+const MARKET = {
+  common: {
+    weapon: [["Bin Lid of Reckoning", "🗑️", "club", "Lid off, gloves off."], ["Doorstop With Intent", "🚪", "club", "Holds doors. Holds grudges."], ["Selfie Stick, Extended", "🤳", "staff", "Reaches things. Hits things."], ["Laminated Bus Timetable", "🚌", "book", "Out of date and sharp at the corners."], ["Lucky Fish Slice", "🍳", "spoon", "Flips pancakes. Flips odds."]],
+    armour: [["Builder's Tabard", "🦺", "vest", "Hi-vis. Hi-confidence."], ["Double-Lined Parka", "🧥", "coat", "Can't feel a thing in it."], ["Shell Suit, Swishy", "👟", "hoodie", "Makes a noise like effort."], ["Charity Shop Tweed", "🧶", "coat", "Smells of libraries and Werther's."], ["Novelty Christmas Jumper", "🎄", "hoodie", "Worn in March. Defiantly."]],
+    trinket: [["Wristband From a Gig", "🎫", "badge", "Never cut it off. Never will."], ["Plaster on the Knee", "🩹", "badge", "Already feels better."], ["Fidget Spinner", "🌀", "orb", "Spins. Helps. Somehow."], ["Gold Star Sticker", "⭐", "badge", "From Year 4. Still counts."], ["Four-Leaf Clover, Laminated", "🍀", "charm", "Found it once. Kept it forever."]],
+  },
+  rare: {
+    weapon: [["Garden Fork, Bent", "🔱", "staff", "Three prongs of disappointment."], ["Riot Shield Tray", "🍽️", "club", "Lunch, served defensively."], ["Hockey Stick, Taped", "🏑", "bat", "Mostly tape at this point."], ["Encyclopaedia, Volume K", "📕", "book", "Knowledge, and a lot of weight."], ["Raffle Prize Rolling Pin", "🥖", "club", "Won it with ticket 77."]],
+    armour: [["Welder's Apron", "🔥", "vest", "Sparks off it like gossip."], ["Motorbike Leathers", "🏍️", "coat", "Smells of petrol and bravado."], ["Running Club Vest", "🎽", "vest", "Club motto: never stop, never stretch."], ["Professor's Cardigan", "🧑‍🏫", "robe", "Elbow patches doing a lot of work."], ["Lucky Rugby Shirt", "🏉", "hoodie", "Never washed. Never lost."]],
+    trinket: [["Medal From Sports Day", "🥈", "amulet", "Second in the egg and spoon."], ["Whistle on a Lanyard", "📯", "bell", "One blast and everyone behaves."], ["Stopwatch, Cracked", "⏱️", "amulet", "Still fast. Just uglier."], ["Pocket Calculator", "🧮", "badge", "Spells BOOBLESS upside down. Classic."], ["Bingo Dabber", "🎱", "charm", "Two fat ladies, eighty-eight."]],
+  },
+  epic: {
+    weapon: [["Sledgehammer From the Shed", "🔨", "hammer", "Fixes everything, permanently."], ["Lollipop Sign, Reinforced", "🛑", "club", "Stop means stop."], ["Carbon Walking Pole", "🥢", "staff", "Weighs nothing. Hits like a train."], ["Chess Clock Flail", "♟️", "whip", "Your move. Their problem."], ["Pub Quiz Trophy", "🏆", "club", "Won by one point. Never forgotten."]],
+    armour: [["Scaffolder's Harness", "🧗", "plate", "Clipped on to something, always."], ["Riot Van Padding", "🚓", "plate", "Took it off the van. Van didn't mind."], ["Fell Runner's Shell", "⛰️", "hoodie", "Waterproof, windproof, sense-proof."], ["Archivist's Gown", "📜", "robe", "Pockets full of footnotes."], ["Casino Waistcoat", "🎰", "vest", "Red always comes up eventually."]],
+    trinket: [["Knuckleduster Keyring", "🔑", "charm", "Opens doors. Closes arguments."], ["St Christopher Pendant", "📿", "amulet", "Patron saint of getting there."], ["Energy Gel, Unopened", "⚡", "badge", "Saving it for the hill."], ["Crossword Pen", "🖊️", "badge", "Seven down: 'stride' (6)."], ["Horseshoe, Upside Up", "🧲", "charm", "Luck doesn't fall out this way."]],
+  },
+  legendary: {
+    weapon: [["Caber From the Highland Games", "🪵", "club", "Tossed once. Kept tossing."], ["Beefeater's Halberd", "⚔️", "staff", "Guards the Tower. Guards you."], ["Royal Mail Sorting Whip", "📮", "whip", "Second-class post, first-class pain."], ["Bletchley Codebook", "📗", "book", "The answer was walking all along."], ["Grand National Riding Crop", "🏇", "whip", "Backed it at 100 to 1."]],
+    armour: [["Coal Miner's Jacket", "⛏️", "coat", "Seen the dark. Came back up."], ["Lifeboat Crew Drysuit", "🛟", "plate", "Launches in any weather."], ["Channel Swimmer's Grease", "🏊", "vest", "Twenty-one miles of goose fat."], ["Don's Gown From Oxford", "🎓", "robe", "Billowing is half the argument."], ["Lottery Winner's Dressing Gown", "🛁", "robe", "Bought on the Saturday night."]],
+    trinket: [["Prize Bull's Rosette", "🏵️", "badge", "Best in show, three years running."], ["Lighthouse Lens Shard", "💡", "orb", "Still turns towards the dark."], ["Pigeon Racing Ring", "🕊️", "charm", "Came home first. Always does."], ["Enigma Rotor", "⚙️", "amulet", "Turns once a day. Clicks into place."], ["Wishing Well Penny", "🪙", "charm", "Thrown in 1953. Still wishing."]],
+  },
+  mythic: {
+    weapon: [["Hammer of the Green Man", "🌳", "hammer", "Bark worse than its bite. Bite awful."], ["Shield-Oar of the Last Viking", "🛶", "club", "Rowed here. Staying."], ["Spring-Heeled Jack's Cane", "🦘", "staff", "Leaps rooftops. Lands on bosses."], ["Merlin's Lecture Notes", "📘", "book", "Annotated. Furious."], ["Black Dog's Lead", "🐕", "whip", "Walk it, or it walks you."]],
+    armour: [["Giant's Causeway Plate", "🪨", "plate", "Hexagonal. Unmoved."], ["Armour of the Lambton Worm", "🐛", "plate", "Grown back three times."], ["Wild Hunt Riding Cloak", "🐎", "coat", "Never stops galloping."], ["Druid's Mistletoe Robe", "🌿", "robe", "Knows what the stones know."], ["Selkie's Sealskin Coat", "🦭", "coat", "Lose it and the sea takes you back."]],
+    trinket: [["Kelpie's Bridle", "🌊", "charm", "Whoever holds it can't be pulled under."], ["Witch Bottle From a Chimney", "🫙", "amulet", "Pins, rosemary, and something else."], ["Will-o'-the-Wisp in a Jar", "🔦", "orb", "Leads you somewhere. Mostly right."], ["Merlin's Spectacles", "👓", "badge", "See what's coming. Hate it."], ["Hare's Foot of the Moor", "🐇", "charm", "The hare didn't need it. Apparently."]],
+  },
+  relic: {
+    weapon: [["Hammer From the First Forge", "🔥", "hammer", "Struck the first nail in England."], ["Hadrian's Gatepost", "🧱", "club", "Pulled straight out of the Wall."], ["Ley-Line Divining Rod", "🪄", "wand", "Twitches towards trouble."], ["Book of the Long Count", "📖", "book", "Every step ever walked, in tally marks."], ["Wheel of the Last Ferryman", "☸️", "fan", "Spins for whoever pays."]],
+    armour: [["Sutton Hoo Helm and Mail", "🪖", "plate", "Dug up and still sharp."], ["Mail of the Round Table", "🛡️", "plate", "Everyone sat equal. Everyone got hit."], ["Cloak of the Long Walkers", "🧣", "coat", "Worn by every squad that came back."], ["Robe of the Standing Stones", "🗿", "robe", "Hums at the solstice."], ["Fool's Motley of Fortune", "🃏", "robe", "Bells on. Luck on."]],
+    trinket: [["Tooth of the Lambton Worm", "🦷", "charm", "Still bites, out of habit."], ["Stone From Stonehenge, Small", "🪨", "orb", "Nobody noticed. Probably."], ["Bell From a Drowned Church", "🔔", "bell", "Rings at high tide. Rings for you."], ["Astrolabe of the Long Count", "🧭", "amulet", "Points along the route."], ["Coin From the Ferryman", "💰", "charm", "Paid your fare. Not yet."]],
+  },
+  ascendant: {
+    weapon: [["Thunderclap Mallet", "⛈️", "hammer", "Heard before it's swung."], ["Cloudbreaker Pike", "☁️", "staff", "Opens the sky. Holds the line."], ["Jet-Stream Fan", "🌬️", "fan", "Thirty thousand feet of tailwind."], ["Weather Station Almanac", "📙", "book", "Forecasts bosses with 90% accuracy."], ["Rainbow's End Whip", "🌈", "whip", "There was gold. You're holding it."]],
+    armour: [["Stormfront Plate", "🌩️", "plate", "Low pressure. High defence."], ["Hailstone Hauberk", "🧊", "plate", "Every link a frozen promise."], ["Slipstream Suit", "🪂", "hoodie", "Drag is a choice."], ["Aurora Scholar's Robe", "🌌", "robe", "Glows when you're right."], ["Cloud-Nine Smoking Jacket", "☁️", "coat", "Comfortable at altitude."]],
+    trinket: [["Lightning in a Bottle", "⚡", "orb", "Caught it once. Never again."], ["Kite Line to Heaven", "🪁", "feather", "Holds on whatever the wind does."], ["Swift's Feather", "🪶", "feather", "Never lands. Never needs to."], ["Barometer Brooch", "🌡️", "badge", "Knows what's coming before it comes."], ["Sunbeam Through Cloud", "🌤️", "orb", "Lands on you. Specifically you."]],
+  },
+  celestial: {
+    weapon: [["Meteorite Maul", "☄️", "hammer", "Arrived at 70,000 mph. Kept going."], ["Polestar Lance", "🌟", "staff", "Never moves. Never yields."], ["Comet-Tail Whip", "💫", "whip", "Visible once a lifetime. Your lifetime."], ["Star Chart of the Walkers", "🗺️", "book", "Every route is up there, in pinpricks."], ["Shooting Star Wand", "🌠", "wand", "Wish granted. Boss deleted."]],
+    armour: [["Eclipse Plate", "🌑", "plate", "Blots out everything, briefly."], ["Armour of the Plough", "✨", "plate", "Seven stars, riveted in."], ["Orbit-Cut Suit", "🛰️", "hoodie", "Falls around the world, never down."], ["Astronomer's Robe", "🔭", "robe", "Lined with the night."], ["Zodiac Coat", "♈", "coat", "Every sign's in your favour."]],
+    trinket: [["Neutron Star Locket", "🧿", "amulet", "A teaspoon weighs a mountain."], ["Moon Rock Charm", "🌕", "charm", "One small step, kept."], ["Pulsar Pocket Watch", "⏲️", "amulet", "Ticks perfectly forever."], ["Planisphere Pin", "📌", "badge", "Turn it to tonight's sky."], ["Lucky Star, Actual", "⭐", "orb", "You were born under it."]],
+  },
+  eternal: {
+    weapon: [["Hammer That Struck Midnight", "🕛", "hammer", "Every clock agreed."], ["Gate of the Last Morning", "⛩️", "club", "Nothing passes it. Nothing ever has."], ["Hand of the First Clock", "🕐", "sword", "Points forward. Only forward."], ["Ledger of Every Step", "📒", "book", "Your name's in it. Underlined."], ["Thread of Fate, Frayed", "🧵", "whip", "Snapped once. Knotted. Holding."]],
+    armour: [["Armour of the Unmoving Hour", "⏳", "plate", "Time stopped trying."], ["Shell of the World Turtle", "🐢", "plate", "Carries everything. Complains never."], ["Coat of the Endless Road", "🛣️", "coat", "Pockets full of miles."], ["Robe Woven From Tomorrow", "🔮", "robe", "Fits better next week."], ["Mantle of the Last Lucky Break", "🍀", "coat", "There won't be another. Doesn't need one."]],
+    trinket: [["Heart of the Long Count", "❤️‍🔥", "amulet", "Ticks with every step you take."], ["Keystone of the Sky", "🗝️", "charm", "Hold it and nothing falls."], ["Hourglass of Spare Seconds", "⌛", "orb", "The sand runs up."], ["The Final Footnote", "✒️", "badge", "Explains everything. Small print."], ["Wish That Came True", "🎐", "bell", "Rings once, softly. That was it."]],
+  },
+};
+// Budgets per tier: weapon/armour [main, second], trinket [stat]; perks are 80% of a class item's.
+const MARKET_BUDGET = {
+  common: [2, 0, 2], rare: [4, 0, 3], epic: [7, 2, 5], legendary: [10, 3, 7], mythic: [14, 5, 10], relic: [20, 7, 15],
+  ascendant: [29, 10, 21], celestial: [43, 15, 30], eternal: [62, 22, 44],
+};
+const MARKET_PERKS = {
+  //            epic   legendary mythic relic  ascendant celestial eternal
+  critDmg:    [0.25, 0.5, 0.8, 1, 1.25, 1.5, 1.6],
+  thorns:     [0.4, 0.8, 1.6, 2, 2.5, 3, 3.6],
+  combo:      [0.2, 0.4, 0.8, 1, 1.25, 1.5, 1.6],
+  spCharge:   [0.06, 0.1, 0.14, 0.18, 0.22, 0.26, 0.3],
+  critChance: [0.03, 0.06, 0.1, 0.12, 0.15, 0.18, 0.2],
+  lifesteal:  [0.008, 0.016, 0.03, 0.04, 0.05, 0.06, 0.065],
+  shield:     [1.5, 3, 5, 6, 8, 10, 11],
+  dodge:      [0.04, 0.06, 0.1, 0.12, 0.15, 0.16, 0.16],
+  cdr:        [0.08, 0.16, 0.24, 0.28, 0.35, 0.36, 0.36],
+  loot:       [0.08, 0.16, 0.28, 0.36, 0.45, 0.55, 0.64],
+  feast:      [1.4, 1.5, 1.8, 2.2, 2.6, 3.2, 3.4],
+  heal:       [0.08, 0.16, 0.28, 0.36, 0.45, 0.55, 0.56],
+  trivia:     [2, 4, 6, 8, 10, 12, 13],
+  steal:      [0.025, 0.05, 0.08, 0.1, 0.13, 0.16, 0.16],
+};
+// Which perk each style gets, per slot.
+const MARKET_PERK_OF = {
+  weapon: { power: "critDmg", guard: "thorns", speed: "combo", brains: "spCharge", luck: "critChance" },
+  armour: { power: "lifesteal", guard: "shield", speed: "dodge", brains: "cdr", luck: "loot" },
+  trinket: { power: "feast", guard: "heal", speed: "cdr", brains: "trivia", luck: "steal" },
+};
+const slug = (s) => s.toLowerCase().replace(/['’,.!]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+for (const [tier, slots] of Object.entries(MARKET)) {
+  const [main, second, single] = MARKET_BUDGET[tier], pi = ["epic", "legendary", "mythic", "relic", "ascendant", "celestial", "eternal"].indexOf(tier);
+  for (const [slot, list] of Object.entries(slots)) {
+    list.forEach(([name, e, look, text], i) => {
+      const style = MARKET_STYLES[i], base = slot === "weapon" ? "power" : "guard";
+      let stats;
+      // Power and luck both turn straight into damage, so those styles get trimmed budgets; otherwise raw damage
+      // would always be the best buy (checked in fights: every style lands within about 10% of the class item).
+      const trim = style === "power" || style === "luck" ? (slot === "trinket" && style === "power" ? 0.45 : 0.6) : 1;
+      if (slot === "trinket") stats = { [style]: Math.max(1, Math.round(single * trim)) };
+      else if (style === base) stats = { [base]: main };
+      else stats = second ? { [base]: main, [style]: Math.max(1, Math.round(second * trim)) } : { [base]: main - 1, [style]: 1 };
+      const perkType = MARKET_PERK_OF[slot][style], pv = pi >= 0 ? MARKET_PERKS[perkType][pi] : 0;
+      ITEMS.push({ id: `m-${slug(name)}`, cls: null, slot, tier, name, e, look, stats, perk: pi >= 0 ? [perkType, Math.round(pv * (perkType === "critChance" ? 0.4 : perkType === "critDmg" ? 0.6 : 1) * 1000) / 1000] : null, text, market: style });
+    });
+  }
+}
 // Names for the written seasons' sets; game.js gives every season's set its stats (and names later ones itself).
 const SEASON_SETS = {"s2": {"weapon": {"name": "Norwegian Cheese Slicer, Sharpened", "e": "🧀", "text": "Invented in Lillehammer for brown cheese. Repurposed for bosses."}, "armour": {"name": "Knitted Jumper Your Host Insists You Borrow", "e": "🧶", "text": "Itchy at minus twenty. Itchier indoors. You may not give it back."}, "trinket": {"name": "Thermos of Coffee, Still Hot After the Fjord", "e": "☕", "text": "Drunk at the top, the bottom, and every bench in between."}}, "s3": {"weapon": {"name": "Midsummer Maypole, Snapped in Half", "e": "🌼", "text": "Danced round it for six hours. Hit a boss with it for six seconds."}, "armour": {"name": "Sauna Towel, Worn With Dignity", "e": "🧖", "text": "The Finns say you don't need one. The Finns are very relaxed people."}, "trinket": {"name": "Midsummer Crown of Seven Flowers", "e": "🌸", "text": "Sleep on it and dream of your future. It's mostly walking."}}, "s4": {"weapon": {"name": "Walking Cane, Amber Handle (Mosquito Included)", "e": "🦯", "text": "Forty million years old. The mosquito still looks annoyed."}, "armour": {"name": "Loden Coat, Slightly Too Grand", "e": "🧥", "text": "Bought in Vienna. Now you have to walk like you're in Vienna."}, "trinket": {"name": "Lump of Baltic Amber, Possibly a Boiled Sweet", "e": "🟠", "text": "Washed up on a beach in Lithuania. Do not lick it to check."}}};
 root.EffortItems = { CLASSES, TIERS, ITEMS, SETS, SEASON_SETS };

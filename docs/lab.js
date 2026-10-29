@@ -598,7 +598,7 @@ function renderRaid() {
   FX.init($("#arena"));
   if (!R.over) FX.music(true, R.boss.phase || 1);
   if (three) {
-    V.raid.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: !!m.you, answers: m.answers, pos: m.pos, scale: G.stepScale(m.stride) })) });
+    V.raid.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: !!m.you, answers: { ...m.answers, ...Object.fromEntries(G.SLOTS.filter((sl) => m.equipped?.[sl]).map((sl) => [`_${sl}`, m.equipped[sl]])) }, pos: m.pos, scale: G.stepScale(m.stride) })) });
     if (!V.raid.A) return renderRaid();
     $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.you ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.you ? "You" : m.name)}<span class="st"></span><i><s></s></i></div>`).join("");
   }

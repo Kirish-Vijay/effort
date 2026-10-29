@@ -56,6 +56,8 @@ function traits(a) {
   const pal = (PALETTES[a.time] || PALETTES.noon)(hue);
   return {
     sig, hue, num, time: a.time, wear: { suit: a._suit || null, band: a._band || null },
+    // Equipped gear (_weapon, _armour, _trinket) resolved to looks by character.js, which every page loads first.
+    gear: typeof globalThis.Walker?.gear === "function" ? globalThis.Walker.gear(a) : null,
     pal: { ...pal, accent: hsl(hue + 150 + num * 3, 72, 54), accent2: hsl(hue + 200 + num * 5, 68, 62), cheek: "#ff8a8a" },
     shape: SHAPES[a.pace] ? a.pace : "stroll",
     pattern: a.land || "forest", carry: a.carry || "none", feature: a.creature || "bear",
@@ -134,7 +136,9 @@ function kf(p, keys) {
   }
   return keys[keys.length - 1][1];
 }
-const CH = ["px", "py", "pz", "rx", "ry", "sway", "top", "sq", "aLx", "aLz", "aRx", "aRz", "glow", "flash"];
+// wg: how far the held weapon turns in the fist, on top of its resting grip (so a swing raises it behind you,
+// brings it over the top and down in front, instead of just poking forward with the punch).
+const CH = ["px", "py", "pz", "rx", "ry", "sway", "top", "sq", "aLx", "aLz", "aRx", "aRz", "glow", "flash", "wg"];
 // One-shot actions: keyframed offsets from the rest pose over p = 0..1.
 const ACTIONS = {
   attack: { dur: 0.35, k: {
@@ -146,6 +150,7 @@ const ACTIONS = {
     aRx: [[0, 0], [0.22, -0.9], [0.5, 2.0, "o"], [0.7, 1.7], [1, 0]],
     aRz: [[0, 0], [0.22, 0.2], [0.5, -0.65], [1, 0]],
     aLx: [[0, 0], [0.5, -0.5], [1, 0]],
+    wg: [[0, 0], [0.22, 2.2], [0.5, -3.1, "o"], [0.75, -2.7], [1, 0]],
   } },
   big: { dur: 0.7, k: {
     py: [[0, 0], [0.4, 0], [0.52, 0.38, "o"], [0.63, 0, "i"], [1, 0]],
@@ -156,6 +161,7 @@ const ACTIONS = {
     aLx: [[0, 0], [0.4, 2.8], [0.52, 3.0], [0.64, 1.2, "o"], [0.82, 1.0], [1, 0]],
     aRz: [[0, 0], [0.4, -0.25], [0.64, -0.1], [1, 0]],
     aLz: [[0, 0], [0.4, 0.25], [0.64, 0.1], [1, 0]],
+    wg: [[0, 0], [0.4, -1.9], [0.52, -1.9], [0.64, -2.7, "o"], [0.82, -2.5], [1, 0]],
   } },
   hurt: { dur: 0.3, flash: "#ff3b30", k: {
     pz: [[0, 0], [0.22, 0.17, "o"], [1, 0]],
@@ -178,9 +184,11 @@ const ACTIONS = {
     sq: [[0, 0], [0.3, 0.2], [0.62, -0.2], [0.8, 0.06], [1, 0]],
     aRx: [[0, 0], [0.35, 2.6], [1, 0]], aLx: [[0, 0], [0.35, 2.4], [1, 0]],
     flash: [[0, 0], [0.25, 0.55], [1, 0]],
+    wg: [[0, 0], [0.35, -2.0], [1, 0]],
   } },
   cast: { dur: 0.5, k: {
     aRx: [[0, 0], [0.3, 1.45, "o"], [0.8, 1.45], [1, 0]], aLx: [[0, 0], [0.3, 1.4, "o"], [0.8, 1.4], [1, 0]],
+    wg: [[0, 0], [0.3, -1.55, "o"], [0.8, -1.55], [1, 0]],
     aRz: [[0, 0], [0.3, -0.3], [0.8, -0.3], [1, 0]], aLz: [[0, 0], [0.3, 0.3], [0.8, 0.3], [1, 0]],
     glow: [[0, 0], [0.3, 1], [0.8, 1], [1, 0]],
     sq: [[0, 0], [0.3, 0.06], [0.8, 0.04], [1, 0]],
@@ -197,10 +205,22 @@ const LOOPS = {
   cheer: (time, w, t) => {
     const p = (t % 0.5) / 0.5, h = Math.sin(Math.PI * p);
     return { py: 0.2 * h, sq: 0.18 * (h - 0.4), aRx: 2.7 + 0.2 * Math.sin(4 * Math.PI * p), aLx: 2.5 + 0.2 * Math.sin(4 * Math.PI * p + 1),
-      aRz: 0.3 * Math.sin(2 * Math.PI * p), aLz: -0.3 * Math.sin(2 * Math.PI * p), ry: 0.15 * Math.sin(2 * Math.PI * p) };
+      aRz: 0.3 * Math.sin(2 * Math.PI * p), aLz: -0.3 * Math.sin(2 * Math.PI * p), ry: 0.15 * Math.sin(2 * Math.PI * p), wg: -2.05 };
   },
-  block: (time, w, t) => ({ sq: -0.1, rx: -0.12, pz: 0.02, px: 0.006 * Math.sin(t * 50), aRx: 1.9, aRz: -0.75, aLx: 1.9, aLz: 0.75 }),
+  block: (time, w, t) => ({ sq: -0.1, rx: -0.12, pz: 0.02, px: 0.006 * Math.sin(t * 50), aRx: 1.9, aRz: -0.75, aLx: 1.9, aLz: 0.75, wg: -1.26 }),
 };
+
+// Gear geometry is shared by every ninja on the page (it never changes shape), so it lives here and is never disposed.
+const gearGeos = new WeakMap();
+function sharedGeo(THREE, key, make) {
+  let m = gearGeos.get(THREE);
+  if (!m) gearGeos.set(THREE, (m = new Map()));
+  let g = m.get(key);
+  if (!g) { g = make(); g.userData.keep = true; m.set(key, g); }
+  return g;
+}
+// How brightly legendary-and-up gear glows, by rank (kept low: the arena's bloom picks up anything much over 1.2).
+const GEAR_GLOW = [0, 0, 0, 0.45, 0.6, 0.75, 0.9, 1.0, 1.1];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const sp = (v, e) => Math.sign(v) * Math.abs(v) ** e;
@@ -236,12 +256,14 @@ export function buildWalker(THREE, answers, opts = {}) {
     uTint: { value: new THREE.Color(0, 0, 0) }, uTintAmt: { value: 0 },
     uFlash: { value: new THREE.Color(1, 0.2, 0.2) }, uFlashAmt: { value: 0 }, uOutScale: { value: 1 },
   };
+  const glowMats = []; // emissive gear materials (legendary+), pulsed gently from relic up
   function toon(hex, o = {}) {
-    const key = `t|${hex}|${o.gloss ?? 1}|${o.map ? o.map.uuid : ""}`;
+    const key = `t|${hex}|${o.gloss ?? 1}|${o.map ? o.map.uuid : ""}|${o.ei || 0}`;
     let m = mcache.get(key);
     if (!m) {
       m = new THREE.MeshToonMaterial({ color: o.map ? 0xffffff : hex, map: o.map || null, gradientMap: gradientMap(THREE) });
-      m.userData = { wu, gloss: { value: o.gloss ?? 1 }, rim: { value: o.rim ?? 0.32 } };
+      if (o.ei) { m.emissive.set(o.emissive || hex); m.emissiveIntensity = o.ei; glowMats.push(m); }
+      m.userData = { wu, gloss: { value: o.gloss ?? 1 }, rim: { value: o.rim ?? 0.32 }, ei: o.ei || 0 };
       m.onBeforeCompile = toonCompile;
       mcache.set(key, m); mats.add(m);
     }
@@ -423,7 +445,7 @@ export function buildWalker(THREE, answers, opts = {}) {
   }
 
   // ---------- arms (L = the ninja's left = -X = viewer-right in front view) ----------
-  const NEUTRAL = { px: 0, py: 0, pz: 0, rx: 0, ry: 0, sway: 0, top: 0, sq: 1, aLx: 0, aLz: -0.42, aRx: 0, aRz: 0.42, glow: 0, flash: 0 };
+  const NEUTRAL = { px: 0, py: 0, pz: 0, rx: 0, ry: 0, sway: 0, top: 0, sq: 1, aLx: 0, aLz: -0.42, aRx: 0, aRz: 0.42, glow: 0, flash: 0, wg: 0 };
   const shY = TY + 0.17, ARM = 0.25;
   const glowMat = new THREE.MeshBasicMaterial({ color: opts.castColor || "#5dff95", transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
   mats.add(glowMat);
@@ -459,6 +481,279 @@ export function buildWalker(THREE, answers, opts = {}) {
   mover.traverse((o) => { if (o.isMesh && o.material !== glowMat && !(o.material && o.material.side === THREE.BackSide && o.material.isMeshBasicMaterial)) bbox.expandByObject(o); });
   const height = bbox.max.y;
 
+  // ---------- gear: weapon in the right fist, armour over the gi, a trinket (after the height, so a raised
+  // weapon or a feather doesn't make you "taller" for name tags) ----------
+  const gearTicks = []; // (clock, flap) => void, for the bits that bob and sway
+  let hold = null, holdRest = 0, holdK = 1;
+  const GR = t.gear || {};
+  if (GR.weapon || GR.armour || GR.trinket) {
+    const SG = (key, make) => sharedGeo(THREE, `${key}|${detail}`, make);
+    const seg = (n) => Math.max(3, Math.round(n * detail));
+    const gp = (geo, color, parent, o = {}) => part(geo, toon(color, { gloss: o.gloss ?? 0.6, ei: o.ei || 0 }), parent, { outline: o.outline ?? 0.6 });
+    const trimOf = (g) => (g.rank >= 1 ? g.color : darker(g.base, 0.7));
+    const glowOf = (g) => GEAR_GLOW[Math.min(8, g.rank)] || 0;
+    const sph = () => SG("sph", () => new THREE.SphereGeometry(1, seg(12), seg(9)));
+    const gcyl = (rt, rb, h, rs = 12) => SG(`cyl${rt}|${rb}|${h}|${rs}`, () => new THREE.CylinderGeometry(rt, rb, h, seg(rs)));
+    const gcap = (r, len) => SG(`cap${r}|${len}`, () => new THREE.CapsuleGeometry(r, len, Math.max(2, seg(2)), Math.max(6, seg(8))));
+    const gbox = (w, h, d, r) => SG(`box${w}|${h}|${d}|${r || 0}`, () => (r ? roundedBox(THREE, w, h, d, r) : new THREE.BoxGeometry(w, h, d)));
+    const gtorus = (R, r, arc = Math.PI * 2) => SG(`tor${R}|${r}|${arc}`, () => new THREE.TorusGeometry(R, r, seg(6), seg(16), arc));
+    const goct = () => SG("oct", () => new THREE.OctahedronGeometry(1, 0));
+    // A lathe (shell of revolution) round the body's axis; gap leaves the front (-Z) open.
+    const glathe = (name, pts, gap = 0) => SG(`lathe${name}|${gap}`, () => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg(22), Math.PI + gap / 2, Math.PI * 2 - gap));
+    const _p = new THREE.Vector3(), _q = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+    const cord = (a, b, r, color, parent) => { // a thin rod between two points
+      const m = gp(gcyl(r, r, 1, 5), color, parent, { outline: 0 });
+      _p.set(...a); _q.set(...b); m.position.copy(_p).add(_q).multiplyScalar(0.5);
+      _q.sub(_p); m.scale.y = _q.length(); m.quaternion.setFromUnitVectors(UP, _q.normalize());
+      return m;
+    };
+    const at = (m, x, y, z, s) => { m.position.set(x, y, z); if (s != null) (Array.isArray(s) ? m.scale.set(...s) : m.scale.setScalar(s)); return m; };
+    const SZ = 0.88; // torso depth squash, so shells hug the body
+    const gearPh = ((t.seed % 1000) / 1000) * Math.PI * 2;
+
+    // ----- weapon: modelled with its grip at the origin and pointing up +Y, in a group that turns in the fist -----
+    if (GR.weapon) {
+      const g = GR.weapon, b = g.base, tc = g.color, tr = trimOf(g), ei = glowOf(g), r = g.rank, look = g.look;
+      hold = new THREE.Group(); hold.position.y = -0.23; armR.add(hold);
+      const W = new THREE.Group(); hold.add(W);
+      W.rotation.z = look === "bag" ? -0.42 : -0.62; // lean out from the body (bags just hang)
+      W.scale.setScalar(look === "staff" ? 1.12 : look === "bag" || look === "fan" ? 1.2 : 1.32); // chunky enough to read on a phone
+      holdRest = look === "bag" ? 0 : look === "staff" ? -0.4 : -0.64; holdK = look === "bag" ? 0.25 : look === "staff" ? 0.85 : 1;
+      const WOOD = "#3a2a22";
+      switch (look) {
+        case "sword": {
+          gp(gcap(0.024, 0.13), WOOD, W);
+          if (r >= 1) at(gp(gcyl(0.03, 0.03, 0.05), tc, W, { outline: 0 }), 0, -0.02, 0);
+          at(gp(sph(), tr, W, { ei, outline: 0 }), 0, -0.1, 0, 0.036);
+          at(gp(gbox(0.2, 0.036, 0.06, 0.014), tr, W, { ei: r >= 3 ? ei * 0.6 : 0 }), 0, 0.09, 0);
+          at(gp(gbox(0.078, 0.44, 0.024, 0.01), b, W, { gloss: 1 }), 0, 0.32, 0);
+          const tip = SG("swordtip", () => new THREE.ConeGeometry(0.0545, 0.12, 4).rotateY(Math.PI / 4).scale(1, 1, 0.3));
+          at(gp(tip, b, W, { gloss: 1 }), 0, 0.6, 0);
+          if (r >= 1) at(gp(gbox(0.02, 0.36, 0.028), tc, W, { outline: 0, ei }), 0, 0.31, 0);
+          break;
+        }
+        case "staff": {
+          at(gp(gcap(0.026, 1.0), b, W), 0, 0.12, 0);
+          at(gp(gcyl(0.031, 0.031, 0.13), r >= 1 ? tc : "#e9e2cf", W, { outline: 0.4 }), 0, 0, 0);
+          for (const y of [0.6, -0.37]) at(gp(gcyl(0.035, 0.035, 0.06), tr, W, { outline: 0 }), 0, y, 0);
+          if (r >= 2) { const gem = at(gp(goct(), tc, W, { ei, gloss: 1 }), 0, 0.71, 0, [0.06, 0.085, 0.06]); gem.rotation.y = 0.4; }
+          break;
+        }
+        case "wand": {
+          at(gp(gcyl(0.014, 0.022, 0.36, 8), b, W), 0, 0.13, 0);
+          if (r >= 1) at(gp(gcyl(0.02, 0.02, 0.03, 8), tc, W, { outline: 0 }), 0, 0.27, 0);
+          const star = at(gp(goct(), r >= 1 ? tc : "#fff3b0", W, { ei: Math.max(ei, 0.25), gloss: 1 }), 0, 0.35, 0, [0.045, 0.06, 0.045]);
+          star.rotation.y = Math.PI / 4;
+          break;
+        }
+        case "umbrella": {
+          at(gp(gcyl(0.012, 0.012, 0.66, 6), "#c9cfd6", W, { outline: 0.4 }), 0, 0.25, 0);
+          const hook = at(gp(gtorus(0.045, 0.014, Math.PI), WOOD, W, { outline: 0.5 }), 0.045, -0.08, 0); hook.rotation.z = Math.PI;
+          const canopy = SG("umbrella", () => new THREE.LatheGeometry([[0.008, 0.12], [0.06, 0.18], [0.082, 0.24], [0.072, 0.34], [0.04, 0.48], [0.008, 0.6]].map(([x, y]) => new THREE.Vector2(x, y)), seg(10)));
+          gp(canopy, r >= 1 ? tc : b, W, { outline: 0.7 });
+          at(gp(gcyl(0.072, 0.074, 0.03), r >= 1 ? darker(tc, 0.7) : "#c9a227", W, { outline: 0.4, ei: r >= 3 ? ei : 0 }), 0, 0.3, 0);
+          at(gp(sph(), "#c9cfd6", W, { outline: 0 }), 0, 0.61, 0, 0.016);
+          break;
+        }
+        case "bat": {
+          at(gp(gcyl(0.022, 0.024, 0.2, 8), r >= 1 ? tc : "#2b2b2b", W, { outline: 0.5 }), 0, 0.02, 0);
+          at(gp(gbox(0.11, 0.42, 0.046, 0.018), b, W), 0, 0.33, 0);
+          if (r >= 1) for (const y of [0.42, 0.47]) at(gp(gbox(0.113, 0.026, 0.049), tc, W, { outline: 0, ei }), 0, y, 0);
+          break;
+        }
+        case "book": {
+          at(gp(gbox(0.2, 0.26, 0.075, 0.012), b, W), 0, 0.16, 0);
+          at(gp(gbox(0.19, 0.24, 0.062), "#f4ecd8", W, { outline: 0 }), 0.012, 0.16, 0);
+          at(gp(gbox(0.03, 0.27, 0.082, 0.01), tr, W, { outline: 0.5 }), -0.09, 0.16, 0);
+          if (r >= 2) for (const z of [-1, 1]) { const e = at(gp(gcyl(0.036, 0.036, 0.012, 14), tc, W, { outline: 0.4, ei }), 0.01, 0.18, z * 0.04); e.rotation.x = Math.PI / 2; }
+          break;
+        }
+        case "spoon": {
+          at(gp(gbox(0.032, 0.3, 0.016, 0.007), r >= 1 ? tc : b, W, { outline: 0.5 }), 0, 0.12, 0);
+          at(gp(sph(), r >= 3 ? tc : b, W, { gloss: 1, ei }), 0, 0.36, 0, [0.072, 0.095, 0.03]);
+          if (/spork|fork/i.test(g.name)) for (const x of [-0.03, 0, 0.03]) at(gp(gbox(0.014, 0.06, 0.014), r >= 3 ? tc : b, W, { outline: 0.4 }), x, 0.465, 0);
+          break;
+        }
+        case "bag": { // hangs from the fist
+          at(gp(gtorus(0.055, 0.012), tr, W, { outline: 0.4 }), 0, -0.03, 0);
+          at(gp(gbox(0.2, 0.22, 0.1, 0.03), b, W), 0, -0.19, 0);
+          if (r >= 1) at(gp(gbox(0.09, 0.075, 0.106, 0.012), tc, W, { outline: 0, ei }), 0, -0.19, 0);
+          break;
+        }
+        case "hammer": {
+          at(gp(gcap(0.024, 0.4), "#8a5a2b", W), 0, 0.17, 0);
+          const head = new THREE.Group(); head.position.y = 0.45; head.rotation.x = Math.PI / 2; W.add(head);
+          gp(gcyl(0.078, 0.078, 0.26, 14), b, head, { gloss: 1 });
+          if (r >= 1) for (const y of [-0.11, 0.11]) at(gp(gcyl(0.083, 0.083, 0.035, 14), tc, head, { outline: 0.5, ei }), 0, y, 0);
+          break;
+        }
+        case "fan": {
+          const fc = canvas(128, 128), fx = fc.getContext("2d");
+          fx.fillStyle = b; fx.fillRect(0, 0, 128, 128);
+          fx.strokeStyle = "rgba(31,42,36,.55)"; fx.lineWidth = 2;
+          for (let a = 0; a < 360; a += 14) { fx.beginPath(); fx.moveTo(64, 64); fx.lineTo(64 + Math.cos((a * Math.PI) / 180) * 64, 64 + Math.sin((a * Math.PI) / 180) * 64); fx.stroke(); }
+          fx.strokeStyle = r >= 1 ? tc : darker(b, 0.75); fx.lineWidth = 12; fx.beginPath(); fx.arc(64, 64, 54, 0, Math.PI * 2); fx.stroke();
+          const face = SG("fan", () => new THREE.CylinderGeometry(0.27, 0.27, 0.016, seg(14), 1, false, Math.PI - 1.15, 2.3).rotateX(Math.PI / 2));
+          part(face, toon("#ffffff", { gloss: 0.3, map: texture(fc) }), W, { outline: 0.6 });
+          at(gp(gbox(0.03, 0.13, 0.022, 0.008), WOOD, W, { outline: 0.5 }), 0, 0.03, 0);
+          at(gp(sph(), tr, W, { outline: 0, ei }), 0, 0, 0, 0.022);
+          break;
+        }
+        case "whip": {
+          gp(gcap(0.024, 0.13), WOOD, W);
+          at(gp(sph(), tr, W, { outline: 0 }), 0, -0.09, 0, 0.032);
+          const pts = [[0, 0.08, 0], [0.02, 0.25, -0.02], [0.12, 0.36, -0.05], [0.24, 0.3, -0.05], [0.29, 0.14, -0.02], [0.27, -0.02, 0.02], [0.31, -0.14, 0.04]];
+          const lash = SG("lash", () => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p))), seg(24), 0.013, Math.max(4, seg(5))));
+          gp(lash, b, W, { outline: 0.5 });
+          if (r >= 1) at(gp(sph(), tc, W, { outline: 0.4, ei }), 0.31, -0.14, 0.04, 0.026);
+          break;
+        }
+        default: { // club
+          gp(gcap(0.026, 0.12), WOOD, W);
+          at(gp(gcyl(0.078, 0.042, 0.36, 12), b, W), 0, 0.25, 0);
+          at(gp(sph(), b, W, { outline: 0 }), 0, 0.43, 0, [0.078, 0.04, 0.078]);
+          if (r >= 1) at(gp(gcyl(0.077, 0.075, 0.04, 12), tc, W, { outline: 0.5, ei }), 0, 0.36, 0);
+          if (r >= 2) for (let k = 0; k < 4; k++) {
+            const a = (k / 4) * Math.PI * 2 + 0.4, stud = gp(SG("stud", () => new THREE.ConeGeometry(0.022, 0.05, 6)), tr, W, { outline: 0 });
+            stud.position.set(Math.cos(a) * 0.068, 0.27, Math.sin(a) * 0.068); stud.quaternion.setFromUnitVectors(UP, _p.set(Math.cos(a), 0.25, Math.sin(a)).normalize());
+          }
+        }
+      }
+    }
+
+    // ----- armour: a shell over the torso (lathed round the body), shoulder trims, sleeves for the soft ones -----
+    if (GR.armour) {
+      const g = GR.armour, b = g.base, tc = g.color, tr = trimOf(g), ei = glowOf(g), r = g.rank, look = g.look;
+      const shell = (name, pts, gap, color, o = {}) => { const m = gp(glathe(name, pts, gap), color, body, { outline: o.outline ?? 0.8, gloss: o.gloss, ei: o.ei }); m.scale.z = SZ; return m; };
+      const band = (name, r0, y0, y1, gap, color, o = {}) => shell(name, [[r0, y0], [r0 + 0.002, y1]], gap, color, { outline: 0.5, ...o });
+      // Thin strips that follow the shell: a narrow lathe slice offset just outside it, at angle phi (π = front).
+      const strip = (name, pts, phi, w, color, o = {}) => {
+        const geo = SG(`strip${name}|${w}`, () => new THREE.LatheGeometry(pts.map(([rr, y]) => new THREE.Vector2(rr + 0.008, y)), Math.max(2, seg(2)), -w / 2, w));
+        const sq = new THREE.Group(); sq.scale.z = SZ; body.add(sq);
+        const m = gp(geo, color, sq, { outline: 0, ei: o.ei }); m.rotation.y = phi; return m;
+      };
+      const sleeves = () => { for (const pv of [armL, armR]) { at(gp(gcap(0.079, 0.1), b, pv, { outline: 0.8 }), 0, -0.085, 0); if (r >= 1) at(gp(gcyl(0.084, 0.084, 0.03), tr, pv, { outline: 0.4, ei }), 0, -0.15, 0); } };
+      const epaulettes = () => { if (r >= 1) for (const d of [-1, 1]) { const ep = at(gp(sph(), tr, body, { outline: 0.5, ei }), d * 0.25, shY + 0.035, 0, [0.095, 0.035, 0.09]); ep.rotation.z = -d * 0.35; } };
+      const SASH_Y = TY - 0.07;
+      switch (look) {
+        case "plate": {
+          shell("plate", [[0.27, 0.47], [0.293, 0.52], [0.29, 0.6], [0.262, 0.66], [0.21, 0.71]], 0, b, { gloss: 1 });
+          band("platerim", 0.297, 0.465, 0.505, 0, tr, { ei });
+          at(gp(gbox(0.022, 0.15, 0.02), darker(b, 0.7), body, { outline: 0 }), 0, 0.585, -0.258);
+          if (r >= 2) for (const z of [-1, 1]) { const e = at(gp(gcyl(0.045, 0.045, 0.014, 14), tc, body, { outline: 0.4, ei }), 0, 0.6, z * 0.262); e.rotation.x = Math.PI / 2; }
+          const dome = SG("dome", () => new THREE.SphereGeometry(1, seg(14), seg(6), 0, Math.PI * 2, 0, Math.PI / 2));
+          for (const d of [-1, 1]) {
+            const pd = new THREE.Group(); pd.position.set(d * 0.27, shY - 0.01, 0); pd.rotation.z = -d * 0.45; body.add(pd);
+            at(gp(dome, b, pd, { gloss: 1, outline: 0.7 }), 0, 0, 0, [0.12, 0.085, 0.115]);
+            const rim = at(gp(gtorus(1, 0.1), tr, pd, { outline: 0.4, ei }), 0, 0.005, 0, [0.12, 0.115, 0.12]); rim.rotation.x = Math.PI / 2;
+          }
+          break;
+        }
+        case "robe": {
+          shell("robe", [[0.34, 0.1], [0.31, 0.22], [0.279, 0.4], [0.273, 0.54], [0.25, 0.63], [0.2, 0.71]], 0, b);
+          band("robehem", 0.343, 0.1, 0.15, 0, tr, { ei });
+          band("robebelt", 0.284, SASH_Y - 0.035, SASH_Y + 0.035, 0, C.sash, { outline: 0.6 });
+          strip("robefront", [[0.34, 0.1], [0.31, 0.22], [0.279, 0.4]], Math.PI, 0.16, tr, { ei });
+          for (const d of [-1, 1]) { const v = at(gp(gbox(0.03, 0.16, 0.02), tr, body, { outline: 0, ei }), d * 0.055, 0.6, -0.232); v.rotation.z = d * 0.55; v.rotation.x = -0.25; }
+          sleeves(); epaulettes();
+          break;
+        }
+        case "hoodie": {
+          shell("hoodie", [[0.27, 0.3], [0.278, 0.4], [0.274, 0.52], [0.252, 0.62], [0.2, 0.71]], 0, b);
+          band("hoodiehem", 0.283, 0.3, 0.35, 0, darker(b, 0.82));
+          const pocket = at(gp(gbox(0.22, 0.09, 0.03, 0.01), darker(b, 0.85), body, { outline: 0.5 }), 0, 0.39, -0.232); pocket.rotation.x = 0.08;
+          for (const d of [-1, 1]) { cord([d * 0.05, 0.64, -0.215], [d * 0.055, 0.53, -0.238], 0.007, tr, body); at(gp(sph(), tr, body, { outline: 0, ei }), d * 0.055, 0.525, -0.238, 0.014); }
+          const hood = at(gp(gtorus(0.22, 0.075, Math.PI), b, body, { outline: 0.7 }), 0, 0.7, 0.02); hood.rotation.x = Math.PI / 2; hood.scale.set(1, SZ, 1);
+          sleeves(); epaulettes();
+          break;
+        }
+        case "coat": {
+          const pts = [[0.33, 0.2], [0.3, 0.3], [0.281, 0.42], [0.275, 0.54], [0.252, 0.63], [0.2, 0.71]];
+          shell("coat", pts, 0.55, b);
+          band("coathem", 0.334, 0.2, 0.24, 0.55, tr, { ei });
+          shell("coatcollar", [[0.215, 0.66], [0.255, 0.76]], 0.9, darker(b, 0.85), { outline: 0.6 });
+          if (r >= 1) for (const s of [-1, 1]) strip("coatedge", pts, Math.PI + s * (0.55 / 2 + 0.03), 0.06, tr, { ei });
+          if (r >= 1) for (const y of [0.52, 0.42, 0.32]) { const ph = Math.PI + 0.55 / 2 + 0.11, rr = 0.29; at(gp(sph(), tc, body, { outline: 0, ei }), Math.sin(ph) * rr, y, Math.cos(ph) * rr * SZ, 0.016); }
+          sleeves(); epaulettes();
+          break;
+        }
+        default: { // vest
+          const pts = [[0.268, 0.3], [0.276, 0.4], [0.272, 0.52], [0.25, 0.62], [0.2, 0.7]];
+          shell("vest", pts, 0.75, b);
+          band("vesthem", 0.281, 0.295, 0.33, 0.75, tr, { ei });
+          if (b === "#d4f23c") band("vesthivis", 0.281, 0.42, 0.46, 0.75, "#eef2f4", { outline: 0 });
+          if (r >= 1) for (const s of [-1, 1]) strip("vestedge", pts, Math.PI + s * (0.75 / 2 + 0.03), 0.06, tr, { ei });
+          epaulettes();
+        }
+      }
+    }
+
+    // ----- trinket -----
+    if (GR.trinket) {
+      const g = GR.trinket, b = g.base, tc = g.color, ei = glowOf(g), r = g.rank, look = g.look;
+      // Sit on top of any armour shell: chest pieces come forward, belt pieces move out.
+      const puff = { plate: 0.045, robe: 0.03, coat: 0.03, hoodie: 0.028, vest: 0.022 }[GR.armour?.look] || 0;
+      const out = (x, z) => { const rr = Math.hypot(x, z / SZ) || 1, k = (rr + puff * 1.4) / rr; return [x * k, z * k]; };
+      const sway = (pivot, amp, speed, ph) => { const x0 = pivot.rotation.x, z0 = pivot.rotation.z; gearTicks.push((c, flap) => { pivot.rotation.z = z0 + Math.sin(c * speed + ph) * amp * (1 + flap * 3); pivot.rotation.x = x0 + Math.sin(c * speed * 0.7 + ph + 1) * amp * 0.6; }); };
+      switch (look) {
+        case "amulet": {
+          for (const d of [-1, 1]) cord([d * 0.1, 0.675, -0.19 - puff], [0, 0.585, -0.238 - puff], 0.006, b, body);
+          const pd = new THREE.Group(); pd.position.set(0, 0.565, -0.236 - puff); body.add(pd);
+          const disc = gp(gcyl(0.042, 0.042, 0.018, 14), b, pd, { outline: 0.5, gloss: 1 }); disc.rotation.x = Math.PI / 2;
+          at(gp(sph(), tc, pd, { gloss: 1, ei: Math.max(ei, r >= 1 ? 0.15 : 0), outline: 0 }), 0, 0, -0.01, [0.027, 0.027, 0.013]);
+          break;
+        }
+        case "badge": {
+          const bd = new THREE.Group(); bd.position.set(-0.118 - puff * 0.4, 0.585, -0.218 - puff); bd.rotation.y = 0.45; body.add(bd);
+          const disc = gp(gcyl(0.056, 0.056, 0.016, 16), tc, bd, { outline: 0.5, ei: ei * 0.6 }); disc.rotation.x = Math.PI / 2;
+          const ec = canvas(96, 96), ex = ec.getContext("2d");
+          ex.fillStyle = b; ex.fillRect(0, 0, 96, 96);
+          if (g.e) { ex.font = "64px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif"; ex.textAlign = "center"; ex.textBaseline = "middle"; ex.fillText(g.e, 48, 54); }
+          else { ex.fillStyle = tc; ex.beginPath(); ex.arc(48, 48, 22, 0, Math.PI * 2); ex.fill(); }
+          const face = part(SG("badgeface", () => new THREE.CircleGeometry(0.043, seg(18)).rotateY(Math.PI)), toon("#ffffff", { gloss: 0.2, map: texture(ec) }), bd, { outline: 0 });
+          face.position.z = -0.0095;
+          break;
+        }
+        case "orb": {
+          const ob = new THREE.Group(); ob.position.set(-0.46, 0.93, 0.06); body.add(ob);
+          at(gp(sph(), r >= 1 ? tc : b, ob, { gloss: 1, ei: Math.max(ei, 0.12), outline: 0.6 }), 0, 0, 0, 0.07);
+          let ring = null;
+          if (r >= 2) { ring = gp(gtorus(1, 0.06), darker(tc, 0.75), ob, { outline: 0, ei: ei * 0.5 }); ring.scale.setScalar(0.105); ring.rotation.x = 1.2; }
+          const y0 = ob.position.y, ph = gearPh;
+          gearTicks.push((c) => { ob.position.y = y0 + Math.sin(c * 2.1 + ph) * 0.035; if (ring) ring.rotation.z = c * 1.4; });
+          break;
+        }
+        case "bell": {
+          const pv = new THREE.Group(); const [bx, bz] = out(0.19, 0.16); pv.position.set(bx, TY - 0.1, bz); body.add(pv);
+          const bell = SG("bell", () => new THREE.LatheGeometry([[0.001, 0], [0.016, -0.004], [0.026, -0.024], [0.03, -0.05], [0.044, -0.074], [0.047, -0.084], [0.001, -0.084]].map(([x, y]) => new THREE.Vector2(x, y)), seg(14)));
+          at(gp(gtorus(0.014, 0.004), "#3a2a22", pv, { outline: 0 }), 0, 0.008, 0);
+          gp(bell, r >= 1 ? tc : b, pv, { gloss: 1, ei, outline: 0.6 });
+          at(gp(sph(), INK, pv, { outline: 0 }), 0, -0.088, 0, 0.014);
+          sway(pv, 0.18, 3.1, gearPh);
+          break;
+        }
+        case "feather": {
+          const kasa = t.hat === "wizard" || t.hat === "bucket";
+          const yk = kasa ? HR * 0.62 : HR * 0.48, rk = kasa ? HR * 0.9 : radAtY(yk) + 0.01;
+          const pv = new THREE.Group(); pv.position.set(-rk * 0.88, yk, rk * 0.47); pv.rotation.set(0.45, 0, 0.35); head.add(pv);
+          at(gp(gcyl(0.008, 0.008, 0.4, 5), "#6b5a45", pv, { outline: 0 }), 0, 0.19, 0);
+          at(gp(sph(), b, pv, { outline: 0.6 }), 0, 0.22, 0, [0.055, 0.2, 0.018]);
+          at(gp(sph(), tc, pv, { outline: 0.5, ei }), 0, 0.37, 0, [0.045, 0.085, 0.02]);
+          sway(pv, 0.06, 4.2, gearPh);
+          break;
+        }
+        default: { // charm, on a short cord from the sash at the left hip
+          const pv = new THREE.Group(); const [cx, cz] = out(-0.25, -0.06); pv.position.set(cx, TY - 0.1, cz); body.add(pv);
+          at(gp(gcyl(0.006, 0.006, 0.06, 5), INK, pv, { outline: 0 }), 0, -0.03, 0);
+          at(gp(sph(), b, pv, { outline: 0, gloss: 1 }), 0, -0.062, 0, 0.012);
+          const ch = at(gp(goct(), tc, pv, { gloss: 1, ei, outline: 0.5 }), 0, -0.11, 0, [0.04, 0.05, 0.022]); ch.rotation.y = 0.3;
+          sway(pv, 0.2, 2.7, gearPh + 1);
+        }
+      }
+    }
+  }
+  const pulse = glowMats.length && Math.max(GR.weapon?.rank || 0, GR.armour?.rank || 0, GR.trinket?.rank || 0) >= 5;
+
   // ---------- animation ----------
   const ph = (t.seed % 1000) / 1000;
   const W = { phase: opts.phase ?? ph * Math.PI * 2, omega: (2 * Math.PI) / (1.5 + ph * 0.5) };
@@ -490,6 +785,7 @@ export function buildWalker(THREE, answers, opts = {}) {
     lean.rotation.z = baseTilt + p.sway;
     armL.rotation.set(p.aLx, 0, p.aLz);
     armR.rotation.set(p.aRx, 0, p.aRz);
+    if (hold) hold.rotation.x = holdRest + holdK * p.wg;
     const g = clamp(p.glow, 0, 1);
     glowMat.opacity = 0.6 * g;
     for (const gl of glows) { gl.visible = g > 0.01; gl.scale.setScalar(0.001 + g * (0.09 + 0.015 * Math.sin(clock * 20))); }
@@ -513,6 +809,8 @@ export function buildWalker(THREE, answers, opts = {}) {
     // headband tails flutter, harder when cheering or attacking
     const flap = act.name === "cheer" || act.name === "attack" || act.name === "big" ? 0.3 : 0.12;
     wobblers.forEach((w, i) => { w.rotation.x = w.userData.rx0 + Math.sin(clock * 5.5 + i * 1.3 + W.phase) * flap - (p.pz < 0 ? p.pz * 0.8 : 0); });
+    for (let i = 0; i < gearTicks.length; i++) gearTicks[i](clock, flap);
+    if (pulse) { const k = 0.82 + 0.22 * Math.sin(clock * 2.6 + W.phase); for (let i = 0; i < glowMats.length; i++) glowMats[i].emissiveIntensity = glowMats[i].userData.ei * k; }
     group.getWorldScale(_a); wu.uOutScale.value = (_a.x + _a.y + _a.z) / 3;
   }
   function startAction(name, bd) {
