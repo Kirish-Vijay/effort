@@ -1,4 +1,4 @@
-// Effort 3D arena: the battle stage for the 7pm Taxman and the Sunday raid. Camera sits behind your squad
+// Effort 3D arena: the battle stage for the evening Taxman and the Sunday raid. Camera sits behind your squad
 // (Pokémon GO raid style), walkers stand in formation with their backs to you, the boss towers at the far end.
 // Loaded as a module; exposes window.Arena3D and fires "arena3d-ready". The lab drives it with game events.
 import * as THREE from "three";

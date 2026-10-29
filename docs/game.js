@@ -1,5 +1,5 @@
 // Effort game rules: the step currency, walker stats and classes, gear and perks, player levels,
-// the 7pm Taxman, the Sunday raid and its trivia. Pure logic with no DOM, so the lab, the app and
+// the evening Taxman, the Sunday raid and its trivia. Pure logic with no DOM, so the lab, the app and
 // the server can all run the same numbers. Needs items.js and prompts.js loaded first.
 (function (root) {
 "use strict";
@@ -24,8 +24,9 @@ const DEFAULT_RULES = {
   lastLoot: -0.25,          // ...the week's lowest walker gets 25% less...
   slackerTax: 0.1,          // ...and pays 10% of their week's Efforts to the top walker
   slackerAggro: 2.5,        // the boss goes for the lowest walker this many times as often
-  windowHour: 19,           // battles open at 7pm
-  dailyWindowMin: 5,
+  windowHour: 18,           // the Taxman's in from 6pm...
+  windowCloseHour: 21,      // ...till 9pm: start your fight any time in between
+  dailyWindowMin: 5,        // a Taxman fight lasts this long
   raidMin: 15,
   taxmanBaseHp: 35000,
   taxmanHpPerEffort: 100,
@@ -247,7 +248,7 @@ function dealsFor(day, cls, level) {
 }
 const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RULES.dealDiscount : 1));
 
-// ---------- 7pm: the Taxman ----------
+// ---------- 6pm to 9pm: the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
 // (only the moving weak spot takes proper damage), and golden receipts fly past for bonus loot.
 function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {}, level = 1, squadAvg = 0, den = null }) {

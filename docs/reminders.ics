@@ -23,11 +23,11 @@ END:VTIMEZONE
 BEGIN:VEVENT
 UID:effort-taxman@effort-game.vercel.app
 DTSTAMP:20261027T000000Z
-DTSTART;TZID=Europe/London:20261028T190000
-DTEND;TZID=Europe/London:20261028T190500
+DTSTART;TZID=Europe/London:20261029T180000
+DTEND;TZID=Europe/London:20261029T210000
 RRULE:FREQ=DAILY
 SUMMARY:Effort: fight the Taxman
-DESCRIPTION:Five minutes only. https://effort-game.vercel.app/
+DESCRIPTION:He's in from 6pm to 9pm. Five minutes to beat him. https://effort-game.vercel.app/
 URL:https://effort-game.vercel.app/
 BEGIN:VALARM
 ACTION:DISPLAY

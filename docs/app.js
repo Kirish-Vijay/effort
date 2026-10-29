@@ -9,9 +9,9 @@ const SB_URL = "https://nfsogyreyownlchwdnff.supabase.co";
 const SB_KEY = "sb_publishable_PUypet-MNmKBxmUIBpEbsw_ecCkuGhK";
 const PUSH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-push";
 const AUTH = "https://nfsogyreyownlchwdnff.supabase.co/functions/v1/effort-auth";
-// On Android in a browser: the Effort app does steps, scrolling and the 6:45pm ping with a tap each.
+// On Android in a browser: the Effort app does steps, scrolling and the evening pings with a tap each.
 function androidApp(t) {
-  return `<p class="small" style="margin-top:0">The Effort app does it all: steps and scrolling with one tap each, and the 6:45pm ping.</p>
+  return `<p class="small" style="margin-top:0">The Effort app does it all: steps and scrolling with one tap each, and a ping when the Taxman's in.</p>
     <a class="btn gold block" href="${STEPS_APK}">${ic("phone")} 1. Get the Effort app</a>
     <p class="tiny faint" style="margin:6px 2px 12px">Free, under 1 MB. Open the download and tap <b>Install</b>. If Android asks, allow installs from your browser. If Play Protect warns you, tap <b>More details → Install anyway</b>: it's our own app, it just isn't on the Play Store.</p>
     <a class="btn green block" href="${stepsAppLink(t)}">${ic("arrowRight")} 2. Open Effort in the app</a>
@@ -188,6 +188,14 @@ window.onEffortSteps = (n) => {
 // The Android back button: close a sheet, step back through the quiz, or go back to Today; otherwise leave the app.
 window.effortBack = () => {
   if (!$("#sheet").hidden) { closeSheet(); return true; }
+  // In chat: close the search, then a reply or edit, then go to Today like the other tabs do.
+  if (S.view === "chat") {
+    if ($("#csearch") && !$("#csearch").hidden) closeChatSearch();
+    else if (CH.mention) mentionShow(null);
+    else if (CH.reply || CH.edit) { CH.reply = CH.edit = null; chatComposerState(); }
+    else closeChat("today");
+    return true;
+  }
   if (["tax", "raid"].includes(S.view)) return true;
   const back = $("[data-act=quiz-back]") || $("[data-act=signin-back]") || $("[data-act=lobby-leave]") || $("[data-act=back]");
   if (back) { back.click(); return true; }
@@ -206,6 +214,7 @@ async function load() {
   S.D = D;
   ANS[D.me.id] = answersOf(D.me);
   nat("setToken", S.token);
+  if (D.fight?.finished_at) nat("taxDone", D.today.day);
   for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
   return D;
 }
@@ -289,7 +298,7 @@ const head2d = (answers) => Walker.svg(answers, { crop: "head", mood: "fresh" })
 const face = (id, size = 52) => `<div class="face has-fallback" style="width:${size}px;height:${size}px"><span class="fb">${head2d(ANS[id])}</span>${portraitImg("walker", id, { w: size * 2, h: size * 2, frame: "head" })}</div>`;
 
 // ---------- notifications ----------
-// A ping at 6:45pm, 15 minutes before the Taxman (and before the raid on Sunday). The server sends it;
+// A ping at 6pm when the Taxman's in (and the raid lobby on Sunday), and a last call at 8:30pm if you haven't fought. The server sends it;
 // this phone just has to sign up. iPhones only allow it once Effort is on the Home Screen.
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 async function callPush(action, body) {
@@ -326,7 +335,7 @@ async function enablePush() {
     await callPush("subscribe", { token: S.token, sub: sub.toJSON() });
     store.set("pushSynced", S.D?.today.day || "");
     S.push = "on"; render(); FX.play("levelup");
-    toast("You'll get a ping at 6:45pm");
+    toast("You'll get a ping at 6pm, and a last call at 8:30 if you haven't fought");
   } catch (e) { toast(`Couldn't turn them on: ${e.message}`); }
 }
 async function disablePush() {
@@ -344,13 +353,13 @@ async function keepPushAlive() {
 function pushBlock() {
   if (NATIVE) return S.native?.reminders
     ? `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("bell")} Pings on</span><span class="row" style="gap:6px"><button class="btn xs" data-act="native-test">Send a test</button><button class="btn xs" data-act="native-reminders-off">Turn off</button></span></div>`
-    : `<button class="btn gold block" data-act="native-reminders-on">${ic("bell")} Ping me at 6:45pm</button>`;
+    : `<button class="btn gold block" data-act="native-reminders-on">${ic("bell")} Ping me when the Taxman's in</button>`;
   switch (S.push) {
     case "on": return `<div class="row spread" style="flex-wrap:wrap;gap:8px"><span class="chip green">${ic("bell")} Pings on</span><span class="row" style="gap:6px"><button class="btn xs" data-act="push-test">Send a test</button><button class="btn xs" data-act="push-off">Turn off</button></span></div>`;
     case "install": return `<div class="guide small">On iPhone, notifications only work from the Home Screen app: tap <b>Share</b> → <b>Add to Home Screen</b>, open Effort from there, then turn them on.</div>`;
     case "denied": return `<div class="guide small">Notifications are blocked for Effort. Allow them in your phone's settings (or the browser's site settings), then come back here.</div>`;
     case "unsupported": return `<p class="small muted" style="margin:0">This browser can't do notifications. Use the calendar below.</p>`;
-    default: return `<button class="btn gold block" data-act="push-on">${ic("bell")} Ping me at 6:45pm</button>`;
+    default: return `<button class="btn gold block" data-act="push-on">${ic("bell")} Ping me when the Taxman's in</button>`;
   }
 }
 
@@ -398,30 +407,38 @@ function viewMain() {
       ${walletHtml()}
     </header>
     <div class="stack">${tabs[S.tab]()}</div>
-    <nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["journey", "Journey", "flag"], ["chat", "Chat", "chat"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
-      `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}>${ic(i)}${l}${dockDot(k)}</button>`).join("")}</div></nav>`;
+    ${dockHtml(S.tab)}`;
   // Already on the main screens: change only what's different. Coming from anywhere else: draw it fresh.
   const app = $("#app");
   if (app.firstElementChild?.matches("header.header")) morph(app, html, 3);
   else { app.innerHTML = html; for (const c of app.children) stamp(c, 3); }
 }
-// Today's walking that isn't in the wallet yet: a day is paid at midnight, after the Taxman's cut. Until the
-// Taxman's settled it's the full amount; after that, what's left of it once he's had his share.
+// Today's walking that isn't in the wallet yet. Before the Taxman's settled it's the full amount so far, shown as a
+// badge (his cut isn't known). Once he's settled (beaten, fought or missed) his rate covers the whole day, midnight
+// to midnight, and the server pays today in as it comes; this is the bit since it last did, so the wallet's numbers
+// can move straight away.
 function pendingToday() {
-  if (!S.D?.today) return { n: 0, taxed: false };
+  if (!S.D?.today) return { n: 0, taxed: false, rate: 0 };
   const T = taxSetup(), E = T.efforts, f = S.D.fight, st = taxState(), paid = ledgerFor("tax", S.D.today.day)?.amount || 0;
-  if (f && st === "done") return { n: Math.max(0, E - Math.round(E * Number(f.rate) * (1 - (Number(f.knocked) || 0))) + Math.round(E * (Number(f.steal_pct) || 0)) - paid), taxed: true };
-  if (st === "missed") return { n: Math.max(0, E - Math.round(E * T.taxRate)), taxed: true };
-  return { n: E, taxed: false };
+  if (f && st === "done") {
+    const k = Number(f.knocked) || 0, net = E - Math.round(E * Number(f.rate) * (1 - k)) + Math.round(E * (Number(f.steal_pct) || 0));
+    return { n: net - paid, taxed: true, rate: Number(f.rate) * (1 - k), steal: Number(f.steal_pct) || 0 };
+  }
+  if (st === "missed") return { n: E - Math.round(E * T.taxRate) - paid, taxed: true, rate: T.taxRate, steal: 0 };
+  return { n: E, taxed: false, rate: T.taxRate };
 }
 function walletHtml() {
-  const w = S.D.wallet;
+  const P = pendingToday(), w = S.D.wallet + (P.taxed ? P.n : 0);
   if (w < 0) return `<button class="wallet" data-act="wallet" aria-label="You owe ${fmt(-w)} Efforts"><span class="cur eff debt"><span class="cico">${coin(24)}</span><span class="cv"><b>−${fmt(-w)}</b><small>Efforts owed</small></span></span></button>`;
-  const n = Math.floor(w / PER_E()), e = w % PER_E(), p = pendingToday().n;
+  const n = Math.floor(w / PER_E()), e = w % PER_E(), p = P.taxed ? 0 : P.n;
   return `<button class="wallet" data-act="wallet" aria-label="${n} Endeavours and ${e} Efforts${p ? `, plus ${p} from today on the way` : ""}. What are these?">
       <span class="cur end"><span class="cico">${gem(24)}</span><span class="cv"><b>${fmt(n)}</b><small>Endeavour${n === 1 ? "" : "s"}</small></span></span>
       <span class="cur eff"><span class="cico">${coin(24)}</span><span class="cv"><b>${e}</b><small>Effort${e === 1 ? "" : "s"}</small></span>${p ? `<em class="pend">+${fmt(p)}</em>` : ""}</span>
     </button>`;
+}
+function dockHtml(on) {
+  return `<nav class="dock"><div class="inner">${[["today", "Today", "sword"], ["raid", "Raid", "raid"], ["journey", "Journey", "flag"], ["chat", "Chat", "chat"], ["shop", "Shop", "bag"], ["me", "Me", "user"]].map(([k, l, i]) =>
+      `<button data-tab="${k}" ${on === k ? 'aria-current="page"' : ""}>${ic(i)}${l}${dockDot(k)}</button>`).join("")}</div></nav>`;
 }
 // A dot on the dock when something's waiting: the Taxman is open, or the raid is live.
 function dockDot(tab) {
@@ -612,7 +629,12 @@ function viewChat() {
       <div class="crow"><textarea id="cinput" rows="1" maxlength="2000" placeholder="Message ${esc(squad()?.name || "your squad")}" aria-label="Message"></textarea>
         <button class="btn gold csend" aria-label="Send">${ic("arrowRight")}</button></div>
     </form>
-  </section>`;
+  </section>${dockHtml("chat")}`;
+  // The chat sits above the dock; while typing the dock steps aside for the keyboard.
+  const fit = () => { const cv = $("#chatview"), dock = $("#app > .dock"); if (cv && dock) cv.style.bottom = document.body.classList.contains("typing") ? "0px" : `${dock.offsetHeight}px`; };
+  fit(); addEventListener("resize", fit);
+  $("#chatview").addEventListener("focusin", (e) => { if (e.target.id === "cinput") { document.body.classList.add("typing"); fit(); } });
+  $("#chatview").addEventListener("focusout", (e) => { if (e.target.id === "cinput") setTimeout(() => { if (document.activeElement?.id !== "cinput") { document.body.classList.remove("typing"); fit(); } }, 120); });
   const list = $("#clist");
   list.addEventListener("scroll", () => {
     if (list.scrollTop < 160) chatOlder();
@@ -659,12 +681,14 @@ function openChat() {
   }
   clearInterval(CH.poll); CH.poll = setInterval(() => { if (S.view === "chat" && !document.hidden) chatNewer(); }, 15000);
 }
-function closeChat() {
+function closeChat(tab) {
   clearInterval(CH.poll);
   try { CH.ch?.unsubscribe(); } catch { /* gone */ }
   CH.ch = null;
+  document.body.classList.remove("typing");
   S.view = "main";
-  render();
+  if (tab) { S.tab = tab; store.set("tab", tab); }
+  render(); scrollTo(0, 0);
 }
 async function chatAction(act, id) {
   const m = CH.msgs.get(id);
@@ -998,15 +1022,15 @@ function taxHero() {
     const k = Number(f.knocked);
     chip = `<span class="chip">${ic("check")} Done for today</span>`;
     line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : k >= 0.05 ? `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.` : `He took the full ${Math.round(Number(f.rate) * 100)}%.`;
-    btn = `<div class="rline total" style="margin-top:12px"><span>Banked tonight</span><span class="rv">${paid ? signedEfforts(paid.amount) : "–"}</span></div>
-      <p class="tiny faint" style="margin:6px 0 0">Steps after 7pm still count: they pay out after midnight on the same terms.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
+    btn = `<div class="rline total" style="margin-top:12px"><span>Banked today</span><span class="rv">${paid ? signedEfforts(paid.amount + Math.max(0, pendingToday().n)) : "–"}</span></div>
+      <p class="tiny faint" style="margin:6px 0 0">These terms cover all of today, midnight to midnight: keep walking and it keeps going in.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
   } else if (st === "soon") {
-    chip = `<span class="chip gold">${ic("clock")} Tonight · 7pm</span>`;
-    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Five minutes to knock him out.`;
-    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${NATIVE ? (S.native?.reminders ? "" : `<button class="btn xs block" style="margin-top:10px" data-act="native-reminders-on">${ic("bell")} Ping me at 6:45pm</button>`) : S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me at 6:45pm</button>` : ""}`;
+    chip = `<span class="chip gold">${ic("clock")} Tonight · 6pm to 9pm</span>`;
+    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Turn up any time from 6 to 9: five minutes to knock him out.`;
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${NATIVE ? (S.native?.reminders ? "" : `<button class="btn xs block" style="margin-top:10px" data-act="native-reminders-on">${ic("bell")} Ping me when he's in</button>`) : S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me when he's in</button>` : ""}`;
   } else {
     chip = `<span class="chip red">${ic("warning")} Missed tonight</span>`;
-    line = `No fight, so he takes the full ${Math.round(T.taxRate * 100)}% when today settles after midnight.`;
+    line = `No fight, so he takes the full ${Math.round(T.taxRate * 100)}% of today's walking, midnight to midnight. The rest goes straight into your wallet.`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span></button>`;
   }
   return `<section class="panel hero">
@@ -1030,7 +1054,7 @@ function tabToday() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort, up to ${G.RULES.dailyEffortCap} a day. ${PER_E()} Efforts make 1 Endeavour, which is what gear costs.</span></div></div>
         <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>7pm: five minutes to fight</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it; knock him out to keep everything, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra. Miss it and he takes the lot.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: five minutes to fight</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it; knock him out to keep everything, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra. Miss it and he takes the lot.</span></div></div>
         <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>When he Audits you only the moving target takes damage. Golden receipts knock 3% off his health.</span></div></div>
       </div>
     </section>`;
@@ -1255,7 +1279,7 @@ function tabMe() {
     ${wardrobePanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("bell")}</span><h2 class="ol-sm">Reminders</h2></div>
-      <p class="small muted" style="margin:0 0 10px">The Taxman is only around 7pm to 7:05pm, and the raid is Sunday 7pm to 7:15pm. Get a ping at 6:45pm so you don't miss them.</p>
+      <p class="small muted" style="margin:0 0 10px">The Taxman is in from 6pm to 9pm, and the raid lobby is Sunday 6pm to 9pm. Get a ping at 6pm, and a last call at 8:30 if you haven't fought.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -1288,7 +1312,7 @@ function reminderButtons() {
   const gcal = (text, start, mins, rule) => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(text)}&dates=${gstamp(start)}/${gstamp(start + mins * 60000)}&ctz=Europe/London&recur=${encodeURIComponent("RRULE:" + rule)}&details=${encodeURIComponent(APP_URL)}`;
   const taxAt = w.tax.test ? w.tax.next : w.tax.opens > now() ? w.tax.opens : w.tax.next;
   return `<a class="btn sm block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
-    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman", taxAt, 5, "FREQ=DAILY")}">Google: 7pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–9pm)", w.raid.test ? w.raid.closes : w.raid.opens, 180, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
+    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman (6–9pm)", taxAt, 180, "FREQ=DAILY")}">Google: 6pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–9pm)", w.raid.test ? w.raid.closes : w.raid.opens, 180, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
 }
 
 // ---------- sheets ----------
@@ -1327,15 +1351,15 @@ function iphoneHome(kind) {
         <li><b>New Blank Automation</b> → <b>Get Contents of URL</b>, paste:${box(`${API}/scroll?t=${t}&ev=open`)}</li>
         <li>Make a second one the same way, ticking <b>Is Closed</b> and using:${box(`${API}/scroll?t=${t}&ev=close`)}</li>
       </ol>`;
-  return `<p class="small" style="margin-top:0">There's no App Store app, so Effort runs from your Home Screen instead: full screen like an app, signed in, with the 6:45pm ping. A Shortcut sends your steps by itself.</p>
+  return `<p class="small" style="margin-top:0">There's no App Store app, so Effort runs from your Home Screen instead: full screen like an app, signed in, with the evening pings. A Shortcut sends your steps by itself.</p>
     <span class="field-label">1 · Put Effort on your Home Screen</span>
     ${isStandalone() ? `<div class="chip green" style="margin-bottom:6px">${ic("check")} Done: you're in the Home Screen app</div>` : `<ol class="steps-list">
       <li>Open <b>effort-game.vercel.app</b> in <b>Safari</b>. Other browsers can't add it.</li>
       <li>Tap <b>Share</b> (the square with an arrow), then <b>Add to Home Screen</b> → <b>Add</b>.</li>
       <li>Open <b>Effort</b> from your Home Screen from now on. It opens full screen like an app.</li>
     </ol>`}
-    <span class="field-label">2 · Turn on the 6:45pm ping</span>
-    <p class="small" style="margin:0">In the Home Screen app: <b>Me → Reminders → Ping me at 6:45pm</b>. iPhones only allow notifications from Home Screen apps.</p>
+    <span class="field-label">2 · Turn on the evening pings</span>
+    <p class="small" style="margin:0">In the Home Screen app: <b>Me → Reminders → Ping me when the Taxman's in</b>. iPhones only allow notifications from Home Screen apps.</p>
     <span class="field-label">3 · Sync your steps automatically</span>
     <p class="small" style="margin:0 0 8px">A one-time Shortcut. After this it runs on its own.</p>
     <ol class="steps-list">
@@ -1356,7 +1380,7 @@ function setupBody(kind) {
   let body;
   if (p === "ios") body = iphoneHome(kind);
   else if (p === "android") body = androidApp(t);
-  else if (kind === "steps") body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before 7pm and again before bed. You can fix the last week.</p>`;
+  else if (kind === "steps") body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before you fight the Taxman and again before bed. You can fix the last week.</p>`;
   else body = `<p class="small">Each evening, check Screen Time (iPhone) or Digital Wellbeing (Android) and type your short-video minutes into <b>Me → Scrolling → Type it in</b>.</p>`;
   return `${toggle}<div class="guide">${body}</div>`;
 }
@@ -1412,13 +1436,14 @@ function profileSheet(id) {
 }
 // What the two currencies are, from tapping the wallet.
 function walletSheet() {
-  const w = S.D.wallet, R = G.RULES;
+  const P = pendingToday(), w = S.D.wallet + (P.taxed ? P.n : 0), R = G.RULES;
   openSheet(`${sheetHead("Your money")}
     <div class="money">
-      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut at 7pm unless you beat him.</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : w % PER_E()}</b></div>
+      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut of the day's unless you beat him (6pm to 9pm).</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : w % PER_E()}</b></div>
       <div class="mrow"><span class="mic">${gem(44)}</span><div class="grow"><b>Endeavours</b><span>${PER_E()} Efforts make 1 Endeavour, automatically. Gear in the shop costs Endeavours.</span></div><b class="num">${fmt(Math.max(0, Math.floor(w / PER_E())))}</b></div>
     </div>
-    ${(() => { const p = pendingToday(); return p.n ? `<div class="pendrow">${coin(22)}<span><b>+${fmt(p.n)} Effort${p.n === 1 ? "" : "s"} from today's walking</b> ${p.taxed ? "land at midnight. That's after the Taxman's share." : "so far. They land at midnight, after the Taxman takes his cut: beat him at 7pm to keep them all."}</span></div>` : ""; })()}
+    ${P.taxed ? `<div class="pendrow">${coin(22)}<span><b>Today's walking goes straight in</b> ${P.steal ? `with the ${Math.round(P.steal * 100)}% you stole on top` : P.rate > 0 ? `after the Taxman's ${Math.round(P.rate * 100)}%` : "with no tax"}. That's every step today, midnight to midnight, so keep walking.</span></div>`
+      : P.n ? `<div class="pendrow">${coin(22)}<span><b>+${fmt(P.n)} Effort${P.n === 1 ? "" : "s"} from today's walking</b> so far. Once you've faced the Taxman (6pm to 9pm), his cut or your bonus applies to the whole day and they go straight into your wallet.</span></div>` : ""}
     ${w < 0 ? `<p class="small" style="color:#ff9aa3;margin:12px 0 0">You're in debt: your next ${fmt(-w)} Efforts pay it off before you keep any.</p>` : `<p class="tiny faint" style="margin:12px 0 0">So ${fmt(w)} Efforts in total: ${fmt(Math.floor(w / PER_E()))} Endeavour${Math.floor(w / PER_E()) === 1 ? "" : "s"} and ${w % PER_E()} Effort${w % PER_E() === 1 ? "" : "s"} towards the next.</p>`}
     <button class="btn gold block" style="margin-top:14px" data-tab="shop">${ic("bag")} Spend them in the shop</button>`);
 }
@@ -1620,12 +1645,12 @@ function viewWelcome() {
   const inv = S.invite;
   $("#app").innerHTML = `<section class="welcome">
     <div class="wl-hero"><div class="wl-bosses">${portraitImg("boss", "taxman", { w: 260, h: 280, cls: "b1" })}${portraitImg("boss", "autoplay", { w: 220, h: 240, cls: "b2" })}</div>
-      <div class="logo ol">EFFORT</div><p class="tag">Out-walk your mates. Fight the Taxman at 7. Raid together on Sunday.</p></div>
+      <div class="logo ol">EFFORT</div><p class="tag">Out-walk your mates. Fight the Taxman every evening. Raid together on Sunday.</p></div>
     ${inv ? `<div class="panel invite"><span class="chip gold">${ic("squad")} You're invited</span><h3 class="ol-sm disp">${esc(inv.name)}</h3><p class="small muted">${inv.members} ${inv.members === 1 ? "player" : "players"} already walking.</p></div>` : ""}
     <section class="panel">
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Your steps are money</b><span>Every 100 steps is an Effort. Walk more than the squad and you hit harder, earn more and get taxed less.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>7pm: the Taxman</b><span>Five minutes, every day. Tap him into the ground or he takes his cut.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: the Taxman</b><span>Five minutes, any time in that window, every day. Tap him into the ground or he takes his cut.</span></div></div>
         <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Fifteen minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
       </div>
     </section>
@@ -1704,8 +1729,8 @@ function viewSetup() {
       ${setupPlat() !== "other" ? `<button class="btn green block" style="margin-top:14px" data-act="check-sync" data-kind="steps">${ic("refresh")} Check it worked</button>
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
-    : `<h1 class="ol disp ob-title">Don't miss 7pm</h1>
-      <p class="muted">The Taxman is only around for five minutes a day, and the raid for fifteen on Sunday. We'll ping you at 6:45pm.</p>
+    : `<h1 class="ol disp ob-title">Don't miss the Taxman</h1>
+      <p class="muted">The Taxman's only in from 6pm to 9pm, and the raid lobby's Sunday 6 to 9. We'll ping you at 6, and again at 8:30 if you haven't fought.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -1810,7 +1835,7 @@ function hint(text) {
   h.classList.remove("gone"); h.innerHTML = text;
 }
 
-// ---------- 7pm: the Taxman ----------
+// ---------- 6pm to 9pm: the Taxman ----------
 async function startTax() {
   FX.unlock();
   if (S.busy) return;
@@ -1839,7 +1864,7 @@ function renderTax() {
   $("#app").innerHTML = `<div class="arena tax" id="arena"><div class="shake-wrap" id="shake">
     <div class="hud">
       <div class="bossbar"><div class="por">${ic("receipt")}<span class="lv">${Math.round(T.taxRate * 100)}% TAX</span></div>
-        <div class="nm"><b class="ol-sm">The Taxman</b><small>Collector of the 7pm levy</small></div>
+        <div class="nm"><b class="ol-sm">The Taxman</b><small>Collector of the evening levy</small></div>
         <div class="right"><span class="timer">${ic("clock")}<span id="t-clock">${mmss(V.tax.left)}</span></span><button class="hbtn" data-act="tax-stop" aria-label="End fight">${ic("close")}</button></div></div>
       <div class="hp green" id="t-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
       <div class="hp gold thin" id="t-steal"><i class="fill" style="width:0"></i><span></span></div>
@@ -2503,7 +2528,7 @@ function renderResult() {
         <div class="rline minus"><span>Taxman took · ${Math.round(r.taxRate * (1 - r.knocked) * 100)}%</span><span class="rv">−${effortTag(r.taxed)}</span></div>
         <div class="rline plus"><span>Stolen back · ${Math.round(r.stealPct * 100)}%</span><span class="rv">+${effortTag(r.stolen)}</span></div>
         <div class="rline total"><span class="disp" style="font-size:18px">Banked</span><span class="rv">${coin(26)}<span id="count">${res.net == null ? "…" : "0"}</span></span></div>
-        <p class="tiny faint" style="margin:8px 0 0">Keep walking: steps after 7pm pay out after midnight on these terms.</p>
+        <p class="tiny faint" style="margin:8px 0 0">These terms cover every step today, midnight to midnight: keep walking and it keeps going into your wallet.</p>
       </section>`;
   } else {
     const out = res.out, my = me().id, mine = out.shares.find((s) => s.id === my), T = res.R?.lastTrivia;
@@ -2555,7 +2580,7 @@ async function collect() {
 }
 
 // ---------- clocks ----------
-// Countdowns tick every second; crossing 7pm (or the end of a window) reloads so the buttons are right.
+// Countdowns tick every second; crossing 6pm (or the end of a window) reloads so the buttons are right.
 setInterval(() => {
   if (S.view !== "main" || !S.D) return;
   for (const el of document.querySelectorAll("[data-count]")) el.textContent = countdown(Number(el.dataset.count) - now());
@@ -2681,6 +2706,7 @@ document.addEventListener("click", async (e) => {
   if (d.tab === "chat") { if (!$("#sheet").hidden) closeSheet(); openChat(); return; }
   if (d.jump) { chatJump(Number(d.jump)); return; }
   if (d.cact) { chatAction(d.cact, Number(d.id)); return; }
+  if (d.tab && S.view === "chat") { closeChat(d.tab); FX.play("tap"); return; }
   if (d.tab) { if (!$("#sheet").hidden) closeSheet(); S.tab = d.tab; store.set("tab", d.tab); render(); scrollTo(0, 0); FX.play("tap"); return; }
   if (d.answer !== undefined && S.view === "quiz") {
     const q = QUESTIONS[S.qi];

@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 // The whole game, in the app: the same Effort the website runs, plus what only an app can do on
-// Android: read steps, read short-video screen time, and ping at 6:45pm. The game talks to the app
+// Android: read steps, read short-video screen time, and ping in the evening. The game talks to the app
 // through window.EffortAndroid, and the app tells the game what's connected via window.onEffortNative.
 class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
         }
         setContentView(web)
         web.loadUrl(startUrl(intent) ?: Sync.APP_URL)
+        Reminders.schedule(this) // Android drops the app's alarms on an update; book the evening pings again
         // Back closes sheets and steps back through the game; at the top it leaves the app.
         onBackPressedDispatcher.addCallback(this) {
             web.evaluateJavascript("window.effortBack ? window.effortBack() : false") { handled -> if (handled != "true") moveTaskToBack(true) }
@@ -229,6 +230,8 @@ class MainActivity : ComponentActivity() {
             else if (Build.VERSION.SDK_INT >= 33 && !Reminders.canNotify(this@MainActivity)) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
             else { Reminders.enable(this@MainActivity, true); Reminders.show(this@MainActivity, test = true); pushStatus() }
         }
+
+        @JavascriptInterface fun taxDone(day: String) = Reminders.taxDone(this@MainActivity, day)
 
         @JavascriptInterface fun testReminder() = runOnUiThread { Reminders.show(this@MainActivity, test = true) }
 

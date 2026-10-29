@@ -25,7 +25,7 @@ self.addEventListener("fetch", (e) => {
   );
 });
 
-// Push notifications: the 6:45pm ping before the Taxman, and before the Sunday raid.
+// Push notifications: 6pm when the Taxman's in (and the Sunday raid lobby), and an 8:30pm last call.
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : "" }; }

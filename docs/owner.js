@@ -118,7 +118,7 @@ function viewList() {
     }).join("") : `<div class="empty"><span class="e">🫥</span>Nobody matches.</div>`}</div>`;
 }
 
-// A squad's game state, and a switch that opens the 7pm Taxman and the Sunday raid right now for
+// A squad's game state, and a switch that opens the Taxman and the Sunday raid right now for
 // that squad, for testing. It counts for real: it uses up today's Taxman fight for everyone in it.
 function squadCard(g) {
   if (!g) return "";

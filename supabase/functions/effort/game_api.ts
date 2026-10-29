@@ -1,7 +1,7 @@
-// The live game: wallet, the 7pm Taxman, the Sunday raid, gear and the weekly table.
+// The live game: wallet, the evening Taxman, the Sunday raid, gear and the weekly table.
 // The rules are the same game.js the app and the lab run, kept in the database (see rules.ts).
 //   POST /game         everything the app needs, after settling any finished days
-//   POST /tax_start    open your Taxman fight (7pm–7:05pm your time)
+//   POST /tax_start    open your Taxman fight (any time 6pm–9pm your time; a fight lasts 5 minutes)
 //   POST /tax_finish   save the fight (checkpoints while it runs, then final: true)
 //   POST /raid_lobby   Sunday 6–9pm: join the lobby, pick the boss, say you're ready (it starts when 4+ are ready)
 //   POST /raid_join    once it's started, join the fight; returns the roster
@@ -61,10 +61,11 @@ function daysFrom(from: string, to: string) {
 const goodTz = (tz: unknown) => { try { new Intl.DateTimeFormat("en", { timeZone: String(tz) }); return String(tz); } catch { return SQUAD_TZ; } };
 
 // ---------- windows ----------
+// The Taxman's in from 6pm to 9pm; a fight can start any time in between and lasts five minutes.
 // An owner test window (groups.test_until) opens both fights now, for real, until it closes.
 function taxWindow(now: number, tz: string, test: number | null) {
   const day = localDate(now, tz);
-  const opens = zoned(day, G.RULES.windowHour, 0, tz), closes = opens + G.RULES.dailyWindowMin * 60000;
+  const opens = zoned(day, G.RULES.windowHour, 0, tz), closes = zoned(day, G.RULES.windowCloseHour ?? 21, 0, tz);
   const next = now < closes ? opens : zoned(addDays(day, 1), G.RULES.windowHour, 0, tz);
   if (test && test > now) return { day, opens: now, closes: test, next: now, open: true, test: true };
   return { day, opens, closes, next, open: now >= opens && now < closes, test: false };
@@ -164,6 +165,35 @@ async function settleDays(db: Any, player: Any, squad: Any, L: Any, now: number)
   });
   await db.from("ledger").upsert(rows, { onConflict: "player_id,kind,ref", ignoreDuplicates: true });
   return rows.length;
+}
+
+// Once the Taxman's settled for today (fought, beaten or missed), today's walking is paid as it comes in, on those
+// terms: the whole day, midnight to midnight, so steps after the fight count the same way. It's the day's "tax"
+// row, kept up to date; at midnight settleDays pays whatever's left (usually nothing). Returns true if it paid.
+async function bankToday(db: Any, player: Any, squad: Any, now: number) {
+  const tz = goodTz(player.tz), day = localDate(now, tz), w = taxWindow(now, tz, null);
+  if (day < LAUNCH_DAY) return false;
+  const { data: f } = await db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", day).maybeSingle();
+  if (f ? !f.finished_at && now <= Date.parse(f.ends_at) + 90000 : now < w.closes) return false; // not settled yet
+  const ids = squad ? squad.members.map((m: Any) => m.id) : [player.id];
+  const [steps, scroll, { data: row }] = await Promise.all([
+    stepsFor(db, ids, day, day), scrollFor(db, player.id, day, day),
+    db.from("ledger").select("amount").eq("player_id", player.id).eq("kind", "tax").eq("ref", day).maybeSingle(),
+  ]);
+  const s = steps[player.id][day] ?? 0, E = G.effortsFromSteps(s);
+  let net: number, note: string;
+  if (f) {
+    const knocked = Number(f.knocked), rate = Number(f.rate);
+    net = netOf(E, rate, knocked, Number(f.steal_pct));
+    note = knocked >= 1 ? `Knocked out the Taxman, stole ${Math.round(Number(f.steal_pct) * 100)}%` : `Fought the Taxman down to ${Math.round(rate * (1 - knocked) * 100)}% tax`;
+  } else {
+    const rate = G.taxRate(s, scroll[day] ?? NO_SCROLL_MIN, avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
+    net = E - Math.round(E * rate); note = `Missed the Taxman: ${Math.round(rate * 100)}% tax`;
+  }
+  note += ` · ${s.toLocaleString("en-GB")} steps so far`;
+  if (row && row.amount === net) return false;
+  await db.from("ledger").upsert({ player_id: player.id, kind: "tax", ref: day, amount: net, xp: Math.max(0, net), note }, { onConflict: "player_id,kind,ref" });
+  return true;
 }
 
 // The week's table for a squad: everyone's steps Monday to `to`, plus who's too new to be ranked.
@@ -309,7 +339,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
   switch (action) {
     case "game": {
       let L = (await ledgerFor(db, [player.id]))[player.id];
-      const settled = await settleDays(db, player, squad, L, now);
+      const settled = (await settleDays(db, player, squad, L, now)) + (await bankToday(db, player, squad, now) ? 1 : 0);
       // Last week's table, if nobody's settled it yet (no raid happened).
       const thisMonday = mondayOf(localDate(now, SQUAD_TZ));
       if (squad && squad.members.length >= 2 && Date.parse(squad.group.created_at) < zoned(thisMonday, 0, 0, SQUAD_TZ)) await settleWeek(db, squad, addDays(thisMonday, -7));
@@ -366,10 +396,10 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (old?.finished_at) return fail("You've already fought the Taxman today");
       if (old && now < Date.parse(old.ends_at)) return json({ ok: true, fight: old, now, resumed: true, inputs: await taxInputs(db, player, squad, w.day) });
       if (old) return fail("Your fight's over for today");
-      if (!w.open) return fail(`The Taxman only takes visitors from ${G.RULES.windowHour}:00 to ${G.RULES.windowHour}:${String(G.RULES.dailyWindowMin).padStart(2, "0")}pm`);
+      if (!w.open) return fail(`The Taxman only takes visitors from ${G.RULES.windowHour - 12}pm to ${(G.RULES.windowCloseHour ?? 21) - 12}pm`);
       const inputs = await taxInputs(db, player, squad, w.day);
       const S = G.taxmanSetup(inputs);
-      const row = { player_id: player.id, day: w.day, ends_at: new Date(Math.min(w.closes, now + G.RULES.dailyWindowMin * 60000)).toISOString(),
+      const row = { player_id: player.id, day: w.day, ends_at: new Date(now + G.RULES.dailyWindowMin * 60000).toISOString(),
         steps: inputs.steps, efforts: S.efforts, rate: S.taxRate, steal_cap: S.stealCap };
       const { data, error } = await db.from("tax_fights").insert(row).select().single();
       if (error) return fail("You've already started today's fight");
@@ -485,6 +515,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
     }
 
     case "buy": {
+      await bankToday(db, player, squad, now);
       const L = (await ledgerFor(db, [player.id]))[player.id];
       const item = G.itemById(body.item);
       if (!item) return fail("No such item");
@@ -504,6 +535,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
     }
 
     case "upgrade": {
+      await bankToday(db, player, squad, now);
       const L = (await ledgerFor(db, [player.id]))[player.id];
       const item = G.itemById(body.item);
       if (!item || !(item.id in L.inv)) return fail("You don't own that");
@@ -550,6 +582,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (!room) return fail("No such room");
       const amount = Math.floor(Number(body.amount));
       if (!(amount >= 100 && amount <= 1000000)) return fail("Put in at least 1 Endeavour");
+      await bankToday(db, player, squad, now);
       const den = await denFor(db, squad), next = G.denNext(den.totals[room.id]);
       if (!next) return fail(`The ${room.name} is already at level ${G.DEN_MAX}`);
       const give = Math.min(amount, next.need + (() => { let more = 0; for (let L = next.level + 1; L <= G.DEN_MAX; L++) more += G.denCost(L); return more; })());
@@ -562,6 +595,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
     }
 
     case "wardrobe": {
+      if (body.buy) await bankToday(db, player, squad, now);
       const L = (await ledgerFor(db, [player.id]))[player.id], owned = ownedCosmetics(L), day = gameDay(squad, now);
       if (!G.featureOn("wardrobe", day)) return fail("The wardrobe opens soon");
       if (body.buy) {

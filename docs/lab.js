@@ -168,7 +168,7 @@ function tabDaily() {
   return `
     <section class="panel hero">
       <div class="art"><div class="bg" style="background:radial-gradient(90% 120% at 80% 100%, #3f8a5e 0%, #1c4030 45%, #0f2219 100%)"></div>
-        <div class="label"><span class="chip gold">${ic("clock")} Tonight · 7pm</span><h3 class="ol">The Taxman</h3><p>Wants ${Math.round(S.taxRate * 100)}% of today's Efforts. Knock him out to keep it all, then rob him.</p></div>
+        <div class="label"><span class="chip gold">${ic("clock")} Tonight · 6pm to 9pm</span><h3 class="ol">The Taxman</h3><p>Wants ${Math.round(S.taxRate * 100)}% of today's Efforts. Knock him out to keep it all, then rob him.</p></div>
         <div class="portrait">${portraitImg("boss", "taxman", { w: 300, h: 320 })}</div></div>
       <div class="body">
         <div id="day-tiles">${dayTiles()}</div>
@@ -193,7 +193,7 @@ function tabDaily() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort. ${PER_E()} Efforts make 1 Endeavour. More steps also make you hit harder tonight.</span></div></div>
         <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more. Your week decides your power on Sunday.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>The Taxman calls at 7pm</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% of the day's Efforts. Scrolling over your budget pushes it towards ${Math.round((G.RULES.baseTax + G.RULES.taxMaxExtra) * 100)}%.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>The Taxman's in from 6pm to 9pm</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% of the day's Efforts. Scrolling over your budget pushes it towards ${Math.round((G.RULES.baseTax + G.RULES.taxMaxExtra) * 100)}%.</span></div></div>
         <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>Tap to fight back</b><span>${G.RULES.dailyWindowMin} minutes. Every hit cuts the tax; knock him out and you keep everything. Keep tapping to steal up to ${Math.round(S.stealCap * 100)}% extra. Stop and he heals.</span></div></div>
         <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>About every ${G.RULES.auditEvery + G.RULES.auditFor}s he Audits you: only the moving target takes damage. Golden receipts knock off 3% of his health, or add 1% to your haul once he's down.</span></div></div>
       </div>
@@ -457,7 +457,7 @@ function hint(text) {
   h.classList.remove("gone"); h.innerHTML = text;
 }
 
-// ---------- 7pm: the Taxman ----------
+// ---------- 6pm to 9pm: the Taxman ----------
 function startTax(seconds) {
   FX.unlock();
   const S = taxSetup(), full = G.RULES.dailyWindowMin * 60;
@@ -476,7 +476,7 @@ function renderTax() {
   $("#app").innerHTML = `<div class="arena tax" id="arena"><div class="shake-wrap" id="shake">
     <div class="hud">
       <div class="bossbar"><div class="por">${ic("receipt")}<span class="lv">${Math.round(S.taxRate * 100)}% TAX</span></div>
-        <div class="nm"><b class="ol-sm">The Taxman</b><small>Collector of the 7pm levy</small></div>
+        <div class="nm"><b class="ol-sm">The Taxman</b><small>Collector of the evening levy</small></div>
         <div class="right"><span class="timer">${ic("clock")}<span id="t-clock">${mmss(V.tax.left)}</span></span><button class="hbtn" data-act="tax-stop" aria-label="End fight">${ic("close")}</button></div></div>
       <div class="hp green" id="t-hp"><i class="ghost"></i><i class="fill"></i><div class="ticks"></div><span></span></div>
       <div class="hp gold thin" id="t-steal"><i class="fill" style="width:0"></i><span></span></div>
