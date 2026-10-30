@@ -368,7 +368,7 @@ const MARKET_PERKS = {
   feast:      [1.4, 1.5, 1.8, 2.2, 2.6, 3.2, 3.4],
   heal:       [0.08, 0.16, 0.28, 0.36, 0.45, 0.55, 0.56],
   trivia:     [2, 4, 6, 8, 10, 12, 13],
-  steal:      [0.025, 0.05, 0.08, 0.1, 0.13, 0.16, 0.16],
+  steal:      [0.012, 0.025, 0.04, 0.05, 0.065, 0.08, 0.08],
 };
 // Which perk each style gets, per slot.
 const MARKET_PERK_OF = {
@@ -383,9 +383,7 @@ for (const [tier, slots] of Object.entries(MARKET)) {
     list.forEach(([name, e, look, text], i) => {
       const style = MARKET_STYLES[i], base = slot === "weapon" ? "power" : "guard";
       let stats;
-      // Power and luck both turn straight into damage, so those styles get trimmed budgets; otherwise raw damage
-      // would always be the best buy (checked in fights: every style lands within about 10% of the class item).
-      const trim = style === "power" || style === "luck" ? (slot === "trinket" && style === "power" ? 0.45 : 0.6) : 1;
+      const trim = 1;
       if (slot === "trinket") stats = { [style]: Math.max(1, Math.round(single * trim)) };
       else if (style === base) stats = { [base]: main };
       else stats = second ? { [base]: main, [style]: Math.max(1, Math.round(second * trim)) } : { [base]: main - 1, [style]: 1 };
@@ -396,5 +394,19 @@ for (const [tier, slots] of Object.entries(MARKET)) {
 }
 // Names for the written seasons' sets; game.js gives every season's set its stats (and names later ones itself).
 const SEASON_SETS = {"s2": {"weapon": {"name": "Norwegian Cheese Slicer, Sharpened", "e": "🧀", "text": "Invented in Lillehammer for brown cheese. Repurposed for bosses."}, "armour": {"name": "Knitted Jumper Your Host Insists You Borrow", "e": "🧶", "text": "Itchy at minus twenty. Itchier indoors. You may not give it back."}, "trinket": {"name": "Thermos of Coffee, Still Hot After the Fjord", "e": "☕", "text": "Drunk at the top, the bottom, and every bench in between."}}, "s3": {"weapon": {"name": "Midsummer Maypole, Snapped in Half", "e": "🌼", "text": "Danced round it for six hours. Hit a boss with it for six seconds."}, "armour": {"name": "Sauna Towel, Worn With Dignity", "e": "🧖", "text": "The Finns say you don't need one. The Finns are very relaxed people."}, "trinket": {"name": "Midsummer Crown of Seven Flowers", "e": "🌸", "text": "Sleep on it and dream of your future. It's mostly walking."}}, "s4": {"weapon": {"name": "Walking Cane, Amber Handle (Mosquito Included)", "e": "🦯", "text": "Forty million years old. The mosquito still looks annoyed."}, "armour": {"name": "Loden Coat, Slightly Too Grand", "e": "🧥", "text": "Bought in Vienna. Now you have to walk like you're in Vienna."}, "trinket": {"name": "Lump of Baltic Amber, Possibly a Boiled Sweet", "e": "🟠", "text": "Washed up on a beach in Lithuania. Do not lick it to check."}}};
+// Class gear makes your class better at what it's good at: the weapon and trinket pour their numbers into your
+// best class stat, the armour into Guard (a Guard class's armour backs up its other stat) so nobody's health
+// falls behind. Same stat budget as the open market. flip: the pair game.js swaps when the wearer's second
+// class stat is their bigger one, so it always follows your best.
+for (const it of ITEMS) {
+  const C = it.cls && CLASSES.find((c) => c.id === it.cls), B = C && MARKET_BUDGET[it.tier];
+  if (!B || it.tier === "common" || it.tier === "rare") continue;
+  const [a, b] = C.stats, [main, second, single] = B, other = a === "guard" ? b : a;
+  if (it.slot === "trinket") { it.stats = { [a]: single }; it.flip = [a, b]; }
+  else if (C.stats.includes("guard")) it.stats = it.slot === "weapon" ? { [other]: main, guard: second } : { guard: main, [other]: second };
+  else { it.stats = it.slot === "weapon" ? { [a]: main, [b]: second } : { guard: main, [a]: second }; it.flip = [a, b]; }
+  // Stealing from the Taxman is capped low now, so steal perks are half what they were.
+  if (it.perk?.[0] === "steal") it.perk = ["steal", Math.round(it.perk[1] * 500) / 1000];
+}
 root.EffortItems = { CLASSES, TIERS, ITEMS, SETS, SEASON_SETS };
 })(typeof window !== "undefined" ? window : globalThis);

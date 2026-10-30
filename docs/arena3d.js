@@ -1314,8 +1314,56 @@ class Arena {
       const at = this.bossPoint(0.5, 0);
       this.shockwave(at, 0xffffff, 9, 0.9, true); this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 14, 1.2);
       this.burst(at, 0xfff3a0, 70, 8); this.flare(at, 0xffffff, 9);
-      this.dissolveAt = this.realT + 0.5;
+      // The Taxman stays down so you can go through his pockets; a raid boss burns away.
+      if (this.mode === "tax") this.lootStart(); else this.dissolveAt = this.realT + 0.5;
     }
+  }
+  // ---------- the Taxman's K.O.: rob him ----------
+  // Walk up to the body; from here every tap is a stomp that knocks coins out of him.
+  lootStart() {
+    this.looting = true;
+    setTimeout(() => {
+      if (this.disposed) return;
+      for (const h of this.heroes.values()) h.target.set(-0.35, 0, this.bossZ + 2.5);
+      this.camMove({ pos: [-0.3, -0.7, -3.4], look: [0.1, -1.3, -0.4], fov: -4, inT: 0.9, dur: 99, outT: 0.6, hold: true, tag: "loot" });
+    }, 900);
+  }
+  coins(at, n, up = 4.5) {
+    n = Math.min(60, Math.round(n * this.fxScale));
+    const gold = hdr(0xffcf3d, 2.2), hi = hdr(0xfff1a0, 2.6);
+    for (let i = 0; i < n; i++) {
+      this.sparks.emit({ x: at.x + rnd(-0.3, 0.3), y: at.y, z: at.z + rnd(-0.2, 0.3), vx: rnd(-1.6, 1.6), vy: rnd(up * 0.6, up), vz: rnd(-0.4, 1.8),
+        c: Math.random() < 0.25 ? hi : gold, life: rnd(0.8, 1.3), size: rnd(0.1, 0.17), end: 0.8, grav: 10, drag: 0.35, shape: 0, core: 0.9 });
+    }
+  }
+  loot(id, { big = false } = {}) {
+    const h = this.heroes.get(id), B = this.boss; if (!h || !B) return;
+    h.w.play("stomp");
+    setTimeout(() => {
+      if (this.disposed) return;
+      const at = this.bossPoint(0.12, 0.2);
+      B.squash = big ? 0.16 : 0.08;
+      this.coins(at, big ? 22 : 8, big ? 6 : 4.5);
+      this.dustRing(V3(at.x, 0.05, at.z), big ? 1.6 : 1, 0xd8c08a, big ? 14 : 6);
+      if (big) { this.shake(0.22); this.hitStop(55, { punch: 0.4, minor: true }); this.flare(at, 0xffd36b, 2.6); }
+    }, 130);
+  }
+  // Pockets empty: a rummage, a fountain of coins, then he fades away.
+  lootFinale(id) {
+    const h = this.heroes.get(id), B = this.boss; if (!h || !B) return;
+    h.w.play("rummage");
+    const at = this.bossPoint(0.15, 0.2);
+    let n = 0;
+    const tick = setInterval(() => {
+      if (this.disposed || ++n > 9) return clearInterval(tick);
+      this.coins(at, 14, 5 + n * 0.3); B.squash = 0.05;
+    }, 160);
+    setTimeout(() => {
+      if (this.disposed) return;
+      h.w.play("cheer");
+      this.coins(this.chest(h, 1.4), 40, 7); this.flare(this.chest(h, 1.2), 0xffe27a, 4);
+      this.dissolveAt = this.realT + 0.6;
+    }, 1500);
   }
   cheer() { for (const h of this.heroes.values()) if (!h.down) h.w.play("cheer"); }
 
@@ -1534,6 +1582,7 @@ class Arena {
       const k = Math.min(1, B.actT / 1.2);
       if (!B.mixer || !B.clips.death) { rx = -k * 1.4; y = -k * 0.4; }
       sy = 1 - (B.mixer ? 0 : k * 0.1);
+      if (B.squash) { sx += B.squash; sy -= B.squash; B.squash *= Math.pow(0.001, dt * 6); if (B.squash < 0.002) B.squash = 0; }
     }
     H.scale.set(sx * grow, sy * grow, sx * grow);
     H.position.set(x, y + (B.hover ? Math.sin(this.t * 1.6) * 0.15 : 0), z);

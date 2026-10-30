@@ -303,7 +303,7 @@ function tabRaid() {
 // ---------- Shop ----------
 function itemCard(item, { deal = false } = {}) {
   const t = G.tierOf(item.tier), own = item.id in L.inv, on = L.equipped[item.slot] === item.id, locked = !own && t.lvl > level();
-  const st = G.itemStats(item, L.inv[item.id] || 0), price = G.priceOf(item, deal);
+  const st = G.itemStats(item, L.inv[item.id] || 0, myStats()), price = G.priceOf(item, deal);
   return `<button class="item ${item.tier} ${locked ? "locked" : ""}" style="--rc:${t.color}" data-item="${item.id}" data-deal="${deal ? 1 : ""}" aria-label="${esc(item.name)}">
     <div class="art-wrap"><span class="rarity">${t.label}</span><div class="art">${itemArt(item)}</div>
       ${own && L.inv[item.id] ? `<span class="upb">+${L.inv[item.id]}</span>` : ""}${on ? `<span class="eq">${ic("check")}</span>` : ""}${deal && !own ? `<span class="deal">−${Math.round((1 - price / G.priceOf(item, false)) * 100)}%</span>` : ""}
@@ -346,7 +346,7 @@ function itemSheet(id, deal) {
   const item = G.itemById(id); if (!item) return;
   const t = G.tierOf(item.tier), up = L.inv[id] || 0, own = id in L.inv, on = L.equipped[item.slot] === id;
   const locked = !own && t.lvl > level(), price = G.priceOf(item, deal), cls = item.cls ? I.CLASSES.find((c) => c.id === item.cls) : null;
-  const st = G.itemStats(item, up), next = G.itemStats(item, up + 1), cost = G.upgradeCost(item, up), maxed = up >= G.RULES.upgradeMax;
+  const st = G.itemStats(item, up, myStats()), next = G.itemStats(item, up + 1, myStats()), cost = G.upgradeCost(item, up), maxed = up >= G.RULES.upgradeMax;
   const sh = $("#sheet");
   sh.innerHTML = `<div class="panel" role="dialog" aria-modal="true" aria-label="${esc(item.name)}" style="--rc:${t.color}"><div class="grab"></div>
     <div class="row spread" style="margin-bottom:10px"><span class="chip" style="background:color-mix(in srgb, ${t.color} 30%, transparent);border-color:${t.color};color:#fff">${t.label}${cls ? ` · ${esc(cls.name)}` : " · Any class"} · ${esc(item.slot)}</span><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>
@@ -368,7 +368,7 @@ function itemSheet(id, deal) {
 
 // ---------- Tuning ----------
 const KNOBS = [
-  ["Taxman", [["baseTax", "Base tax", "0.2 = 20%"], ["taxPerOverMin", "Extra tax per minute over budget"], ["taxMaxExtra", "Most extra tax from scrolling"], ["stealCap", "Most you can steal", "0.3 = 30%"],
+  ["Taxman", [["baseTax", "Base tax", "0.2 = 20%"], ["taxPerOverMin", "Extra tax per minute over budget"], ["taxMaxExtra", "Most extra tax from scrolling"], ["stealCap", "Most you can steal", "0.15 = 15%"],
     ["dailyWindowMin", "Fight length (min)"], ["taxmanBaseHp", "Base health"], ["taxmanHpPerEffort", "Health per Effort earned"], ["taxmanHpPerOverMin", "Health per minute over budget"],
     ["taxmanRegen", "Health regained per idle second", "share of max"], ["taxmanPerLevel", "Toughness per player level"], ["stealPerLevel", "Extra steal cap per level"],
     ["auditEvery", "Seconds between Audits"], ["auditFor", "Audit length (s)"], ["auditBlock", "Damage through an Audit", "share"], ["stealDmgPerPct", "Damage per 1% stolen", "× his health"], ["comboWindowMs", "Combo window (ms)"]]],
@@ -533,7 +533,7 @@ function paintTax() {
   else feed.innerHTML = "";
 }
 function taxTap(e) {
-  const v = V.tax; if (!v) return;
+  const v = V.tax; if (!v || v.looting) return;
   const p = stagePoint(e), hit = G.taxmanTap(v.B, p.x, p.y);
   const [x, y] = FX.local(e.clientX, e.clientY);
   if (++v.taps === 6) hint(null);
@@ -541,9 +541,15 @@ function taxTap(e) {
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, kind: hit.kind, color: hit.kind === "weak" ? "#6fd4ff" : hit.kind === "blocked" ? "#9aa8ff" : "#ffd166" });
   FX.play(hit.kind === "blocked" ? "blocked" : hit.kind === "weak" ? "weak" : hit.crit ? "crit" : "hit");
   if (hit.crit || hit.kind === "weak") { FX.shake($("#shake"), 6, 180); FX.buzz(20); } else FX.buzz(6);
-  if (v.B.ko && (hit.crit || Math.random() < 0.25)) { FX.coins(x, y, hit.crit ? 6 : 2); FX.play("coin"); }
-  v.A?.heroAttack("me", { crit: hit.crit || hit.kind === "weak" });
-  if (hit.kind !== "blocked") bossHurt(hit.crit || hit.kind === "weak");
+  if (v.B.ko) {
+    FX.coins(x, y, hit.crit ? 6 : 2); FX.play("coin");
+    v.A?.loot("me", { big: hit.crit || hit.kind === "barge" });
+    // Taken all you can: rob him, then the fight ends by itself.
+    if (G.taxmanDone(v.B)) { v.looting = true; banner("Cleaned out!", "His pockets are empty"); v.A?.lootFinale("me"); setTimeout(() => { if (V.tax === v) finishTax(); }, 2800); }
+    return;
+  }
+  v.A?.heroAttack("me", { crit: hit.crit || hit.kind === "weak" || hit.kind === "barge" });
+  if (hit.kind !== "blocked") bossHurt(hit.crit || hit.kind === "weak" || hit.kind === "barge");
 }
 function finishTax() {
   const v = V.tax;

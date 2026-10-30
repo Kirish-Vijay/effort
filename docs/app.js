@@ -106,7 +106,7 @@ const PERKS = {
   critDmg: (v) => `Critical hits deal +${v}× damage`,
   combo: (v) => `Combos build ${Math.round(v * 100)}% faster`,
   taxStart: (v) => `Start every Taxman fight on a ${v}-hit combo`,
-  steal: (v) => `Steal up to ${Math.round(v * 100)}% more from the Taxman`,
+  steal: (v) => `Steal up to ${Math.round(v * 1000) / 10}% more from the Taxman`,
   shield: (v) => `Shield Wall lasts ${v}s longer`,
   heal: (v) => `Patch Up heals ${Math.round(v * 100)}% more`,
   swing: (v) => `Big Swing lasts ${v} more hits`,
@@ -406,7 +406,7 @@ function viewMain() {
   const html = `
     <header class="header">
       <button class="avatar" data-tab="me" aria-label="Your profile">${face(me().id)}</button>
-      <div class="who"><div class="nm"><b>${esc(me().name)}</b><span class="lvl" title="Level">Lv ${p.lvl}</span></div><div class="cls">${esc(cls.name)} · <span class="faint">${fmt(p.into)}/${fmt(p.need)} XP</span></div><div class="xp"><i style="width:${p.pct * 100}%"></i></div></div>
+      <div class="who"><div class="nm"><b>${esc(me().name)}</b><span class="lvl" title="Level">Lv ${p.lvl}</span></div><div class="cls">${esc(cls.name)}</div><div class="xp big" role="progressbar" aria-label="XP to level ${p.lvl + 1}" aria-valuemin="0" aria-valuemax="${p.need}" aria-valuenow="${p.into}"><i style="width:${p.pct * 100}%"></i><span class="xpt">${fmt(p.into)} / ${fmt(p.need)} XP</span></div></div>
       ${walletHtml()}
     </header>
     <div class="stack">${tabs[S.tab]()}</div>
@@ -921,7 +921,7 @@ async function claimTrack() {
 }
 
 // ---------- the Den ----------
-const denFmt = (r, v) => (r.fmt === "s" ? `+${(Math.round(v * 100) / 100).toString()}s` : `${r.mod === "upgrade" ? "−" : "+"}${Math.round(v * 100)}%`);
+const denFmt = (r, v) => (r.fmt === "s" ? `+${(Math.round(v * 100) / 100).toString()}s` : `${r.mod === "upgrade" ? "−" : "+"}${Math.round(v * 1000) / 10}%`);
 function denPanel() {
   if (!squad()) return "";
   const F = S.D.features || {}, D = S.D.squad.den;
@@ -1109,14 +1109,15 @@ function tabToday() {
 }
 
 // ---------- Raid ----------
+// Each stat with what it does for you right now (gear included). Your class's two stats are marked.
 function statRows(st, gear = me().gear, inv = S.D.inv) {
-  const { g } = G.loadout(st, gear, inv);
-  const max = Math.max(20, ...Object.values(g));
+  const { g } = G.loadout(st, gear, inv), fx = G.statEffects(g), mine = G.classOf(st).stats;
+  const max = Math.max(10, ...Object.values(g));
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
-    return `<div class="stat" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span></div>`;
-  }).join("");
+    return `<div class="stat fx${mine.includes(s.id) ? " cl" : ""}" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
+      <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
+  }).join("") + `<p class="tiny faint" style="margin:6px 0 0">Every point adds to your attack and health. On top of that, the bigger a stat's share of your total, the bigger its bonus. Gold names are your class's stats.</p>`;
 }
 // What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
 function raidPreview() {
@@ -1233,7 +1234,7 @@ function howRaids() {
 function itemCard(item, { deal = false } = {}) {
   const inv = S.D.inv, t = G.tierOf(item.tier), own = item.id in inv, on = me().gear[item.slot] === item.id, locked = !own && t.lvl > level();
   const gone = !own && !G.onSale(item, S.D.today.day);
-  const st = G.itemStats(item, inv[item.id] || 0), price = G.priceOf(item, deal);
+  const st = G.itemStats(item, inv[item.id] || 0, myStats()), price = G.priceOf(item, deal);
   return `<button class="item ${item.tier} ${locked ? "locked" : ""}" style="--rc:${t.color}" data-item="${item.id}" data-deal="${deal ? 1 : ""}" aria-label="${esc(item.name)}">
     <div class="art-wrap"><span class="rarity">${t.label}</span><div class="art">${itemArt(item)}</div>
       ${own && inv[item.id] ? `<span class="upb">+${inv[item.id]}</span>` : ""}${on ? `<span class="eq">${ic("check")}</span>` : ""}${deal && !own ? `<span class="deal">−${Math.round((1 - price / G.priceOf(item, false)) * 100)}%</span>` : ""}
@@ -1243,6 +1244,16 @@ function itemCard(item, { deal = false } = {}) {
     ${item.perk ? `<div class="perk">${esc(perkText(item.perk))}</div>` : item.set ? `<div class="perk">${esc(I.SETS[item.set]?.what || "")}</div>` : "<div></div>"}
     <div class="foot">${gone ? `<span class="buy">${G.seasonById(item.season) && S.D.today.day < G.seasonById(item.season).start ? `From ${new Date(G.seasonById(item.season).start + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "Gone"}</span>` : locked ? `<span class="buy">Level ${t.lvl}</span>` : own ? `<span class="buy owned">${on ? "Equipped" : "Owned"}</span>` : `<span class="buy ${S.D.wallet < price ? "poor" : ""}">${gem(18)}${fmt(price / PER_E())}</span>`}</div>
   </button>`;
+}
+// What wearing this instead would change: hit strength and health.
+function swapLine(item) {
+  const gear = me().gear, inv = S.D.inv, st = myStats();
+  const now = G.loadout(st, gear, inv).g, then = G.loadout(st, { ...gear, [item.slot]: item.id }, { ...inv, [item.id]: inv[item.id] || 0 }).g;
+  const flip = item.flip ? `<span class="tiny faint" style="display:block;margin-top:3px">Class gear: its biggest numbers always go into your best class stat.</span>` : "";
+  if (gear[item.slot] === item.id) return flip ? `<div class="swapline">${flip}</div>` : "";
+  const dh = Math.round((G.hitIndex(then) / G.hitIndex(now) - 1) * 100), dhp = G.edges(then).hp - G.edges(now).hp;
+  const sg = (n, u = "") => `<b class="${n > 0 ? "up" : n < 0 ? "down" : ""}">${n > 0 ? "+" : ""}${n}${u}</b>`;
+  return `<div class="swapline">Wearing this${gear[item.slot] ? " instead" : ""}: hits ${sg(dh, "%")} · health ${sg(dhp)}${flip}</div>`;
 }
 const dealsToday = () => G.dealsFor(S.D.today.day, myClass().id, level());
 function tabShop() {
@@ -1282,13 +1293,14 @@ function itemSheet(id, deal) {
   const item = G.itemById(id); if (!item) return;
   const inv = S.D.inv, t = G.tierOf(item.tier), up = inv[id] || 0, own = id in inv, on = me().gear[item.slot] === id, wallet = S.D.wallet;
   const locked = !own && t.lvl > level(), price = G.priceOf(item, deal), cls = item.cls ? I.CLASSES.find((c) => c.id === item.cls) : null;
-  const st = G.itemStats(item, up), next = G.itemStats(item, up + 1), cost = G.upgradeCost(item, up, S.D.squad?.den?.levels), maxed = up >= G.RULES.upgradeMax;
+  const st = G.itemStats(item, up, myStats()), next = G.itemStats(item, up + 1, myStats()), cost = G.upgradeCost(item, up, S.D.squad?.den?.levels), maxed = up >= G.RULES.upgradeMax;
   openSheet(`<div class="row spread" style="margin-bottom:10px"><span class="chip" style="background:color-mix(in srgb, ${t.color} 30%, transparent);border-color:${t.color};color:#fff">${t.label}${cls ? ` · ${esc(cls.name)}` : " · Any class"} · ${esc(item.slot)}</span><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>
     <div class="bigart"><div class="art">${itemArt(item)}</div>${up ? `<span class="upb">+${up}</span>` : ""}</div>
     <h2 class="ol-sm">${esc(item.name)}</h2>
     <p class="flavour">${esc(item.text)}</p>
     <div class="tiles">${Object.entries(st).map(([k, v]) => `<div class="tile"><div class="k" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])} ${statLabel(k)}</div><div class="v">+${v}${own && !maxed ? `<small>→ +${next[k]}</small>` : ""}</div></div>`).join("")}</div>
     ${item.perk ? `<div class="perkbox">${ic("star")}<span>${esc(perkText(item.perk))}</span></div>` : ""}
+    ${swapLine(item)}
     ${item.set ? `<div class="perkbox">${ic("star")}<span>${esc(I.SETS[item.set]?.name || "")}. ${esc(I.SETS[item.set]?.what || "")}</span></div>` : ""}
     <div class="btn-row" style="margin-top:12px">
       ${!own && !G.onSale(item, S.D.today.day) ? `<button class="btn block" disabled>${G.seasonById(item.season) && S.D.today.day < G.seasonById(item.season).start ? `On sale from ${longDate(G.seasonById(item.season).start)}` : "Only sold during its season"}</button>` : locked ? `<button class="btn block" disabled>${ic("lock")} Unlocks at level ${t.lvl}</button>`
@@ -1304,7 +1316,7 @@ function gearPicker(slot) {
   const on = me().gear?.[slot];
   openSheet(`${sheetHead(`Your ${slot}`)}
     ${owned.length ? `<div class="gearpick">${owned.map((it) => {
-      const st = G.itemStats(it, S.D.inv[it.id] || 0), t = G.tierOf(it.tier);
+      const st = G.itemStats(it, S.D.inv[it.id] || 0, myStats()), t = G.tierOf(it.tier);
       return `<button class="gp ${it.id === on ? "on" : ""}" style="--rc:${t.color}" data-act="gear-wear" data-id="${it.id}">
         <span class="art">${itemArt(it)}</span>
         <span class="grow"><b>${esc(it.name)}${S.D.inv[it.id] ? ` +${S.D.inv[it.id]}` : ""}</b><small>${Object.entries(st).map(([k, v]) => `+${v} ${statLabel(k).toLowerCase()}`).join(" · ")}${it.perk ? ` · ${esc(perkText(it.perk))}` : ""}</small></span>
@@ -1760,8 +1772,8 @@ function viewReveal() {
     <h1 class="ol disp" style="margin:8px 0 2px;font-size:32px">${esc(a.name || "You")}</h1>
     <div class="chip gold" style="margin:4px auto 10px">${esc(cls.name)}</div>
     <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
-    <section class="panel" style="text-align:left">${G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / 10) * 100}%"></i></div><span class="sv">${st[s.id]}</span></div>`; }).join("")}
-      <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go.</p></section>
+    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / 10) * 100}%"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
+      <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go. Gold names are your class's stats, and your class gear piles more onto your best one.</p></section>
     <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">${S.retake ? "Save my new look" : "That's me"}</button></div>
   </section>`;
   // The draft portrait needs the draft answers.
@@ -1960,16 +1972,31 @@ function taxTick() {
     if (e.type === "auditEnd") $("#dome").hidden = true;
     if (e.type === "receipt") FX.play("receipt");
     if (e.type === "ko") {
-      FX.play("ko"); banner("K.O.!", "Now rob him blind");
-      if (v.A) v.A.bossKO();
+      FX.play("ko"); banner("K.O.!", `Now rob him: up to ${Math.round(v.S.stealCap * 100)}% more`);
+      if (v.A) v.A.bossKO(); else $("#boss")?.classList.add("ko");
       const [x, y] = bossXY(0.5); FX.coins(x, y, 26); FX.ring(x, y, { r1: 260, color: "rgba(255,210,80,.9)", width: 16 }); FX.shake($("#shake"), 14, 500);
       saveTax(false).catch(() => {});
     }
   }
   // Save progress every 10 seconds, so a dropped connection or a closed app doesn't lose the fight.
   if (v.B.t >= v.checkAt) { v.checkAt += 10; saveTax(false).catch(() => {}); }
-  if (v.left <= 0) return finishTax();
+  if (v.left <= 0 && !v.looting) return finishTax();
   paintTax();
+}
+// He's knocked out and you've taken all you can: go through his pockets, then the fight ends by itself.
+function lootTax() {
+  const v = V.tax; if (!v || v.looting) return;
+  v.looting = true;
+  const r = G.taxmanResult(v.B);
+  saveTax(false).catch(() => {});
+  hint(null);
+  FX.play("coin"); FX.buzz(40);
+  banner("Cleaned out!", `+${fmt(r.stolen)} Efforts stolen. His pockets are empty`);
+  const [x, y] = bossXY(0.6);
+  if (v.A) v.A.lootFinale(me().id);
+  else { const b = $("#boss"); b?.classList.add("looted"); setTimeout(() => b?.classList.add("gone"), 1500); }
+  let n = 0; const rain = setInterval(() => { if (!V.tax || ++n > 8) return clearInterval(rain); FX.coins(x, y, 10); FX.play("coin"); }, 180);
+  setTimeout(() => { if (V.tax === v) finishTax(); }, 2800);
 }
 // The final save happens after V.tax is cleared, so it can be handed the fight.
 function saveTax(final, v = V.tax) {
@@ -1988,25 +2015,35 @@ function paintTax() {
   const rc = $("#receipt");
   rc.hidden = !B.receipt;
   if (B.receipt) { rc.style.left = `${B.receipt.x * 100}%`; rc.style.top = `${B.receipt.y * 100}%`; }
-  paintCombo(B.combo, 1 + B.combo / G.RULES.comboMax);
+  paintCombo(B.combo, 1 + (B.combo / G.RULES.comboMax) * (T.comboBonus ?? 1));
   const feed = $("#t-feed");
   if (!B.ko && B.dmg > 0 && B.t - B.lastTap > 0.8) feed.innerHTML = `<div class="warn">He's recounting his money. Keep tapping.</div>`;
   else if (B.audit) feed.innerHTML = `<div class="warn">Audit: hit the moving target.</div>`;
-  else if (B.ko) feed.innerHTML = `<div class="good">Knocked out. Every hit now steals.</div>`;
+  else if (v.looting) feed.innerHTML = `<div class="good">Pockets empty. Counting it up…</div>`;
+  else if (B.ko) feed.innerHTML = `<div class="good">He's down. Every hit knocks more coins out of him.</div>`;
   else feed.innerHTML = "";
 }
 function taxTap(e) {
-  const v = V.tax; if (!v) return;
+  const v = V.tax; if (!v || v.looting) return;
   const p = stagePoint(e), hit = G.taxmanTap(v.B, p.x, p.y);
   const [x, y] = FX.local(e.clientX, e.clientY);
   if (++v.taps === 6) hint(null);
-  if (hit.kind === "receipt") { FX.play("coin"); FX.coins(x, y, 10); FX.number(x, y - 20, hit.bonus, { size: 26, grad: ["#fff3a0", "#f2b51d"] }); return; }
+  if (hit.kind === "receipt") { FX.play("coin"); FX.coins(x, y, 10); FX.number(x, y - 20, hit.bonus, { size: 26, grad: ["#fff3a0", "#f2b51d"] }); if (G.taxmanDone(v.B)) lootTax(); return; }
+  if (hit.kind === "barge") FX.number(x, y - 46, "BARGE!", { size: 24, grad: ["#ffffff", "#9fd0ff"] });
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, kind: hit.kind, color: hit.kind === "weak" ? "#6fd4ff" : hit.kind === "blocked" ? "#9aa8ff" : "#ffd166" });
   FX.play(hit.kind === "blocked" ? "blocked" : hit.kind === "weak" ? "weak" : hit.crit ? "crit" : "hit");
   if (hit.crit || hit.kind === "weak") { FX.shake($("#shake"), 6, 180); FX.buzz(20); } else FX.buzz(6);
-  if (v.B.ko && (hit.crit || Math.random() < 0.25)) { FX.coins(x, y, hit.crit ? 6 : 2); FX.play("coin"); }
-  v.A?.heroAttack(me().id, { crit: hit.crit || hit.kind === "weak" });
-  if (hit.kind !== "blocked") bossHurt(hit.crit || hit.kind === "weak");
+  if (v.B.ko) {
+    // He's down: every tap is a stomp that knocks coins loose.
+    const [bx, by] = bossXY(0.75);
+    FX.coins(bx, by, hit.crit ? 8 : 3); if (hit.crit || Math.random() < 0.4) FX.play("coin");
+    if (v.A) v.A.loot(me().id, { big: hit.crit || hit.kind === "barge" });
+    else { const b = $("#boss"); b?.classList.remove("kicked"); void b?.offsetWidth; b?.classList.add("kicked"); }
+    if (G.taxmanDone(v.B)) lootTax();
+    return;
+  }
+  v.A?.heroAttack(me().id, { crit: hit.crit || hit.kind === "weak" || hit.kind === "barge" });
+  if (hit.kind !== "blocked") bossHurt(hit.crit || hit.kind === "weak" || hit.kind === "barge");
 }
 async function finishTax() {
   const v = V.tax; if (!v || v.ending) return;
@@ -2622,7 +2659,7 @@ function renderResult() {
     <div class="ribbon ol">${title}</div>
     <div class="subline">${sub}</div>
     <div class="stack">${body}
-      <section class="panel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${res.lvlBefore}</b></div><div class="xp" style="height:10px"><i style="width:0%"></i></div><div id="lvlup"></div></section>
+      <section class="panel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${res.lvlBefore}</b></div><div class="xp big"><i style="width:0%"></i><span class="xpt"></span></div><div id="lvlup"></div></section>
       <button class="btn gold xl block" data-act="collect">${ic("coins")} Collect</button>
     </div></div></div>`;
   if (res.kind === "raid") { const mine = res.out.shares.find((s) => s.id === me().id); countUp($("#count"), mine ? mine.total : 0); }
@@ -2646,6 +2683,7 @@ async function collect() {
   btn.disabled = false;
   const p = G.levelProgress(S.D.xp);
   $(".results .xp i").style.width = `${p.pct * 100}%`;
+  $(".results .xp .xpt").textContent = `${fmt(p.into)} / ${fmt(p.need)} XP`;
   $("#lvl-now").textContent = `Level ${p.lvl}`;
   if (p.lvl > res.lvlBefore) { $("#lvlup").innerHTML = `<div class="lvlup ol">Level ${p.lvl}!</div>`; FX.play("levelup"); FX.confetti(100); }
   btn.innerHTML = `Continue ${ic("arrowRight")}`;

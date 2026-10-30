@@ -186,6 +186,14 @@ const ACTIONS = {
     flash: [[0, 0], [0.25, 0.55], [1, 0]],
     wg: [[0, 0], [0.35, -2.0], [1, 0]],
   } },
+  // The Taxman's down: hop and bring everything down on him.
+  stomp: { dur: 0.34, k: {
+    py: [[0, 0], [0.35, 0.3, "o"], [0.58, -0.03, "i"], [1, 0]],
+    rx: [[0, 0], [0.35, 0.1], [0.58, -0.38, "o"], [0.8, -0.2], [1, 0]],
+    sq: [[0, 0], [0.35, 0.16], [0.58, -0.26], [0.78, 0.06], [1, 0]],
+    aRx: [[0, 0], [0.35, 2.6], [0.58, 0.9, "o"], [1, 0]], aLx: [[0, 0], [0.35, 2.4], [0.58, 0.8, "o"], [1, 0]],
+    wg: [[0, 0], [0.35, -1.9], [0.58, -3.0, "o"], [1, 0]],
+  } },
   cast: { dur: 0.5, k: {
     aRx: [[0, 0], [0.3, 1.45, "o"], [0.8, 1.45], [1, 0]], aLx: [[0, 0], [0.3, 1.4, "o"], [0.8, 1.4], [1, 0]],
     wg: [[0, 0], [0.3, -1.55, "o"], [0.8, -1.55], [1, 0]],
@@ -206,6 +214,11 @@ const LOOPS = {
     const p = (t % 0.5) / 0.5, h = Math.sin(Math.PI * p);
     return { py: 0.2 * h, sq: 0.18 * (h - 0.4), aRx: 2.7 + 0.2 * Math.sin(4 * Math.PI * p), aLx: 2.5 + 0.2 * Math.sin(4 * Math.PI * p + 1),
       aRz: 0.3 * Math.sin(2 * Math.PI * p), aLz: -0.3 * Math.sin(2 * Math.PI * p), ry: 0.15 * Math.sin(2 * Math.PI * p), wg: -2.05 };
+  },
+  // Crouched over the Taxman, digging through his pockets.
+  rummage: (time, w, t) => {
+    const p = t * 7;
+    return { sq: -0.2, rx: -0.42, py: -0.04, aRx: 1.0 + 0.7 * Math.sin(p), aLx: 1.0 + 0.7 * Math.sin(p + Math.PI), aRz: -0.2, aLz: 0.2, wg: -0.9, ry: 0.08 * Math.sin(p * 0.5) };
   },
   block: (time, w, t) => ({ sq: -0.1, rx: -0.12, pz: 0.02, px: 0.006 * Math.sin(t * 50), aRx: 1.9, aRz: -0.75, aLx: 1.9, aLz: 0.75, wg: -1.26 }),
 };
