@@ -160,7 +160,7 @@ async function share(text, url) {
 // ---------- state ----------
 const S = {
   view: "boot", tab: store.get("tab") || "today", token: store.get("token"), D: null, skew: 0,
-  answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null, retake: false,
+  answers: store.get("draftAnswers") || {}, qi: 0, platform: detectPlatform(), invite: null,
   setupStep: "steps", setupPlatform: null, shopTab: "class", busy: false, push: "unknown",
   native: NATIVE ? nativeStatus() : null, sheetKind: null,
   signin: null, auth: null,
@@ -1424,6 +1424,31 @@ function skinSheet(id) {
     } catch { host.innerHTML = flat; }
   }
 }
+// Change my look: your own ninja (from your answers, which stay fixed) or any skin you've bought from The House.
+function lookSheet() {
+  const owned = (me().owned || []).map(G.skinById).filter(Boolean), on = me().wear?.skin || null;
+  const card = (k) => {
+    const t = k && G.skinTier(k), wearing = (k?.id || null) === on;
+    return `<button class="skincard${wearing ? " on" : ""}" data-act="look-wear" data-id="${k?.id || ""}" style="--tc:${t?.color || "var(--line-2)"}">
+      ${k ? skinSwatch(k) : `<span class="skinsw own"><span class="fb">${head2d(answersOf({ ...me(), wear: {} }))}</span></span>`}
+      <b>${k ? esc(k.name) : "Your own look"}</b><span class="tiny">${wearing ? "Wearing" : k ? `${esc(t.label)} skin` : "From your answers"}</span></button>`;
+  };
+  S.sheetKind = "look";
+  openSheet(`${sheetHead("Change my look")}
+    <div class="skin-preview" id="skin-preview"><div class="has-fallback"><span class="fb">${Walker.svg(ANS[me().id], { mood: "fresh" })}</span></div></div>
+    <div class="skins">${card(null)}${owned.map(card).join("")}</div>
+    ${owned.length ? "" : `<p class="small muted" style="margin:12px 0 0">No skins yet. They're in The House, from ${G.pounds(G.SKIN_TIERS[0].pence)}.</p>`}
+    <button class="btn block" style="margin-top:12px" data-act="look-house">${ic("crown")} Browse The House</button>
+    <p class="tiny faint" style="margin:10px 0 0;text-align:center">Your answers set your stats and class, so they stay as they are. Skins only change how you look.</p>`);
+  S.sheetKind = "look";
+  const host = $("#skin-preview");
+  S.skinPreview?.dispose?.(); S.skinPreview = null;
+  if (host && window.Arena3D?.preview && use3d()) {
+    const flat = host.innerHTML;
+    try { host.innerHTML = ""; S.skinPreview = Arena3D.preview(host, ANS[me().id]); if (!S.skinPreview?.ok) { S.skinPreview = null; host.innerHTML = flat; } }
+    catch { host.innerHTML = flat; }
+  }
+}
 // Off to Stripe, after a clear look at what's being bought. client_reference_id tells the webhook who bought what.
 function housePay(id, sure = false) {
   const it = G.houseItem(id); if (!it?.link) return;
@@ -1492,7 +1517,7 @@ function tabMe() {
         <div class="bigface has-fallback"><span class="fb">${Walker.svg(ANS[m.id], { mood: "fresh" })}</span>${portraitImg("walker", m.id, { w: 220, h: 260 })}</div>
         <div class="grow"><h2 class="ol-sm disp" style="margin:4px 0 2px;font-size:24px">${esc(m.name)}</h2><div class="small muted">${esc(cls.name)} · Level ${level()}${titleOf(me()) ? ` · ${esc(titleOf(me()))}` : ""}</div>
           <p class="tiny faint" style="margin:8px 0 10px">${esc(cls.blurb)}</p>
-          <button class="btn xs" data-act="retake">${ic("edit")} Change my look</button></div>
+          <button class="btn xs" data-act="look">${ic("star")} Change my look</button></div>
       </div>
     </section>
     <section class="panel">
@@ -1912,7 +1937,7 @@ function viewReveal() {
     <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
     <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / 10) * 100}%"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
       <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go. Gold names are your class's stats, and your class gear piles more onto your best one.</p></section>
-    <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">${S.retake ? "Save my new look" : "That's me"}</button></div>
+    <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">That's me</button></div>
   </section>`;
   // The draft portrait needs the draft answers.
   ANS["draft" + G.hash(JSON.stringify(a))] = a;
@@ -1958,15 +1983,9 @@ function viewSetup() {
   </section>`;
 }
 
-// The quiz is done: make the player (joining the invite's squad if there is one), or save a new look.
+// The quiz is done: make the player (joining the invite's squad if there is one).
 async function finishQuiz() {
   const { name, ...character } = S.answers;
-  if (S.retake) {
-    await call("update_me", { token: S.token, character });
-    S.retake = false; store.del("draftAnswers");
-    await load(); S.view = "main"; S.tab = "me"; render(); toast("New look saved");
-    return;
-  }
   const body = { name, character, platform: S.platform, tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
   let r;
   try { r = S.invite ? await call("join", { ...body, code: S.invite.code }) : await call("signup", body); }
@@ -3007,12 +3026,14 @@ document.addEventListener("click", async (e) => {
     case "native-sync": if (nat("syncNow")) toast("Syncing…"); break;
     case "push-off": disablePush(); break;
     case "push-test": try { await callPush("test", { token: S.token }); toast("Sent. It should arrive in a few seconds"); } catch (err) { toast(err.message); } break;
-    case "start": S.view = "quiz"; S.qi = 0; S.retake = false; render(); break;
-    case "quiz-back": if (S.qi > (S.retake ? 1 : 0)) { S.qi--; render(); } else { S.view = S.retake ? "main" : "welcome"; S.retake = false; render(); } break;
+    case "start": S.view = "quiz"; S.qi = 0; render(); break;
+    case "quiz-back": if (S.qi > 0) { S.qi--; render(); } else { S.view = "welcome"; render(); } break;
     case "quiz-next": quizAdvance(); break;
     case "quiz-restart": S.view = "quiz"; S.qi = 1; render(); break;
     case "quiz-done": t.disabled = true; try { await finishQuiz(); } catch (err) { toast(err.message); t.disabled = false; } break;
-    case "retake": S.retake = true; S.answers = { ...answersOf(me()), name: me().name }; S.qi = 1; S.view = "quiz"; render(); scrollTo(0, 0); toast("Your class can change with your answers"); break;
+    case "look": lookSheet(); break;
+    case "look-house": closeSheet(); S.tab = "shop"; S.shopTab = "house"; render(); scrollTo(0, 0); break;
+    case "look-wear": wardrobe({ skin: d.id || null }, d.id ? "Looking sharp" : "Back to your own look").then(() => S.sheetKind === "look" && lookSheet()); break;
     case "skip-squad": S.view = "setup"; S.setupStep = "steps"; render(); break;
     case "setup-next": S.setupStep = "remind"; render(); scrollTo(0, 0); break;
     case "account-next":
