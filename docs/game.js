@@ -1396,7 +1396,13 @@ const SKINS = [
 ];
 // One Stripe Payment Link per price. The app adds who's buying what (client_reference_id), and the effort-house
 // webhook checks the amount paid covers it, so one link serves every item at that price. Empty until set up.
-const HOUSE_LINKS = { 99: "", 299: "", 499: "", 999: "", 1999: "" };
+const HOUSE_LINKS = {
+  99: "https://buy.stripe.com/eVq7sK8sWcmNbmpcRk67S00",
+  299: "https://buy.stripe.com/14AeVc9x05YpeyBeZs67S01",
+  499: "https://buy.stripe.com/7sY14m38CgD3gGJ2cG67S02",
+  999: "https://buy.stripe.com/dRmeVc9x02Md8adg3w67S03",
+  1999: "https://buy.stripe.com/cNicN46kObiJ9eh4kO67S04",
+};
 const skinById = (id) => SKINS.find((k) => k.id === id) || null;
 const skinTier = (k) => SKIN_TIERS.find((t) => t.id === (k?.tier || k)) || null;
 const pounds = (p) => `£${(p / 100).toFixed(2)}`;
