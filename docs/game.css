@@ -939,3 +939,7 @@ body.typing .chatview .ccomposer { padding-bottom: calc(env(safe-area-inset-bott
 .skincard.on { outline: 3px solid var(--gold); outline-offset: 1px; }
 .skinsw.own { background: var(--panel); display: grid; place-items: center; }
 .skinsw.own .fb, .skinsw.own svg { width: 100%; height: 100%; display: block; }
+.skin-preview .drag-hint { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); padding: 3px 9px; border-radius: 99px; background: rgba(10,15,38,.6); color: var(--text-2); font-size: 11px; pointer-events: none; opacity: .85; }
+.skin-preview canvas { touch-action: pan-y; }
+.skins .skincard { transition: transform .12s ease, outline-color .12s ease; }
+.skins .skincard:active { transform: scale(.96); }

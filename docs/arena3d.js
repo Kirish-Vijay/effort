@@ -254,11 +254,14 @@ function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) 
 
 // ---------- store preview ----------
 // A small live turntable for the skin store: the ninja turning slowly, idling, swinging every few seconds and, in a
-// House skin, doing its victory dance, with its trail and aura running. It has its own WebGL context (freed by
-// dispose()), draws only while on screen, and step(dt) moves it on by hand (tests, or a pane that never paints).
-//   const p = Arena3D.preview(host, answers, { spin: 0.45, every: 2.6, detail: 1.5, fx: 1, autoplay: true });  p.dispose();
+// House skin, doing its victory dance, with its trail and aura running. Drag it to turn it yourself (it keeps a
+// little momentum, then goes back to spinning on its own). setLook(answers) swaps the skin in place with a quick
+// pop, so switching never rebuilds the canvas. It has its own WebGL context (freed by dispose()), draws only while
+// on screen, and step(dt) moves it on by hand (tests, or a pane that never paints).
+//   const p = Arena3D.preview(host, answers, { spin: 0.45, every: 2.6, detail: 1.5, fx: 1, autoplay: true });
+//   p.setLook(otherAnswers);  p.dispose();
 function preview(host, answers, opts = {}) {
-  const none = { ok: false, walker: null, canvas: null, step() {}, play() {}, dispose() {} };
+  const none = { ok: false, walker: null, canvas: null, step() {}, play() {}, setLook() {}, dispose() {} };
   if (!buildWalker || !host) return none;
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" }); } catch { return none; }
@@ -267,43 +270,78 @@ function preview(host, answers, opts = {}) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.25;
   const cv = renderer.domElement;
-  cv.className = "arena3d-preview"; cv.style.cssText = "width:100%;height:100%;display:block";
+  cv.className = "arena3d-preview"; cv.style.cssText = "width:100%;height:100%;display:block;touch-action:pan-y;cursor:grab";
   host.appendChild(cv);
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x24305a, 1.4));
   const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(-3, 6, 8); scene.add(key);
   const rim = new THREE.DirectionalLight(0x8fc3ff, 1.5); rim.position.set(4, 3, -6); scene.add(rim);
-  const w = buildWalker(THREE, answers || {}, { detail: opts.detail ?? 1.5, fx: (opts.fx ?? 1) * (PHONE ? 0.8 : 1) });
+  const make = (a) => buildWalker(THREE, a || {}, { detail: opts.detail ?? 1.5, fx: (opts.fx ?? 1) * (PHONE ? 0.8 : 1) });
+  let w = make(answers);
   scene.add(w.group);
-  w.group.rotation.y = Math.PI + 0.5; // three-quarters on to start
-  const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 50), shot = { y: 1, z: 4, look: 0.7 };
-  const fit = () => {
+  let yaw = Math.PI + 0.5; // three-quarters on to start
+  w.group.rotation.y = yaw;
+  const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 50), shot = { y: 1, z: 4, look: 0.7 }, want = { y: 1, z: 4, look: 0.7 };
+  const fit = (snap = true) => {
     const r = host.getBoundingClientRect(), W = Math.max(1, r.width), H = Math.max(1, r.height);
     renderer.setSize(W, H, false);
     cam.aspect = W / H;
     // Room for a crown overhead and an aura either side.
     const top = (w.height || 1.5) + (w.skinFx?.crown ? 0.4 : 0.15), halfW = w.skinFx?.aura ? 0.9 : 0.72, cy = top / 2;
     const tn = Math.tan((cam.fov * Math.PI) / 360);
-    Object.assign(shot, { y: cy + 0.3, z: Math.max((top * 0.56) / tn, halfW / (tn * cam.aspect)), look: cy - 0.02 });
+    Object.assign(want, { y: cy + 0.3, z: Math.max((top * 0.56) / tn, halfW / (tn * cam.aspect)), look: cy - 0.02 });
+    if (snap) Object.assign(shot, want);
     cam.updateProjectionMatrix();
   };
   // The camera eases after the body, so a lunge stays in frame and its trail streams out behind it.
-  const body = w.group.getObjectByName("mover") || w.group, follow = new THREE.Vector3(), bodyAt = new THREE.Vector3();
+  let body = w.group.getObjectByName("mover") || w.group;
+  const follow = new THREE.Vector3(), bodyAt = new THREE.Vector3();
   const aim = (dt) => {
+    const k = Math.min(1, dt * 6);
+    for (const key2 of ["y", "z", "look"]) shot[key2] += (want[key2] - shot[key2]) * k;
     body.getWorldPosition(bodyAt);
     follow.x += (bodyAt.x - follow.x) * Math.min(1, dt * 7); follow.z += (bodyAt.z - follow.z) * Math.min(1, dt * 7);
     cam.position.set(follow.x, shot.y, shot.z + follow.z); cam.lookAt(follow.x, shot.look, follow.z);
   };
   // The show, on repeat: idle, a swing, a big swing, then a third swing or (House) the dance.
-  const every = opts.every ?? 2.6, dance = !!w.skinFx?.dance;
-  const show = dance ? [[every, "attack"], [every * 2, "big"], [every * 3, "cheer"], [every * 3 + 3.4, "idle"]] : [[every, "attack"], [every * 2, "big"], [every * 3, "attack"]];
-  const cycle = dance ? every * 3 + 4.2 : every * 3.4, spin = (opts.spin ?? 0.45) * (CALM ? 0.4 : 1);
+  const every = opts.every ?? 2.6, spin = (opts.spin ?? 0.45) * (CALM ? 0.4 : 1);
+  let show, cycle;
+  const program = () => {
+    const dance = !!w.skinFx?.dance;
+    show = dance ? [[every, "attack"], [every * 2, "big"], [every * 3, "cheer"], [every * 3 + 3.4, "idle"]] : [[every, "attack"], [every * 2, "big"], [every * 3, "attack"]];
+    cycle = dance ? every * 3 + 4.2 : every * 3.4;
+  };
+  program();
   let t = 0, raf = 0, last = 0, onScreen = true, gone = false;
+  // Turning by hand: drag sideways; let go and it keeps a little momentum, then the spin eases back in.
+  let dragging = false, lastX = 0, lastT = 0, vel = 0, idle = 99, pop = 1, old = null;
+  const down = (e) => { dragging = true; lastX = e.clientX; lastT = performance.now(); vel = 0; cv.style.cursor = "grabbing"; cv.setPointerCapture?.(e.pointerId); };
+  const move = (e) => {
+    if (!dragging) return;
+    const now = performance.now(), dx = e.clientX - lastX, dt = Math.max(16, now - lastT) / 1000;
+    // Smoothed and capped, so one jumpy event can't fling it round twenty times.
+    yaw += dx * 0.011; vel = Math.max(-7, Math.min(7, vel * 0.6 + ((dx * 0.011) / dt) * 0.4)); lastX = e.clientX; lastT = now; idle = 0;
+  };
+  const up = () => { if (!dragging) return; dragging = false; cv.style.cursor = "grab"; if (performance.now() - lastT > 80) vel = 0; };
+  cv.addEventListener("pointerdown", down); cv.addEventListener("pointermove", move);
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up); cv.addEventListener("lostpointercapture", up);
   function step(dt) {
     if (gone) return;
     const prev = t % cycle; t += dt; const now = t % cycle;
     if (opts.autoplay !== false) for (const [at, name] of show) if (now >= prev ? prev < at && at <= now : at > prev || at <= now) w.play(name);
-    w.group.rotation.y += dt * spin;
+    if (!dragging) {
+      idle += dt;
+      yaw += vel * dt; vel *= Math.pow(0.04, dt); // momentum dies away in about a second
+      yaw += dt * spin * Math.min(1, Math.max(0, (idle - 1.5) / 1.5)); // and the spin comes back after a pause
+    }
+    w.group.rotation.y = yaw;
+    // A new skin pops in: the old one shrinks away as the new one springs up.
+    if (pop < 1) {
+      pop = Math.min(1, pop + dt / 0.32);
+      const back = 1 + 2.2 * (pop - 1) ** 3 + 1.2 * (pop - 1) ** 2; // ease-out-back
+      w.group.scale.setScalar(Math.max(0.01, back));
+      if (old) { const k = Math.max(0, 1 - pop * 2.2); old.group.scale.setScalar(Math.max(0.01, k)); old.group.rotation.y = yaw; old.update(dt); if (k <= 0) { scene.remove(old.group); old.dispose(); old = null; } }
+    }
     w.update(dt);
     aim(dt);
     renderer.render(scene, cam);
@@ -320,13 +358,28 @@ function preview(host, answers, opts = {}) {
   const io = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; }) : null;
   io?.observe(host);
   return {
-    ok: true, walker: w, canvas: cv,
+    ok: true, canvas: cv,
     step: (dt = 1 / 60) => step(dt),
     play: (name) => w.play(name),
+    get walker() { return w; },
+    // Swap to another look in the same canvas: same angle, a quick pop, the framing eases to fit.
+    setLook(a) {
+      if (gone) return;
+      if (old) { scene.remove(old.group); old.dispose(); }
+      old = w;
+      w = make(a);
+      w.group.rotation.y = yaw; w.group.scale.setScalar(0.01);
+      scene.add(w.group);
+      body = w.group.getObjectByName("mover") || w.group;
+      program(); t = 0; pop = 0;
+      fit(false);
+      if (w.skinFx?.burst) try { w.skinFx.burst("spark", 18); } catch { /* not every skin bursts */ }
+    },
     dispose() {
       if (gone) return;
       gone = true;
       cancelAnimationFrame(raf); ro?.disconnect(); io?.disconnect();
+      if (old) old.dispose();
       w.dispose(); // its geometry, materials, textures and trails
       renderer.dispose();
       renderer.forceContextLoss(); // browsers cap live WebGL contexts

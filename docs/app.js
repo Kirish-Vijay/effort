@@ -980,7 +980,8 @@ async function wardrobe(body, msg) {
     ANS[me().id] = answersOf(me());
     FX.play(body.buy ? "buy" : "tap"); if (msg) toast(msg);
     render();
-  } catch (e) { toast(e.message); } finally { S.busy = false; }
+    return true;
+  } catch (e) { toast(e.message); return false; } finally { S.busy = false; }
 }
 const titleOf = (p) => G.wardrobeById(p?.wear?.title)?.name || null;
 
@@ -1420,7 +1421,7 @@ function skinSheet(id) {
     const flat = host.innerHTML;
     try {
       host.innerHTML = ""; S.skinPreview = Arena3D.preview(host, look);
-      if (!S.skinPreview?.ok) { S.skinPreview = null; host.innerHTML = flat; }
+      if (!S.skinPreview?.ok) { S.skinPreview = null; host.innerHTML = flat; } else host.insertAdjacentHTML("beforeend", `<span class="drag-hint">Drag to turn</span>`);
     } catch { host.innerHTML = flat; }
   }
 }
@@ -1431,7 +1432,7 @@ function lookSheet() {
     const t = k && G.skinTier(k), wearing = (k?.id || null) === on;
     return `<button class="skincard${wearing ? " on" : ""}" data-act="look-wear" data-id="${k?.id || ""}" style="--tc:${t?.color || "var(--line-2)"}">
       ${k ? skinSwatch(k) : `<span class="skinsw own"><span class="fb">${head2d(answersOf({ ...me(), wear: {} }))}</span></span>`}
-      <b>${k ? esc(k.name) : "Your own look"}</b><span class="tiny">${wearing ? "Wearing" : k ? `${esc(t.label)} skin` : "From your answers"}</span></button>`;
+      <b>${k ? esc(k.name) : "Your own look"}</b><span class="tiny" data-label="${k ? `${esc(t.label)} skin` : "From your answers"}">${wearing ? "Wearing" : k ? `${esc(t.label)} skin` : "From your answers"}</span></button>`;
   };
   S.sheetKind = "look";
   openSheet(`${sheetHead("Change my look")}
@@ -1445,9 +1446,26 @@ function lookSheet() {
   S.skinPreview?.dispose?.(); S.skinPreview = null;
   if (host && window.Arena3D?.preview && use3d()) {
     const flat = host.innerHTML;
-    try { host.innerHTML = ""; S.skinPreview = Arena3D.preview(host, ANS[me().id]); if (!S.skinPreview?.ok) { S.skinPreview = null; host.innerHTML = flat; } }
+    try { host.innerHTML = ""; S.skinPreview = Arena3D.preview(host, ANS[me().id]); if (!S.skinPreview?.ok) { S.skinPreview = null; host.innerHTML = flat; } else host.insertAdjacentHTML("beforeend", `<span class="drag-hint">Drag to turn</span>`); }
     catch { host.innerHTML = flat; }
   }
+}
+// Switch skin in place: the preview and the cards change at once, and it saves in the background (put back if
+// the save fails).
+async function lookWear(id) {
+  const was = me().wear?.skin || null;
+  if (id === was || S.busy) return;
+  const mark = (on) => {
+    for (const c of document.querySelectorAll("#sheet .skincard")) {
+      const yes = (c.dataset.id || null) === on, lab = c.querySelector("[data-label]");
+      c.classList.toggle("on", yes); if (lab) lab.textContent = yes ? "Wearing" : lab.dataset.label;
+    }
+    const look = answersOf({ ...me(), wear: { ...(me().wear || {}), skin: on } });
+    if (S.skinPreview) S.skinPreview.setLook(look);
+    else { const fb = $("#skin-preview .fb"); if (fb) fb.innerHTML = Walker.svg(look, { mood: "fresh" }); }
+  };
+  mark(id); FX.play("tap");
+  if (!(await wardrobe({ skin: id }, null))) mark(was);
 }
 // Off to Stripe, after a clear look at what's being bought. client_reference_id tells the webhook who bought what.
 function housePay(id, sure = false) {
@@ -3033,7 +3051,7 @@ document.addEventListener("click", async (e) => {
     case "quiz-done": t.disabled = true; try { await finishQuiz(); } catch (err) { toast(err.message); t.disabled = false; } break;
     case "look": lookSheet(); break;
     case "look-house": closeSheet(); S.tab = "shop"; S.shopTab = "house"; render(); scrollTo(0, 0); break;
-    case "look-wear": wardrobe({ skin: d.id || null }, d.id ? "Looking sharp" : "Back to your own look").then(() => S.sheetKind === "look" && lookSheet()); break;
+    case "look-wear": lookWear(d.id || null); break;
     case "skip-squad": S.view = "setup"; S.setupStep = "steps"; render(); break;
     case "setup-next": S.setupStep = "remind"; render(); scrollTo(0, 0); break;
     case "account-next":
