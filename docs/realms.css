@@ -1,0 +1,213 @@
+/* Effort: weekly journey map (realms.js). Sits on game.css tokens (--ink, --gold, --panel, --display, --ui).
+   Each realm only swaps the palette, prop silhouettes and one ambient particle; the chrome stays the same (M8). */
+
+/* ---------- Realm palettes over the navy base ---------- */
+.rlm {
+  --g0: #0e2620; --g1: #133129; --far: #1f4a3d; --mid: #0a1d18; --near: #050f0c;
+  --acc: #a6e05a; --acc2: #e8e4d4; --lm: #4f8a4a; --lm-off: #22403a; --sky: #2c5a3c; --fx: rgba(200, 235, 205, .2); --plate-on: #2f6b3a;
+  --rev: 0;
+}
+.rlm--swamp { --g0: #0d241e; --g1: #12302a; --far: #1f4a3d; --mid: #0a1d18; --near: #050f0c; --acc: #a6e05a; --lm: #4f8a4a; --lm-off: #22403a; --sky: #2f5e42; --fx: rgba(205, 235, 210, .16); --plate-on: #2f6b3a; }
+.rlm--spore { --g0: #24160e; --g1: #2e1c11; --far: #55321a; --mid: #1a0f08; --near: #0e0704; --acc: #ffa53d; --lm: #c76a2a; --lm-off: #3e2717; --sky: #6b3a1a; --fx: #ffd27a; --plate-on: #8a4416; }
+.rlm--glacier { --g0: #0e2430; --g1: #142f3d; --far: #2c5464; --mid: #0a1a23; --near: #050f15; --acc: #c9f6ff; --lm: #7cc4d8; --lm-off: #21404d; --sky: #3d7187; --fx: #eef9ff; --plate-on: #2d6a80; }
+.rlm--storm { --g0: #161b26; --g1: #1d2331; --far: #374258; --mid: #0f131c; --near: #080b11; --acc: #ffe14d; --lm: #8592ab; --lm-off: #2a3141; --sky: #4a5570; --fx: #ffe9a0; --plate-on: #5b6680; }
+.rlm--abyss { --g0: #041a1f; --g1: #07252b; --far: #10424a; --mid: #031216; --near: #01090c; --acc: #3dffc5; --lm: #1f8f80; --lm-off: #12343a; --sky: #0f4c52; --fx: #a8fff1; --plate-on: #156b62; }
+.rlm--glitch { --g0: #090d0c; --g1: #0f1714; --far: #1c3a2e; --mid: #060c09; --near: #020504; --acc: #7dff4f; --acc2: #ff3b6b; --lm: #3a8a4a; --lm-off: #1b2c24; --sky: #1d3b2c; --fx: #7dff4f; --plate-on: #2f6e3c; }
+.rlm--space { --g0: #06070c; --g1: #0c0d15; --far: #22253a; --mid: #05060b; --near: #020206; --acc: #ffc83d; --acc2: #ff6a3d; --lm: #b58a3a; --lm-off: #24252f; --sky: #2b2720; --fx: #fff3c4; --plate-on: #7a5a1e; }
+
+/* ---------- Frame ---------- */
+.rlm { position: relative; border-radius: 18px; border: 2px solid var(--ink); overflow: hidden; background: var(--g0); box-shadow: 0 4px 0 var(--ink); color: var(--text); font-family: var(--ui); text-align: left; }
+.rlm button { font: inherit; color: inherit; }
+
+/* ---------- Summary band (M9) ---------- */
+.rlm-head { position: relative; z-index: 4; padding: 10px 12px 11px; background: var(--g1); border-bottom: 2px solid var(--ink); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08); }
+.rlm-title b { display: block; font: 400 19px/1.1 var(--display); letter-spacing: .01em; }
+.rlm-title span { display: block; margin-top: 2px; font-size: 12px; line-height: 1.3; color: var(--text-2); }
+.rlm-count { margin-top: 8px; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.rlm-now { font: 400 21px/1 var(--display); color: var(--gold); text-shadow: 0 2px 0 var(--ink); }
+.rlm-lairname { color: var(--text); font-weight: 600; }
+.rlm-bar { position: relative; height: 12px; margin: 7px 4px 0; border-radius: 99px; background: var(--inset); border: 2px solid var(--ink); }
+.rlm-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; max-width: 100%; border-radius: 99px; background: var(--gold); box-shadow: inset 0 -3px 0 var(--gold-lo), inset 0 2px 0 var(--gold-hi); }
+.rlm-tick { position: absolute; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; transform: rotate(45deg); background: var(--lm-off); border: 2px solid var(--ink); }
+.rlm-tick.is-on { background: var(--gold-hi); }
+.rlm-next { margin-top: 8px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 10px; font-size: 12.5px; color: var(--text-2); }
+.rlm-next b { color: var(--text); }
+.rlm-today { color: var(--text-3); }
+.rlm-done-msg { font: 400 15px/1.2 var(--display); color: var(--gold) !important; text-shadow: 0 1.5px 0 var(--ink); }
+
+/* ---------- Scrolling world (M1) ---------- */
+.rlm-view { position: relative; }
+.rlm-scroll { position: relative; z-index: 1; height: 62vh; height: 62dvh; max-height: 620px; min-height: 340px; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .22) transparent; }
+.rlm-scroll:focus-visible { outline: 3px solid var(--cyan); outline-offset: -3px; }
+.rlm-world { position: relative; width: 100%; height: 0; padding-top: 477.78%; overflow: hidden; } /* 360 x 1720 */
+.rlm-ground, .rlm-props, .rlm-path { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.rlm-band.top, .rlm-band.b1 { fill: var(--g0); }
+.rlm-band.b0 { fill: var(--g1); }
+.rlm-far { z-index: 1; will-change: transform; }
+.rlm-far path { fill: var(--far); opacity: .6; }
+.rlm-mid { z-index: 2; will-change: transform; }
+.rlm-mid path { fill: var(--mid); }
+.rlm-path { z-index: 3; }
+.rlm-near { z-index: 4; }
+.rlm-near path { fill: var(--near); }
+
+/* ---------- Path and trail (M2, S3) ---------- */
+.rlm-p-ink { fill: none; stroke: var(--ink); stroke-width: 13; stroke-linecap: round; opacity: .6; }
+.rlm-p-bed { fill: none; stroke: rgba(0, 0, 0, .35); stroke-width: 8; stroke-linecap: round; }
+.rlm-p-dash { fill: none; stroke: rgba(255, 255, 255, .42); stroke-width: 3; stroke-dasharray: 8 9; stroke-linecap: round; }
+.rlm-p-gold { fill: none; stroke: var(--gold); stroke-width: 7; stroke-linecap: round; }
+.rlm-fp { fill: var(--gold-hi); opacity: 0; transition: opacity .3s; }
+.rlm-fp.is-on { opacity: .5; }
+.rlm-trail { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; opacity: .95; }
+
+/* ---------- Landmarks (M5) ---------- */
+.rlm-lm { display: block; width: 60px; height: 60px; overflow: visible; }
+.rlm-lm .b { fill: var(--lm-off); stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.rlm-lm .l { fill: rgba(255, 255, 255, .07); }
+.rlm-lm .s { fill: none; stroke: var(--lm-off); stroke-width: 2.5; stroke-linecap: round; }
+.rlm-lm .d { fill: #04060c; stroke: var(--ink); stroke-width: 2; }
+.rlm-cp.is-on .rlm-lm .b, .rlm-lm.is-lit .b { fill: var(--lm); }
+.rlm-cp.is-on .rlm-lm .l, .rlm-lm.is-lit .l { fill: var(--acc); }
+.rlm-cp.is-on .rlm-lm .s, .rlm-lm.is-lit .s { stroke: var(--lm); }
+.rlm-lm .b, .rlm-lm .l { transition: fill .4s; }
+
+.rlm-cp { position: absolute; z-index: 6; width: 0; height: 0; padding: 0; margin: 0; border: 0; background: none; cursor: pointer; -webkit-appearance: none; appearance: none; }
+.rlm-cp:focus-visible { outline: none; }
+.rlm-cp:focus-visible .rlm-plate { outline: 3px solid var(--cyan); outline-offset: 2px; }
+.rlm-cp-disc { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%; background: var(--lm-off); border: 3px solid var(--ink); box-shadow: 0 2px 0 var(--ink), inset 0 0 0 3px rgba(255, 255, 255, .08); }
+.rlm-cp.is-on .rlm-cp-disc { background: var(--gold); box-shadow: 0 2px 0 var(--ink), inset 0 -3px 0 var(--gold-lo), inset 0 2px 0 var(--gold-hi); }
+.rlm-cp.is-next .rlm-cp-disc::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 2px solid var(--gold); animation: rlm-ping 1.6s ease-out infinite; }
+.rlm-cp-body { position: absolute; top: -72px; width: 150px; display: flex; flex-direction: column; gap: 3px; }
+.rlm-cp.side-r .rlm-cp-body { left: 20px; align-items: flex-start; text-align: left; }
+.rlm-cp.side-l .rlm-cp-body { right: 20px; align-items: flex-end; text-align: right; }
+.rlm-cp-body .rlm-lm { transform-origin: 50% 100%; }
+.rlm-cp.is-pop .rlm-lm { animation: rlm-pop .6s cubic-bezier(.2, 1.6, .4, 1); }
+
+.rlm-plate { display: inline-block; max-width: 150px; padding: 4px 8px 5px; font: 400 13px/1.08 var(--display); letter-spacing: .01em; color: var(--text-2); background: var(--panel-lo); border: 2px solid var(--ink); border-radius: 9px; box-shadow: 0 2px 0 var(--ink); }
+.rlm-cp.is-on .rlm-plate { color: #fff; background: var(--plate-on); text-shadow: 0 1.5px 0 var(--ink); }
+.rlm-cp.is-next .rlm-plate { color: var(--gold-hi); }
+.rlm-cp-lore { display: none; max-width: 150px; padding: 4px 7px; font: 500 11px/1.3 var(--ui); color: var(--text); background: rgba(5, 8, 20, .76); border-radius: 7px; }
+.rlm-cp.is-on .rlm-cp-lore { display: block; }
+
+/* Lair: the end of the path, under the boss */
+.rlm-lair-art { position: absolute; left: -56px; top: -84px; width: 112px; height: 94px; }
+.rlm-lm--lair { width: 100%; height: 100%; }
+.rlm-lair .rlm-cp-body { left: 50px; width: 96px; top: -78px; align-items: flex-start; text-align: left; }
+.rlm-lair .rlm-plate, .rlm-lair .rlm-cp-lore { max-width: 96px; white-space: normal; overflow-wrap: break-word; }
+.rlm.is-done .rlm-huddle { transform: translate(-50%, 16px); }
+.rlm-lair .rlm-plate { font-size: 14px; }
+.rlm-lair.is-on .rlm-lair-art { animation: rlm-pop .6s cubic-bezier(.2, 1.6, .4, 1); transform-origin: 50% 100%; }
+
+/* Start camp */
+.rlm-start { position: absolute; z-index: 6; width: 0; height: 0; }
+.rlm-start-dot { position: absolute; left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); border: 3px solid var(--lm-off); }
+.rlm-start .rlm-plate { position: absolute; top: 16px; left: 0; transform: translateX(-50%); white-space: nowrap; font-size: 12px; }
+
+/* ---------- Boss (M7): a silhouette that brightens per checkpoint ---------- */
+.rlm-boss { position: absolute; left: 50%; z-index: 5; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.rlm-medal { position: relative; width: 128px; height: 128px; border-radius: 50%; overflow: hidden; background: var(--sky); border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink), inset 0 0 0 4px rgba(255, 255, 255, .07), inset 0 -18px 0 rgba(0, 0, 0, .18); }
+.rlm-medal svg { position: absolute; left: 5%; top: 7%; width: 90%; height: 90%; overflow: visible; }
+.rlm-boss-art { filter: brightness(var(--rev)); transition: filter .6s; }
+.rlm-boss-art .k { stroke: var(--ink); stroke-width: 3; stroke-linejoin: round; }
+.rlm-boss-art .s { fill: none; stroke-width: 4; stroke-linecap: round; }
+.rlm-boss-art .d1, .rlm-boss-art .d2 { opacity: 0; transition: opacity .5s; }
+.rlm-boss-eyes .eye { fill: var(--acc); opacity: .55; transition: fill .5s, opacity .5s; }
+.rlm-boss-eyes .pupil { fill: var(--ink); opacity: 0; transition: opacity .5s; }
+.rlm[data-stage="1"] { --rev: .16; }
+.rlm[data-stage="2"] { --rev: .36; }
+.rlm[data-stage="3"] { --rev: .56; }
+.rlm[data-stage="4"] { --rev: .78; }
+.rlm[data-stage="5"] { --rev: 1; }
+.rlm:not([data-stage="0"]) .rlm-boss-eyes .eye { opacity: 1; }
+.rlm:is([data-stage="2"], [data-stage="3"], [data-stage="4"], [data-stage="5"]) .rlm-boss-art .d1 { opacity: 1; }
+.rlm:is([data-stage="4"], [data-stage="5"]) .rlm-boss-art .d2 { opacity: 1; }
+.rlm[data-stage="5"] .rlm-boss-eyes .eye { fill: #fff; }
+.rlm[data-stage="5"] .rlm-boss-eyes .pupil { opacity: 1; }
+.rlm.is-done .rlm-medal { border-color: var(--gold); animation: rlm-rumble 2.6s ease-in-out infinite; }
+.rlm-pips { display: flex; gap: 7px; }
+.rlm-pips i { width: 10px; height: 10px; transform: rotate(45deg); background: var(--inset); border: 2px solid var(--ink); transition: background .4s; }
+.rlm[data-stage="1"] .rlm-pips i:nth-child(-n+1),
+.rlm[data-stage="2"] .rlm-pips i:nth-child(-n+2),
+.rlm[data-stage="3"] .rlm-pips i:nth-child(-n+3),
+.rlm[data-stage="4"] .rlm-pips i:nth-child(-n+4),
+.rlm[data-stage="5"] .rlm-pips i { background: var(--gold); }
+.rlm-boss-name { font-size: 15px; color: #fff; text-shadow: 0 1.5px 0 var(--ink); background: var(--ink); }
+
+/* ---------- Squad huddle (M3, M4) ---------- */
+.rlm-pin { position: absolute; z-index: 7; left: var(--hx); top: var(--hy); width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--gold-hi); border: 3px solid var(--ink); box-shadow: 0 0 0 3px rgba(255, 200, 61, .3); }
+.rlm-huddle { position: absolute; z-index: 8; left: clamp(var(--hw), var(--hx), calc(100% - var(--hw))); top: var(--hy); transform: translate(-50%, calc(-100% - 13px)); display: flex; align-items: flex-end; padding: 4px 6px 4px 16px; border-radius: 99px; background: rgba(6, 10, 26, .82); border: 2px solid var(--ink); box-shadow: 0 3px 0 var(--ink); }
+.rlm-f { position: relative; flex: none; width: 30px; height: 30px; margin-left: -10px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--panel); border: 2px solid var(--ink); box-shadow: 0 2px 0 var(--ink); }
+.rlm-f > .face, .rlm-card-face > .face { width: 100% !important; height: 100% !important; border-radius: 50% !important; border: 0 !important; box-shadow: none !important; }
+.rlm-f.is-walk { animation: rlm-bob .9s ease-in-out infinite alternate; animation-delay: var(--bd); }
+.rlm-f.is-zero { filter: grayscale(1) brightness(.6); transform: translateY(-3px) scale(.86); }
+.rlm-ini { font: 400 15px/1 var(--display); color: var(--text); }
+.rlm-more { font: 400 12px/1 var(--display); color: var(--text-2); background: var(--panel-lo); }
+.rlm-token svg { width: 20px; height: 20px; fill: var(--gold); stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; }
+
+/* ---------- Checkpoint card (M6) ---------- */
+.rlm-card { position: absolute; z-index: 3; left: 10px; right: 10px; bottom: 10px; padding: 10px 12px 12px; background: var(--panel); border: 2px solid var(--ink); border-radius: 16px; box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, .14), 0 4px 0 var(--ink); animation: rlm-up .2s ease-out; }
+.rlm-card-row { display: flex; align-items: center; gap: 10px; }
+.rlm-card-row .grow { flex: 1; min-width: 0; }
+.rlm-card-art { flex: none; width: 58px; height: 58px; display: grid; place-items: center; border-radius: 13px; background: var(--g1); border: 2px solid var(--ink); }
+.rlm-card-art .rlm-lm { width: 46px; height: 46px; }
+.rlm-card-art .rlm-lm--lair { width: 50px; height: 42px; }
+.rlm-card b.disp { display: block; font: 400 17px/1.1 var(--display); }
+.rlm-card small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.rlm-card.is-on small { color: var(--gold); }
+.rlm-card p { margin: 9px 0 0; font-size: 13.5px; line-height: 1.4; color: var(--text); }
+.rlm-card-top { display: flex; align-items: center; gap: 8px; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--text-2); }
+.rlm-card-top b { color: var(--text); }
+.rlm-card-face { flex: none; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--panel-lo); border: 2px solid var(--ink); }
+.rlm-x { flex: none; width: 34px; height: 34px; padding: 0; display: grid; place-items: center; border-radius: 10px; background: var(--panel-lo); border: 2px solid var(--ink); box-shadow: 0 2px 0 var(--ink); color: var(--text-2); cursor: pointer; }
+.rlm-x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+
+/* ---------- Ambient particles, one per realm (M8) ---------- */
+.rlm-fx { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
+.rlm-fx i { position: absolute; left: var(--x); top: var(--y); display: block; }
+/* fog: slow drifting banks */
+.rlm-fx--fog i { width: 240px; height: 80px; margin-left: -120px; border-radius: 50%; background: radial-gradient(closest-side, var(--fx), rgba(0, 0, 0, 0)); animation: rlm-drift calc(var(--d) * 2.4) ease-in-out infinite alternate; animation-delay: var(--dl); }
+/* spores: rising specks */
+.rlm-fx--spores i { top: 100%; width: calc(5px * var(--z)); height: calc(5px * var(--z)); border-radius: 50%; background: var(--fx); animation: rlm-rise var(--d) linear infinite; animation-delay: var(--dl); }
+/* snow: falling flakes */
+.rlm-fx--snow i { top: -8px; width: calc(4px * var(--z)); height: calc(4px * var(--z)); border-radius: 50%; background: var(--fx); animation: rlm-fall var(--d) linear infinite; animation-delay: var(--dl); }
+/* bubbles: rising rings */
+.rlm-fx--bubbles i { top: 100%; width: calc(9px * var(--z)); height: calc(9px * var(--z)); border-radius: 50%; border: 1.5px solid var(--fx); opacity: .6; animation: rlm-rise calc(var(--d) * 1.2) linear infinite; animation-delay: var(--dl); }
+/* storm: rain and the odd lightning flash */
+.rlm-fx--storm i { top: -24px; width: 1.5px; height: 20px; background: rgba(255, 233, 160, .45); transform: rotate(14deg); animation: rlm-rain calc(var(--d) * .12) linear infinite; animation-delay: var(--dl); }
+.rlm-fx .fx-flash { position: absolute; inset: 0; background: var(--fx); opacity: 0; animation: rlm-flash 7s linear infinite; }
+.rlm-fx .fx-bolt { position: absolute; top: 3%; left: 72%; width: 26px; height: 78px; fill: var(--acc); stroke: var(--ink); stroke-width: 2; opacity: 0; animation: rlm-flash-bolt 7s linear infinite; }
+/* glitch: scanlines, a rolling band, flickering slices */
+.rlm-fx .fx-scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .22) 0 1px, rgba(0, 0, 0, 0) 1px 3px); }
+.rlm-fx .fx-band { position: absolute; left: 0; right: 0; top: -60px; height: 46px; background: rgba(125, 255, 79, .06); animation: rlm-band 5.5s linear infinite; }
+.rlm-fx--glitch i { width: calc(60px * var(--z)); height: 3px; background: var(--acc); opacity: 0; animation: rlm-slice calc(var(--d) * .5) steps(1, end) infinite; animation-delay: var(--dl); }
+.rlm-fx--glitch i:nth-child(2) { background: var(--acc2); }
+/* stars: twinkling, and a shooting star now and then */
+.rlm-fx--stars i { width: calc(3px * var(--z)); height: calc(3px * var(--z)); border-radius: 50%; background: var(--fx); animation: rlm-twinkle calc(var(--d) * .4) ease-in-out infinite alternate; animation-delay: var(--dl); }
+.rlm-fx .fx-shoot { position: absolute; top: 12%; left: 8%; width: 90px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, rgba(255, 243, 196, 0), var(--fx)); transform: rotate(18deg); opacity: 0; animation: rlm-shoot 9s ease-out infinite; }
+
+/* glitch realm: plates carry a slight colour split */
+.rlm--glitch .rlm-plate { text-shadow: 1.5px 0 0 rgba(255, 59, 107, .7), -1.5px 0 0 rgba(125, 255, 79, .55); }
+.rlm--glitch .rlm-cp.is-on .rlm-plate { text-shadow: 1.5px 0 0 rgba(255, 59, 107, .8), -1.5px 0 0 rgba(125, 255, 79, .6), 0 1.5px 0 var(--ink); }
+
+/* ---------- Keyframes ---------- */
+@keyframes rlm-bob { to { transform: translateY(-4px); } }
+@keyframes rlm-ping { from { transform: scale(.7); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }
+@keyframes rlm-pop { 0% { transform: scale(.55); } 100% { transform: scale(1); } }
+@keyframes rlm-up { from { transform: translateY(14px); } to { transform: none; } }
+@keyframes rlm-rumble { 0%, 86%, 100% { transform: none; } 89% { transform: translateX(-2px) rotate(-1deg); } 92% { transform: translateX(2px) rotate(1deg); } 95% { transform: translateX(-1px); } }
+@keyframes rlm-drift { from { transform: translateX(-50px); opacity: .5; } to { transform: translateX(50px); opacity: 1; } }
+@keyframes rlm-rise { 0% { transform: translate(0, 0); opacity: 0; } 12% { opacity: .8; } 85% { opacity: .8; } 100% { transform: translate(var(--dx), -680px); opacity: 0; } }
+@keyframes rlm-fall { 0% { transform: translate(0, 0); opacity: 0; } 10% { opacity: .9; } 50% { transform: translate(var(--dx), 340px); } 100% { transform: translate(0, 680px); opacity: .7; } }
+@keyframes rlm-rain { from { transform: translate(0, 0) rotate(14deg); } to { transform: translate(-160px, 680px) rotate(14deg); } }
+@keyframes rlm-flash { 0%, 89% { opacity: 0; } 90% { opacity: .2; } 91% { opacity: 0; } 92.5% { opacity: .14; } 94%, 100% { opacity: 0; } }
+@keyframes rlm-flash-bolt { 0%, 89% { opacity: 0; } 90%, 93% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@keyframes rlm-band { from { transform: translateY(0); } to { transform: translateY(720px); } }
+@keyframes rlm-slice { 0% { opacity: 0; transform: none; } 50% { opacity: .55; transform: translateX(14px); } 60% { opacity: 0; } }
+@keyframes rlm-twinkle { from { opacity: .15; } to { opacity: .9; } }
+@keyframes rlm-shoot { 0%, 80% { opacity: 0; transform: translate(0, 0) rotate(18deg); } 82% { opacity: 1; } 92%, 100% { opacity: 0; transform: translate(220px, 72px) rotate(18deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .rlm *, .rlm *::after { animation: none !important; transition: none !important; }
+  .rlm-fx--spores i, .rlm-fx--bubbles i, .rlm-fx--snow i, .rlm-fx--storm i { top: var(--y); opacity: .5; }
+  .rlm-fx .fx-band, .rlm-fx .fx-shoot { display: none; }
+}

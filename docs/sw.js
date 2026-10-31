@@ -1,6 +1,6 @@
 // Network first so updates show up straight away; cached shell only when offline.
-const CACHE = "effort-v9";
-const SHELL = ["./", "index.html", "game.css", "character.js", "icons.js", "items.js", "prompts.js", "game.js", "seasons.js", "world.js", "story.js", "stories.js", "fx.js", "app.js", "models.js", "arena3d.js", "icon.svg", "manifest.webmanifest"];
+const CACHE = "effort-v10";
+const SHELL = ["./", "index.html", "game.css", "character.js", "icons.js", "items.js", "prompts.js", "game.js", "seasons.js", "world.js", "story.js", "stories.js", "realms.js", "realms.css", "fx.js", "app.js", "models.js", "arena3d.js", "icon.svg", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

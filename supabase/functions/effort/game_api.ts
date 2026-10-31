@@ -10,7 +10,8 @@
 //   POST /buy | /upgrade | /equip
 //   POST /season_claim claim a season reward: a story chapter, a track tier or a weekly bounty
 //   POST /den_give     put Efforts into a room of the squad's Den
-//   POST /wardrobe     buy or wear cosmetics
+//   POST /wardrobe     buy or wear cosmetics (and wear skins from The House)
+//   POST /gamba        buy one of Winny's Gamba Buckets
 //   POST /hunt_finish  Wednesday's Midweek Hunt: report the fight, get your share
 //   POST /chat_list | /chat_around | /chat_send | /chat_edit | /chat_delete | /chat_search   squad chat (see chat.ts)
 //   POST /squad_create make a squad and join it
@@ -25,8 +26,9 @@ let G: Any; // the rules (game.js), loaded before each request is handled
 const LAUNCH_DAY = "2026-10-27";
 // Squads raid together, so the raid runs on UK time for everyone.
 const SQUAD_TZ = "Europe/London";
-// No scroll data at all for a day: assume this many minutes.
-const NO_SCROLL_MIN = 30;
+// Apps that report on their own (the Effort app, the iPhone open/close automation). Anyone else's app time counts
+// as over budget (Game.scrollCounted): not linking never pays.
+const scrollLinked = (player: Any) => player?.scroll_source === "auto";
 const DAY_MS = 86400000;
 
 // ---------- dates ----------
@@ -108,7 +110,7 @@ async function debtFor(db: Any, id: string, day: string) {
 }
 async function scrollFor(db: Any, id: string, from: string, to: string) {
   const { data } = await db.from("daily_scroll").select("day,minutes,auto_minutes").eq("player_id", id).gte("day", from).lte("day", to);
-  return Object.fromEntries((data ?? []).map((r: Any) => [r.day, r.minutes ?? r.auto_minutes ?? NO_SCROLL_MIN]));
+  return Object.fromEntries((data ?? []).map((r: Any) => [r.day, r.minutes ?? r.auto_minutes ?? 0]));
 }
 const avgOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
@@ -127,6 +129,12 @@ async function ledgerFor(db: Any, ids: string[]) {
 const statsOf = (p: Any) => G.stats(p.character || {});
 const level = (L: Any) => G.levelOf(L.xp);
 const cleanGear = (gear: Any, inv: Record<string, number>) => Object.fromEntries(Object.entries(gear || {}).filter(([slot, id]) => G.itemById(id)?.slot === slot && (id as string) in inv));
+
+// The House: everything raised from skins so far (paid through Stripe; see the effort-house function).
+async function houseTotal(db: Any) {
+  const { data } = await db.from("house_payments").select("pence");
+  return { pence: (data ?? []).reduce((a: number, r: Any) => a + (r.pence || 0), 0), count: (data ?? []).length };
+}
 
 // ---------- settling days ----------
 const netOf = (E: number, rate: number, knocked: number, steal: number) => E - Math.round(E * rate * (1 - knocked)) + Math.round(E * steal);
@@ -156,7 +164,7 @@ async function settleDays(db: Any, player: Any, squad: Any, L: Any, now: number)
     let net, how;
     if (f) { net = netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct)); how = Number(f.knocked) >= 1 ? "knocked him out" : `fought, ${Math.round(Number(f.rate) * (1 - Number(f.knocked)) * 100)}% tax`; }
     else {
-      const rate = G.taxRate(s, scroll[day] ?? NO_SCROLL_MIN, avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
+      const rate = G.taxRate(s, G.scrollCounted(s, scroll[day], scrollLinked(player)), avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
       net = E - Math.round(E * rate); how = `didn't fight, ${Math.round(rate * 100)}% tax`;
     }
     const paid = L.rows.filter((r: Any) => r.kind === "tax" && r.ref === day).reduce((a: number, r: Any) => a + r.amount, 0);
@@ -187,7 +195,7 @@ async function bankToday(db: Any, player: Any, squad: Any, now: number) {
     net = netOf(E, rate, knocked, Number(f.steal_pct));
     note = knocked >= 1 ? `Knocked out the Taxman, stole ${Math.round(Number(f.steal_pct) * 100)}%` : `Fought the Taxman down to ${Math.round(rate * (1 - knocked) * 100)}% tax`;
   } else {
-    const rate = G.taxRate(s, scroll[day] ?? NO_SCROLL_MIN, avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
+    const rate = G.taxRate(s, G.scrollCounted(s, scroll[day], scrollLinked(player)), avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
     net = E - Math.round(E * rate); note = `Missed the Taxman: ${Math.round(rate * 100)}% tax`;
   }
   note += ` · ${s.toLocaleString("en-GB")} steps so far`;
@@ -264,8 +272,8 @@ async function denFor(db: Any, squad: Any) {
   const levels = Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, G.denLevel(v)]));
   return { totals, levels };
 }
-// Cosmetics someone owns: ledger rows of kind "cosmetic".
-const ownedCosmetics = (L: Any) => L.rows.filter((r: Any) => r.kind === "cosmetic").map((r: Any) => r.ref);
+// Wardrobe pieces bought with Endeavours, plus skins bought for real money (granted by the effort-house webhook).
+const ownedCosmetics = (L: Any) => L.rows.filter((r: Any) => r.kind === "cosmetic" || r.kind === "skin").map((r: Any) => r.ref);
 
 // ---------- the season ----------
 // Where the squad is on the journey, this player's track, the chapters that are open, the week's bounties
@@ -322,7 +330,7 @@ function bossChoice(group: Any, day: string) {
 const LOBBY_STALE_MS = 20000;
 
 // ---------- the routes ----------
-const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim", "den_give", "wardrobe", "hunt_finish",
+const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim", "den_give", "wardrobe", "gamba", "hunt_finish",
   "chat_list", "chat_around", "chat_send", "chat_edit", "chat_delete", "chat_search"]);
 export async function gameRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; playerByToken: Any }) {
   const { db, json, fail } = ctx;
@@ -383,10 +391,12 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
           created_at: player.created_at, steps_synced_at: player.steps_synced_at, steps_source: player.steps_source, scroll_synced_at: player.scroll_synced_at, scroll_source: player.scroll_source },
         wallet: L.wallet, xp: L.xp, inv: L.inv,
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
-          scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, noScrollMin: NO_SCROLL_MIN },
+          scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, scrollLinked: scrollLinked(player) },
         fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now, den), hunt, chat: { latest: await chatLatest(db, squad) },
         features: Object.fromEntries(Object.keys(G.FEATURES).map((f) => [f, G.featureOn(f, gameDay(squad, now))])), gameDay: gameDay(squad, now),
         ledger: L.rows.slice(0, 25).map((r: Any) => ({ kind: r.kind, ref: r.ref, amount: r.amount, note: r.note, at: r.at })),
+        gamba: { today: L.rows.filter((r: Any) => r.kind === "gamba" && String(r.ref).startsWith(today + ":")).length },
+        house: await houseTotal(db),
       });
     }
 
@@ -597,7 +607,9 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
     case "wardrobe": {
       if (body.buy) await bankToday(db, player, squad, now);
       const L = (await ledgerFor(db, [player.id]))[player.id], owned = ownedCosmetics(L), day = gameDay(squad, now);
-      if (!G.featureOn("wardrobe", day)) return fail("The wardrobe opens soon");
+      // Paid skins can be worn from day one; everything else waits for the wardrobe to open.
+      const skinOnly = !body.buy && Object.keys(body).filter((k) => ["suit", "band", "title", "skin"].includes(k)).every((k) => k === "skin");
+      if (!skinOnly && !G.featureOn("wardrobe", day)) return fail("The wardrobe opens soon");
       if (body.buy) {
         const w = G.wardrobeById(body.buy);
         if (!w) return fail("No such item");
@@ -610,16 +622,36 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         return json({ ok: true, wallet: bal, owned: [...owned, w.id] });
       }
       const wear: Any = { ...(player.cosmetics || {}) };
-      for (const kind of ["suit", "band", "title"]) {
+      for (const kind of ["suit", "band", "title", "skin"]) {
         if (!(kind in body)) continue;
         const id = body[kind];
         if (id === null) { delete wear[kind]; continue; }
-        const w = G.wardrobeById(id);
+        const w = kind === "skin" ? (G.skinById(id) && { id, kind: "skin" }) : G.wardrobeById(id);
         if (!w || w.kind !== kind || !owned.includes(id)) return fail("You don't have that");
         wear[kind] = id;
       }
       await db.from("players").update({ cosmetics: wear }).eq("id", player.id);
       return json({ ok: true, wear });
+    }
+
+    // Winny's Gamba Bucket: pay, roll here (never on the phone), pay out. The odds are Game.GAMBA, public in the app.
+    case "gamba": {
+      await bankToday(db, player, squad, now);
+      const day = localDate(now, tz), L = (await ledgerFor(db, [player.id]))[player.id];
+      const today = L.rows.filter((r: Any) => r.kind === "gamba" && String(r.ref).startsWith(day + ":")).length;
+      if (today >= G.GAMBA.perDay) return fail(`That's ${G.GAMBA.perDay} buckets today. Winny's closed till midnight`);
+      const ref = `${day}:${today + 1}:${crypto.randomUUID().slice(0, 8)}`;
+      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "gamba", p_ref: ref, p_amount: G.GAMBA.price, p_note: "Winny's Gamba Bucket" });
+      if (error) throw error;
+      if (bal === -1) return fail("Not enough Endeavours");
+      if (bal === -2) return fail("Try again");
+      const u = crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
+      const k = G.gambaRoll(u), [, win, label] = G.GAMBA.prizes[k];
+      if (win > 0) {
+        const { error: e2 } = await db.from("ledger").insert({ player_id: player.id, kind: "gamba-win", ref, amount: win, xp: 0, note: `Gamba Bucket: ${label}` });
+        if (e2) throw e2;
+      }
+      return json({ ok: true, prize: k, win, wallet: bal + win, left: G.GAMBA.perDay - today - 1 });
     }
 
     case "hunt_finish": {
@@ -687,7 +719,7 @@ async function taxInputs(db: Any, player: Any, squad: Any, day: string) {
   const [steps, scroll, L] = await Promise.all([stepsFor(db, ids, day, day), scrollFor(db, player.id, day, day), ledgerFor(db, [player.id])]);
   const inv = L[player.id].inv;
   return {
-    steps: steps[player.id][day] ?? 0, scrollMin: scroll[day] ?? NO_SCROLL_MIN,
+    steps: steps[player.id][day] ?? 0, scrollMin: G.scrollCounted(steps[player.id][day] ?? 0, scroll[day], scrollLinked(player)),
     squadAvg: squad && ids.length > 1 ? avgOf(ids.map((id: string) => steps[id][day] ?? 0)) : 0,
     stats: statsOf(player), equipped: cleanGear(player.gear, inv), inv, level: level(L[player.id]), den: (await denFor(db, squad)).levels,
   };

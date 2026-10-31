@@ -6,7 +6,8 @@
 //
 //   const w = buildWalker(THREE, answers, opts);  scene.add(w.group);  ...  w.update(dt);  w.play("attack");
 //   opts: { detail: 1 (0.5..2; 2 for close-up menus), outline: 0.024, shadow: true (soft blob shadow),
-//           castShadow: false, castColor: "#5dff95", phase: number }
+//           castShadow: false, castColor: "#5dff95", phase: number, fx: 1 (skin effect quality, 0.2..1) }
+// A paid skin (answers._skin) recolours and patterns the suit and adds w.skinFx: see skinOf() below.
 
 const INK = "#1f2a24";
 const IDS = ["time", "pace", "land", "carry", "creature", "morning", "laugh", "hat", "hue", "month", "number", "word"];
@@ -47,6 +48,26 @@ const SHAPES = {
   dash: { n: 2.4, wf: (t) => 0.62 + 0.48 * t },
 };
 const signature = (a) => IDS.map((id) => String(a[id] ?? "").trim().toLowerCase()).join("|");
+
+// ---------- paid skins (cosmetic only: nothing here touches stats) ----------
+// answers._skin = { id, tier, look } (or a bare skin id, looked up in game.js). Tiers stack, each keeping what the one
+// below draws: street = outfit + pattern, flash = glowing trims, neon = light trail + flowing glow, mythic = aura and
+// hit sparks in your colours, house = gold or galaxy body, crown or halo, victory dance. Look fields a tier hasn't
+// reached are ignored, and missing ones fall back to the skin's other colours.
+const SKIN_RANK = { street: 0, flash: 1, neon: 2, mythic: 3, house: 4 };
+const hexOr = (c) => (/^#[0-9a-f]{6}$/i.test(String(c || "")) ? String(c).toLowerCase() : null);
+/** skinOf(answers) → null or { id, tier, rank, base, trim, pattern, glow, trail, aura, spark, body, crown, dance }. */
+export function skinOf(a) {
+  let s = a && a._skin;
+  if (typeof s === "string") { try { s = globalThis.Game?.skinById?.(s) || null; } catch { s = null; } }
+  if (!s || typeof s !== "object" || !s.look) return null;
+  const L = s.look, r = SKIN_RANK[s.tier] ?? 0;
+  const base = hexOr(L.base), trim = hexOr(L.trim), glow = r >= 1 ? hexOr(L.glow) || trim : null;
+  return { id: String(s.id || ""), tier: s.tier || "street", rank: r, base, trim, pattern: L.pattern || null, glow,
+    trail: r >= 2 ? hexOr(L.trail) || glow : null, aura: r >= 3 ? L.aura || "sparks" : null, spark: r >= 3 ? hexOr(L.spark) || glow : null,
+    body: r >= 4 ? L.body || null : null, crown: r >= 4 ? L.crown || null : null, dance: r >= 4 && (L.dance === "flex" || L.dance === "warp") ? L.dance : null };
+}
+
 function traits(a) {
   const sig = signature(a);
   const r = rng(hash(sig));
@@ -54,8 +75,9 @@ function traits(a) {
   const num = Math.max(1, Math.min(99, Number(a.number) || 7));
   const hue = Number.isFinite(Number(a.hue)) ? Number(a.hue) : Math.floor(r() * 360);
   const pal = (PALETTES[a.time] || PALETTES.noon)(hue);
+  const skin = skinOf(a);
   return {
-    sig, hue, num, time: a.time, wear: { suit: a._suit || null, band: a._band || null },
+    sig, hue, num, time: a.time, skin, wear: { suit: skin?.base || a._suit || null, band: skin?.trim || a._band || null },
     // Equipped gear (_weapon, _armour, _trinket) resolved to looks by character.js, which every page loads first.
     gear: typeof globalThis.Walker?.gear === "function" ? globalThis.Walker.gear(a) : null,
     pal: { ...pal, accent: hsl(hue + 150 + num * 3, 72, 54), accent2: hsl(hue + 200 + num * 5, 68, 62), cheek: "#ff8a8a" },
@@ -103,6 +125,58 @@ function inkCompile(shader) {
     .replace("#include <project_vertex>", `vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
   mvPosition.xyz += normalize( normalMatrix * normal ) * uOutline * uOutScale;
   gl_Position = projectionMatrix * mvPosition;`);
+}
+// Skin suits, on top of the cel shading: the glowing pattern (the emissive map) shimmers (flash) or has light running
+// up its lines (neon and up), and House bodies swap the shading for banded toon gold or a screen-space starfield.
+// uSkSlit is the face texture's eye slit in UVs, which keeps its skin and eyes as they are.
+const SKIN_UNI = "uniform float uSkT; uniform float uSkFlow; uniform float uSkBody; uniform vec4 uSkSlit; uniform vec3 uSkA; uniform vec3 uSkB;";
+const SKIN_FRAG = `{
+  float skIn = 1.0;
+  #ifdef USE_MAP
+    skIn = 1.0 - step( uSkSlit.x, vMapUv.x ) * step( vMapUv.x, uSkSlit.z ) * step( uSkSlit.y, vMapUv.y ) * step( vMapUv.y, uSkSlit.w );
+  #endif
+  float skGlow = 1.0;
+  #ifdef USE_EMISSIVEMAP
+    vec2 skUv = vEmissiveMapUv;
+    skGlow = 0.8 + 0.5 * smoothstep( 0.86, 1.0, sin( skUv.y * 5.0 + skUv.x * 3.0 - uSkT * 1.7 ) );
+    skGlow *= mix( 1.0, 0.3 + 1.3 * pow( 0.5 + 0.5 * sin( skUv.y * 16.0 - uSkT * 4.5 ), 3.0 ), uSkFlow );
+  #endif
+  vec3 skV = normalize( vViewPosition );
+  vec3 skE = totalEmissiveRadiance * skGlow;
+  float skL = dot( outgoingLight - totalEmissiveRadiance, vec3( 0.299, 0.587, 0.114 ) );
+  if ( uSkBody > 0.5 && skIn > 0.5 ) {
+    vec3 skR = reflect( -skV, normal );
+    if ( uSkBody < 1.5 ) {
+      float y = skR.y * 0.5 + 0.5;
+      vec3 g = mix( vec3( 0.13, 0.055, 0.008 ), vec3( 0.72, 0.4, 0.05 ), smoothstep( 0.2, 0.45, y ) );
+      g = mix( g, vec3( 1.0, 0.74, 0.22 ), smoothstep( 0.56, 0.6, y ) );
+      g = mix( g, vec3( 1.0, 0.95, 0.72 ), smoothstep( 0.82, 0.85, y ) );
+      g += vec3( 1.0, 0.8, 0.4 ) * 0.6 * smoothstep( 0.96, 1.0, sin( skR.x * 7.0 + skR.y * 3.0 + uSkT * 1.3 ) );
+      outgoingLight = g * ( 0.55 + 0.45 * skL ) + skE * 0.6;
+    } else {
+      vec2 sp = gl_FragCoord.xy * 0.006 + vec2( uSkT * 0.02, uSkT * 0.008 );
+      float n = 0.5 + 0.5 * sin( sp.x * 3.1 + sin( sp.y * 2.3 + uSkT * 0.25 ) * 1.7 ) * sin( sp.y * 2.7 + sin( sp.x * 1.9 ) * 1.3 );
+      vec3 neb = mix( uSkA, uSkB, n * n ) + vec3( 0.8, 0.35, 0.9 ) * pow( n, 7.0 ) * 0.5;
+      vec2 cell = floor( gl_FragCoord.xy / 7.0 ), cf = fract( gl_FragCoord.xy / 7.0 ) - 0.5;
+      float h = fract( sin( dot( cell, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+      float star = step( 0.93, h ) * smoothstep( 0.4, 0.0, length( cf ) ) * ( 0.55 + 0.45 * sin( uSkT * ( 2.0 + h * 4.0 ) + h * 50.0 ) );
+      outgoingLight = neb * ( 0.4 + 0.9 * skL ) + vec3( star * 1.6 ) + uSkB * 0.9 * smoothstep( 0.55, 0.8, 1.0 - dot( normal, skV ) ) + skE;
+    }
+  } else {
+    outgoingLight += skE - totalEmissiveRadiance;
+  }
+}`;
+function skinCompile(shader) {
+  toonCompile.call(this, shader);
+  const s = this.userData.sk;
+  Object.assign(shader.uniforms, { uSkT: s.t, uSkFlow: s.flow, uSkBody: s.body, uSkSlit: s.slit, uSkA: s.a, uSkB: s.b });
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <common>", "#include <common>\n" + SKIN_UNI)
+    .replace(TOON_FRAG, () => SKIN_FRAG + "\n" + TOON_FRAG);
+}
+// Skin sprites (aura, bursts): one size per point on top of the material's.
+function pointsCompile(shader) {
+  shader.vertexShader = shader.vertexShader.replace("#include <common>", "#include <common>\nattribute float aSize;").replace("gl_PointSize = size;", "gl_PointSize = size * aSize;");
 }
 
 const gradCache = new WeakMap();
@@ -221,6 +295,27 @@ const LOOPS = {
     return { sq: -0.2, rx: -0.42, py: -0.04, aRx: 1.0 + 0.7 * Math.sin(p), aLx: 1.0 + 0.7 * Math.sin(p + Math.PI), aRz: -0.2, aLz: 0.2, wg: -0.9, ry: 0.08 * Math.sin(p * 0.5) };
   },
   block: (time, w, t) => ({ sq: -0.1, rx: -0.12, pz: 0.02, px: 0.006 * Math.sin(t * 50), aRx: 1.9, aRz: -0.75, aLx: 1.9, aLz: 0.75, wg: -1.26 }),
+  // House skins' victory dances, played instead of cheer. Flex: crouch, pop up into a power pose (to one side, then the
+  // other) and hold it, arms shaking. Warp: a hopping spin, a blink out of sight, then back with arms up.
+  flex: (time, w, t) => {
+    const P = DANCE.flex.period, p = (t % P) / P, side = Math.floor(t / P) % 2 ? -1 : 1;
+    const crouch = kf(p, [[0, 0], [0.18, 1], [0.3, 0, "o"], [1, 0]]), pose = kf(p, [[0, 0], [0.18, 0], [0.32, 1, "o"], [0.82, 1], [1, 0]]);
+    const shakeA = pose * 0.07 * Math.sin(t * 38);
+    return { py: 0.18 * Math.sin(Math.PI * clamp((p - 0.18) / 0.2, 0, 1)), sq: -0.16 * crouch + 0.05 * pose, rx: 0.12 * crouch - 0.14 * pose, ry: side * 0.38 * pose, sway: -side * 0.06 * pose,
+      aRx: 0.35 * pose - 0.5 * crouch, aLx: 0.35 * pose - 0.5 * crouch, aRz: 1.75 * pose + shakeA + 0.3 * crouch, aLz: -1.75 * pose - shakeA - 0.3 * crouch, wg: -1.6 * pose };
+  },
+  warp: (time, w, t) => {
+    const P = DANCE.warp.period, p = (t % P) / P;
+    const spin = EASE.s(clamp(p / 0.46, 0, 1)), lift = Math.sin(Math.PI * clamp(p / 0.48, 0, 1));
+    const pose = clamp((p - 0.6) / 0.1, 0, 1) * (1 - clamp((p - 0.9) / 0.1, 0, 1));
+    return { ry: Math.PI * 2 * spin, py: 0.24 * lift + 0.06 * pose, sq: 0.08 * lift - 0.1 * pose * Math.sin(t * 9) ** 2,
+      aRx: 0.5 * lift + 2.5 * pose, aLx: 0.5 * lift + 2.5 * pose, aRz: 0.95 * lift + 0.25 * pose, aLz: -0.95 * lift - 0.25 * pose, wg: -0.6 * lift - 2 * pose };
+  },
+};
+// Dance timing: loop length, when the ninja blinks out (warp), and the beats that throw a burst [fraction, kind].
+const DANCE = {
+  flex: { period: 1.7, beats: [[0.3, "coins"]] },
+  warp: { period: 1.5, blink: [0.48, 0.6], beats: [[0.48, "star"], [0.6, "star"]] },
 };
 
 // Gear geometry is shared by every ninja on the page (it never changes shape), so it lives here and is never disposed.
@@ -247,13 +342,113 @@ const SUIT = { dawn: [40, 44], noon: [48, 33], golden: [44, 35], night: [26, 20]
 const darker = (hex, k = 0.72) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * k).toString(16).padStart(2, "0")).join("");
 export function ninjaPalette(t) {
   const [s, l] = SUIT[t.time] || SUIT.noon, W = t.wear || {};
-  return { suit: W.suit || hsl(t.hue, s, l), dark: W.suit ? darker(W.suit) : hsl(t.hue, s, Math.max(10, l - 12)), band: W.band || t.pal.accent, sash: t.pal.accent2,
+  return { suit: W.suit || hsl(t.hue, s, l), dark: W.suit ? darker(W.suit) : hsl(t.hue, s, Math.max(10, l - 12)), band: W.band || t.pal.accent, sash: t.skin?.trim || t.pal.accent2,
     wrap: "#ece6d6", skin: SKIN[t.num % SKIN.length], metal: "#cfd8e0", straw: "#d9b46a", wood: "#3a2a22" };
+}
+// A hex colour mixed towards white.
+const lighter = (hex, k = 0.3) => "#" + [1, 3, 5].map((i) => { const v = parseInt(hex.slice(i, i + 2), 16); return Math.round(v + (255 - v) * k).toString(16).padStart(2, "0"); }).join("");
+
+// A skin's suit pattern on a 256px tile that repeats twice round each limb (so x = 0 and 128 land on your sides).
+// mask: white where the pattern glows and black elsewhere, the same strokes in the same places (the emissive map).
+// P: base, shade (darker base), light (lighter base), trim, hi (lighter trim).
+function paintPattern(x, name, P, mask, seed) {
+  const N = 256, r = rng(seed);
+  const col = (k) => (mask ? (k === "trim" || k === "hi" ? "#fff" : "#000") : P[k]);
+  const tiled = (fn) => { for (const dx of [-N, 0, N]) for (const dy of [-N, 0, N]) { x.save(); x.translate(dx, dy); fn(); x.restore(); } };
+  const path = (pts, w, k) => { x.lineWidth = w; x.strokeStyle = col(k); x.beginPath(); pts.forEach(([a, b], i) => (i ? x.lineTo(a, b) : x.moveTo(a, b))); x.stroke(); };
+  x.fillStyle = col("base"); x.fillRect(0, 0, N, N);
+  x.lineCap = "round"; x.lineJoin = "round";
+  switch (name) {
+    case "stripes": // three stripes down each side
+      x.fillStyle = col("trim");
+      for (const c of [0, 128, 256]) for (let k = -1; k <= 1; k++) x.fillRect(c + k * 13 - 4, 0, 8, N);
+      break;
+    case "camo": {
+      const blobs = Array.from({ length: 26 }, (_, i) => ({ x: r() * N, y: r() * N, s: 14 + r() * 22, k: ["shade", "trim", "light"][i % 3], a: r() * Math.PI }));
+      tiled(() => { for (const b of blobs) { x.fillStyle = col(b.k); for (let j = 0; j < 3; j++) { x.beginPath(); x.ellipse(b.x + Math.cos(b.a + j * 2.1) * b.s * 0.5, b.y + Math.sin(b.a + j * 2.1) * b.s * 0.4, b.s * 0.7, b.s * 0.45, b.a + j, 0, Math.PI * 2); x.fill(); } } });
+      break;
+    }
+    case "bands": // reflective bands round the middle and the cuffs
+      for (const y of [58, 168]) { x.fillStyle = col("trim"); x.fillRect(0, y, N, 30); x.fillStyle = col("hi"); x.fillRect(0, y + 4, N, 4); x.fillRect(0, y + 22, N, 4); }
+      break;
+    case "tiles": // a mirrorball: a grid of tiles catching the light at random
+      for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) {
+        const k = r(); x.globalAlpha = mask ? (k > 0.72 ? 1 : 0) : 0.2 + k * 0.75;
+        x.fillStyle = col(k > 0.72 ? "hi" : "trim"); x.fillRect(i * 16 + 1.5, j * 16 + 1.5, 13, 13);
+      }
+      x.globalAlpha = 1;
+      break;
+    case "circuits": { // traces at right angles ending in pads
+      const traces = Array.from({ length: 14 }, () => { let px = Math.floor(r() * 8) * 32 + 16, py = Math.floor(r() * 8) * 32 + 16; const pts = [[px, py]];
+        for (let s = 0; s < 4; s++) { if (s % 2) px += (r() < 0.5 ? -1 : 1) * 32 * (1 + Math.floor(r() * 2)); else py += (r() < 0.5 ? -1 : 1) * 32 * (1 + Math.floor(r() * 2)); pts.push([px, py]); } return pts; });
+      tiled(() => { for (const pts of traces) { path(pts, 4, "trim"); for (const [a, b] of [pts[0], pts[pts.length - 1]]) { x.fillStyle = col("hi"); x.beginPath(); x.arc(a, b, 6, 0, Math.PI * 2); x.fill(); } } });
+      break;
+    }
+    case "cracks": { // glowing cracks, forking as they go
+      const cracks = [];
+      for (let i = 0; i < 9; i++) { let px = r() * N, py = r() * N, a = r() * Math.PI * 2; const pts = [[px, py]];
+        for (let s = 0; s < 6; s++) { a += (r() - 0.5) * 1.4; px += Math.cos(a) * 18; py += Math.sin(a) * 18; pts.push([px, py]); if (r() < 0.3) cracks.push({ pts: [[px, py], [px + Math.cos(a + 1.1) * 22, py + Math.sin(a + 1.1) * 22]], w: 3 }); }
+        cracks.push({ pts, w: 6 }); }
+      tiled(() => { for (const c of cracks) { path(c.pts, c.w, "trim"); path(c.pts, c.w * 0.35, "hi"); } });
+      break;
+    }
+    case "crystal": { // faceted ice: shaded triangles with bright edges
+      const G = 64;
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (const t of [0, 1]) {
+        const a = [i * G, j * G], b = [(i + 1) * G, j * G], c = [i * G, (j + 1) * G], d = [(i + 1) * G, (j + 1) * G], tri = t ? [b, d, c] : [a, b, c];
+        x.fillStyle = col(["shade", "light", "base"][Math.floor(r() * 3)]); x.beginPath(); tri.forEach(([p, q], k) => (k ? x.lineTo(p, q) : x.moveTo(p, q))); x.closePath(); x.fill();
+        path([...tri, tri[0]], 3, "trim");
+      }
+      break;
+    }
+    case "bolts": { // lightning across the suit
+      const bolts = Array.from({ length: 5 }, () => { let px = r() * N, py = -10; const pts = [[px, py]]; while (py < N + 10) { px += (r() - 0.5) * 50; py += 18 + r() * 20; pts.push([px, py]); } return pts; });
+      tiled(() => { for (const b of bolts) { path(b, 7, "trim"); path(b, 2.5, "hi"); } });
+      break;
+    }
+    case "filigree": { // engraved scrolls
+      x.lineWidth = 3.5; x.strokeStyle = col("trim");
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+        const cx = i * 64 + 32, cy = j * 64 + 32, d = (i + j) % 2 ? 1 : -1;
+        x.beginPath(); for (let a = 0; a < 9; a += 0.25) { const rr = 3 + a * 2.6; x.lineTo(cx + Math.cos(a * d) * rr, cy + Math.sin(a * d) * rr); } x.stroke();
+        x.beginPath(); x.arc(cx + 22, cy - 22, 10, Math.PI * 0.5, Math.PI * 1.5); x.stroke();
+        x.fillStyle = col("hi"); x.beginPath(); x.arc(cx + 30, cy + 30, 3.5, 0, Math.PI * 2); x.fill();
+      }
+      break;
+    }
+    case "stars": { // a sky of dots and a few four-point stars
+      const stars = Array.from({ length: 46 }, () => ({ x: r() * N, y: r() * N, s: r() }));
+      tiled(() => { for (const s of stars) {
+        x.fillStyle = col(s.s > 0.86 ? "hi" : "trim");
+        if (s.s > 0.86) { const R = 9, q = 2; x.beginPath(); x.moveTo(s.x, s.y - R); x.lineTo(s.x + q, s.y - q); x.lineTo(s.x + R, s.y); x.lineTo(s.x + q, s.y + q); x.lineTo(s.x, s.y + R); x.lineTo(s.x - q, s.y + q); x.lineTo(s.x - R, s.y); x.lineTo(s.x - q, s.y - q); x.closePath(); x.fill(); }
+        else { x.beginPath(); x.arc(s.x, s.y, 1 + s.s * 2.4, 0, Math.PI * 2); x.fill(); }
+      } });
+      break;
+    }
+  }
+}
+// Little sprites for the aura and the bursts: a snowflake, an electric spark, a coin and a star.
+function paintSprite(x, kind) {
+  const c = 32;
+  x.clearRect(0, 0, 64, 64); x.lineCap = "round";
+  const glow = x.createRadialGradient(c, c, 0, c, c, 30); glow.addColorStop(0, "rgba(255,255,255,.55)"); glow.addColorStop(1, "rgba(255,255,255,0)");
+  x.fillStyle = glow; x.fillRect(0, 0, 64, 64);
+  x.strokeStyle = x.fillStyle = "#fff";
+  if (kind === "snow") { x.lineWidth = 4; for (let k = 0; k < 6; k++) { const a = (k * Math.PI) / 3, ex = c + Math.cos(a) * 22, ey = c + Math.sin(a) * 22; x.beginPath(); x.moveTo(c, c); x.lineTo(ex, ey); x.stroke();
+    for (const s of [-1, 1]) { const mx = c + Math.cos(a) * 13, my = c + Math.sin(a) * 13; x.beginPath(); x.moveTo(mx, my); x.lineTo(mx + Math.cos(a + s * 0.8) * 7, my + Math.sin(a + s * 0.8) * 7); x.stroke(); } } }
+  else if (kind === "coins") { x.fillStyle = "#ffd23d"; x.beginPath(); x.arc(c, c, 20, 0, Math.PI * 2); x.fill(); x.lineWidth = 4; x.strokeStyle = "#fff4b8"; x.beginPath(); x.arc(c, c, 14, 0, Math.PI * 2); x.stroke(); x.fillStyle = "#fffbe6"; x.beginPath(); x.arc(c - 7, c - 7, 4, 0, Math.PI * 2); x.fill(); }
+  else { // spark and star: a bright core with long points (sparks thinner and more of them)
+    const R = kind === "sparks" ? 30 : 26, q = kind === "sparks" ? 2.2 : 4.5;
+    x.beginPath(); for (let k = 0; k < 8; k++) { const a = (k * Math.PI) / 4 - Math.PI / 2, rr = k % 2 ? q : R; x.lineTo(c + Math.cos(a) * rr, c + Math.sin(a) * rr); } x.closePath(); x.fill();
+    x.beginPath(); x.arc(c, c, 5, 0, Math.PI * 2); x.fill();
+  }
 }
 
 /**
  * buildWalker(THREE, answers, opts) → { group, height, update(dt), play(action), setTint(color|null), dispose() }
- * group: feet at y=0, ~1.5 tall, facing -Z.  Actions: idle, attack, big, hurt, down, revive, cheer, block, cast.
+ * group: feet at y=0, ~1.5 tall, facing -Z.  Actions: idle, attack, big, hurt, down, revive, cheer, block, cast
+ * (and flex, warp: House skins' dances, which cheer turns into).  skinFx: null, or { id, tier, rank, spark, trail, aura,
+ * crown, dance, body, quality(k), burst(kind, n, color, point) } for a skinned walker.
  */
 export function buildWalker(THREE, answers, opts = {}) {
   const t = traits(answers || {});
@@ -302,7 +497,7 @@ export function buildWalker(THREE, answers, opts = {}) {
     if (parent) parent.add(m);
     return m;
   }
-  const mesh = (geo, color, parent, o = {}) => part(geo, toon(color, { gloss: o.gloss ?? 0.5, map: o.map }), parent, o);
+  const mesh = (geo, color, parent, o = {}) => part(geo, (!o.map && skinMat(color)) || toon(color, { gloss: o.gloss ?? 0.5, map: o.map }), parent, o);
   const sphere = (w, h) => G(`s${w}|${h}`, () => new THREE.SphereGeometry(1, Math.round(w * detail), Math.round(h * detail)));
   const capsule = (r, len, cs, rs) => G(`c${r}|${len}|${cs}|${rs}`, () => new THREE.CapsuleGeometry(r, len, Math.max(2, Math.round(cs * detail)), Math.max(6, Math.round(rs * detail))));
   const cyl = (rt, rb, h, rs, open = false) => G(`y${rt}|${rb}|${h}|${rs}|${open}`, () => new THREE.CylinderGeometry(rt, rb, h, Math.round(rs * detail), 1, open));
@@ -310,11 +505,41 @@ export function buildWalker(THREE, answers, opts = {}) {
   const canvas = (w, h) => (typeof OffscreenCanvas !== "undefined" && !opts.domCanvas ? new OffscreenCanvas(w, h) : Object.assign(document.createElement("canvas"), { width: w, height: h }));
   const texture = (cv) => { const x = new THREE.CanvasTexture(cv); x.colorSpace = THREE.SRGBColorSpace; x.anisotropy = 4; texs.add(x); return x; };
 
+  // ---------- skin materials: the patterned suit (and its glow mask), glowing trims, a gold or galaxy body ----------
+  // Every mesh in the suit, boot/fist or band/sash colour picks these up through mesh(); gear keeps its own look.
+  const SK = t.skin, skGlow = []; // skGlow: emissive skin materials, pulsed in update()
+  let skinMat = () => null, skinned = null, skTile = null, SKU = null;
+  if (SK) {
+    SKU = { t: { value: 0 }, flow: { value: SK.rank >= 2 ? 1 : 0 }, body: { value: SK.body === "gold" ? 1 : SK.body === "galaxy" ? 2 : 0 },
+      a: { value: new THREE.Color(C.suit) }, b: { value: new THREE.Color(SK.glow || C.band) } };
+    const P = { base: C.suit, shade: darker(C.suit, 0.7), light: lighter(C.suit, 0.28), trim: C.band, hi: lighter(C.band, 0.55) };
+    const seed = hash("skin:" + SK.id);
+    const tile = (mask) => { const c = canvas(256, 256); paintPattern(c.getContext("2d"), SK.pattern, P, mask, seed); return c; };
+    if (SK.pattern) skTile = { col: tile(false), glow: SK.glow ? tile(true) : null, hood: !["stripes", "bands"].includes(SK.pattern) };
+    const wrapTex = (cv) => { const x = texture(cv); x.wrapS = x.wrapT = THREE.RepeatWrapping; x.repeat.set(2, 1); return x; };
+    const NO_SLIT = new THREE.Vector4(9, 9, 9, 9);
+    // A toon material with the skin's extras (map: its colours; glowMap: where it glows; slit: UV box left alone).
+    skinned = (hex, o = {}) => {
+      const m = new THREE.MeshToonMaterial({ color: o.map ? 0xffffff : hex, map: o.map || null, gradientMap: gradientMap(THREE) });
+      m.userData = { wu, gloss: { value: o.gloss ?? 0.5 }, rim: { value: o.rim ?? 0.32 }, ei: 0, sk: { ...SKU, slit: { value: o.slit || NO_SLIT } } };
+      if (o.glowMap) { m.emissive.set(SK.glow); m.emissiveMap = o.glowMap; m.userData.ei = SK.rank >= 2 ? 1.1 : 0.9; m.emissiveIntensity = m.userData.ei; skGlow.push(m); }
+      m.onBeforeCompile = skinCompile;
+      mats.add(m);
+      return m;
+    };
+    const bodyO = SKU.body.value ? { gloss: SK.body === "gold" ? 1 : 0.2 } : {};
+    const suitMat = skinned(C.suit, { ...bodyO, map: skTile ? wrapTex(skTile.col) : null, glowMap: skTile?.glow ? wrapTex(skTile.glow) : null });
+    const darkMat = SK.body ? skinned(C.dark, bodyO) : null; // boots, fists and collar go gold or starry too
+    const trimMat = SK.glow ? toon(C.band, { gloss: 0.3, ei: SK.rank >= 2 ? 0.75 : 0.55, emissive: SK.glow }) : null;
+    if (trimMat) skGlow.push(trimMat);
+    skinMat = (c) => (c === C.suit ? suitMat : c === C.dark ? darkMat : c === C.band || c === C.sash ? trimMat : null);
+  }
+
   // ---------- rig (same as the old walker, so the battle animations drive it unchanged) ----------
   const BW = 0.3 * t.scaleX;
   const Y0 = 0.18;
   const group = new THREE.Group(); group.name = "walker";
-  const mover = new THREE.Group(); group.add(mover);
+  const mover = new THREE.Group(); mover.name = "mover"; group.add(mover);
   const TPX = BW * 1.05;
   const tp = new THREE.Group(); tp.position.x = TPX; mover.add(tp);
   const tpc = new THREE.Group(); tpc.position.x = -TPX; tp.add(tpc);
@@ -384,7 +609,7 @@ export function buildWalker(THREE, answers, opts = {}) {
   const EYE_U = 0.75, EYE_V = 0.53, GAP = 0.05 + (t.eyeGap - 15) * 0.0025;
   function faceTex(ko) {
     const W = 1024, H = 512, c = canvas(W, H), x = c.getContext("2d");
-    x.fillStyle = C.suit; x.fillRect(0, 0, W, H);
+    x.fillStyle = skTile?.hood ? x.createPattern(skTile.col, "repeat") : C.suit; x.fillRect(0, 0, W, H);
     // hood seam down the back and a soft darker crown
     x.fillStyle = C.dark; x.globalAlpha = 0.35; x.fillRect(0, 0, W, H * 0.12); x.globalAlpha = 1;
     x.strokeStyle = C.dark; x.lineWidth = 6; x.beginPath(); x.moveTo(W * 0.25, 0); x.lineTo(W * 0.25, H * 0.9); x.stroke();
@@ -416,7 +641,19 @@ export function buildWalker(THREE, answers, opts = {}) {
     return texture(c);
   }
   const headGeo = sphere(32, 24);
-  const faceMat = toon("#ffffff", { gloss: 0.15, map: faceTex(false) }), koMat = toon("#ffffff", { gloss: 0.15, map: faceTex(true) });
+  let faceMat, koMat;
+  if (SK) { // the hood takes the skin: its pattern, its glow (none in the slit) and a gold or starry body round the slit
+    let glowMap = null;
+    if (skTile?.glow && skTile.hood) {
+      const gc = canvas(512, 256), gx = gc.getContext("2d");
+      gx.scale(0.5, 0.5); gx.fillStyle = gx.createPattern(skTile.glow, "repeat"); gx.fillRect(0, 0, 1024, 512);
+      gx.fillStyle = "#000"; gx.beginPath(); gx.roundRect(1024 * 0.6 - 12, 512 * 0.43 - 12, 1024 * 0.3 + 24, 512 * 0.19 + 24, 30); gx.fill();
+      glowMap = texture(gc);
+    }
+    const slit = new THREE.Vector4(0.6 - 0.006, 1 - 0.62 - 0.012, 0.9 + 0.006, 1 - 0.43 + 0.012); // the slit's box, in UVs (v runs up)
+    const o = { gloss: SK.body === "gold" ? 0.8 : 0.15, glowMap, slit };
+    faceMat = skinned("#ffffff", { ...o, map: faceTex(false) }); koMat = skinned("#ffffff", { ...o, map: faceTex(true) });
+  } else { faceMat = toon("#ffffff", { gloss: 0.15, map: faceTex(false) }); koMat = toon("#ffffff", { gloss: 0.15, map: faceTex(true) }); }
   const skull = part(headGeo, faceMat, head); skull.scale.set(HR, HR * HSY, HR);
   // hood ears from your pet
   if (["fox", "cat"].includes(t.feature)) for (const d of [-1, 1]) {
@@ -767,6 +1004,229 @@ export function buildWalker(THREE, answers, opts = {}) {
   }
   const pulse = glowMats.length && Math.max(GR.weapon?.rank || 0, GR.armour?.rank || 0, GR.trinket?.rank || 0) >= 5;
 
+  // ---------- skin effects (after the height, like gear): light trails, the aura, crown or halo, dance bursts ----------
+  // Exposed as w.skinFx. Trails live in world space, in whatever the walker's group is added to; everything else rides
+  // on the group. quality(k) (0.2..1, from opts.fx or the arena's fxScale) thins the aura and drops the extras.
+  let fx = null;
+  if (SK) {
+    let quality = clamp(opts.fx ?? 1, 0.2, 1), spark = -1;
+    const ticks = [], owned = [], sprites = new Map();
+    const V = () => new THREE.Vector3();
+    // Light: adds colour and leaves alpha alone, so glows stay glows on a transparent canvas (a store preview) instead
+    // of leaving dark fringes where they're dim.
+    const LIGHT = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor };
+    const sprite = (kind) => { let x = sprites.get(kind); if (!x) { const c = canvas(64, 64); paintSprite(c.getContext("2d"), kind); sprites.set(kind, (x = texture(c))); } return x; };
+    // A cloud of camera-facing sprites with a colour and size each.
+    const points = (n, kind, size) => {
+      const g = new THREE.BufferGeometry(), pos = new Float32Array(n * 3), col = new Float32Array(n * 3), sz = new Float32Array(n).fill(1);
+      const dyn = (arr, k) => new THREE.BufferAttribute(arr, k).setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute("position", dyn(pos, 3)); g.setAttribute("color", dyn(col, 3)); g.setAttribute("aSize", dyn(sz, 1));
+      const m = new THREE.PointsMaterial({ size, map: sprite(kind), vertexColors: true, transparent: true, depthWrite: false, ...LIGHT, fog: false });
+      m.color.setScalar(1.5); // past white, so the arena's bloom catches them
+      m.onBeforeCompile = pointsCompile;
+      geos.add(g); mats.add(m);
+      const obj = new THREE.Points(g, m); obj.frustumCulled = false; obj.renderOrder = 19;
+      const flush = () => { for (const k of ["position", "color", "aSize"]) g.attributes[k].needsUpdate = true; };
+      return { obj, pos, col, sz, g, n, flush };
+    };
+    const at = (parent, x, y, z) => { const o = new THREE.Object3D(); o.position.set(x, y, z); parent.add(o); return o; };
+    const fist = at(armR, 0, -0.2, 0);
+    const tip = hold ? at(hold.children[0], 0, 0.55, 0) : at(armR, 0, -0.62, 0);
+
+    // ----- neon+: a swoosh from fist to weapon tip, and a sheet behind the body, both only while moving fast -----
+    if (SK.trail) {
+      // Three points across (edge, middle, edge), so the ribbon is brightest down its middle and soft at the sides.
+      const ribbon = (A, B, gain, life, n, minQ) => {
+        const pos = new Float32Array(n * 9), col = new Float32Array(n * 9), g = new THREE.BufferGeometry(), idx = [];
+        for (let i = 0; i < n - 1; i++) for (const e of [0, 1]) { const a = i * 3 + e; idx.push(a, a + 1, a + 3, a + 1, a + 4, a + 3); }
+        g.setIndex(idx);
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+        g.setAttribute("color", new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
+        const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(SK.trail).multiplyScalar(gain), vertexColors: true, transparent: true, depthWrite: false,
+          ...LIGHT, side: THREE.DoubleSide, fog: false });
+        geos.add(g); mats.add(m);
+        const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 18; mesh.visible = false; owned.push(mesh);
+        const S = Array.from({ length: n }, () => ({ a: V(), b: V(), t: -1e9, k: 0 })), last = V(), mid = V(), q = V(), r = V();
+        let head = 0, count = 0, has = false;
+        ticks.push((dt) => {
+          const root = group.parent;
+          if (!root || quality < minQ) { mesh.visible = false; has = false; return; }
+          if (mesh.parent !== root) root.add(mesh);
+          if (dt <= 0) return;
+          const s = S[(head = (head + n - 1) % n)];
+          root.worldToLocal(A.getWorldPosition(s.a)); root.worldToLocal(B.getWorldPosition(s.b));
+          mid.copy(s.a).add(s.b).multiplyScalar(0.5);
+          const v = has ? mid.distanceTo(last) / dt : 0; last.copy(mid); has = true;
+          s.t = clock; s.k = clamp((v - 0.7) / 2.2, 0, 1); count = Math.min(n, count + 1);
+          while (count > 1 && clock - S[(head + count - 1) % n].t > life) count--;
+          let any = false;
+          for (let i = 0; i < count; i++) {
+            const e = S[(head + i) % n], f = clamp((clock - e.t) / life, 0, 1), c = e.k * (1 - f) ** 2.2;
+            if (c > 0.01) any = true;
+            q.copy(e.a).add(e.b).multiplyScalar(0.5); // the far end of the trail thins towards its middle
+            r.copy(e.a).lerp(q, f * 0.7); pos.set([r.x, r.y, r.z], i * 9);
+            pos.set([q.x, q.y, q.z], i * 9 + 3);
+            r.copy(e.b).lerp(q, f * 0.7); pos.set([r.x, r.y, r.z], i * 9 + 6);
+            col.fill(c * 0.08, i * 9, i * 9 + 3); col.fill(c, i * 9 + 3, i * 9 + 6); col.fill(c * 0.08, i * 9 + 6, i * 9 + 9);
+          }
+          mesh.visible = any && count > 1;
+          if (!mesh.visible) return;
+          g.setDrawRange(0, (count - 1) * 12);
+          g.attributes.position.needsUpdate = g.attributes.color.needsUpdate = true;
+        });
+      };
+      ribbon(fist, tip, 1.5, 0.22, 16, 0);
+      ribbon(at(mover, 0, 0.5, 0.1), at(mover, 0, 0.82, 0.1), 0.7, 0.3, 16, 0.55);
+    }
+
+    // ----- bursts: coins (flex), stars (warp), sparks off your swings (mythic+), simple ballistic sprites -----
+    const bursts = {};
+    const burst = (kind, x, y, z, n, color, speed = 2.4) => {
+      let B = bursts[kind];
+      if (!B) {
+        const M = 40;
+        B = bursts[kind] = { ...points(M, kind === "spark" ? "sparks" : kind, kind === "coins" ? 0.34 : 0.28), v: new Float32Array(M * 3), base: new Float32Array(M * 3), age: new Float32Array(M).fill(9), life: new Float32Array(M).fill(1), i: 0, alive: 0 };
+        B.sz.fill(0); B.g.setDrawRange(0, M); group.add(B.obj);
+      }
+      const c = new THREE.Color(color);
+      n = Math.max(3, Math.round(n * quality));
+      for (let k = 0; k < n; k++) {
+        const i = B.i; B.i = (B.i + 1) % B.n; B.sz[i] = 1;
+        const a = Math.random() * Math.PI * 2, up = kind === "coins" ? 2.2 + Math.random() * 1.6 : (Math.random() - 0.3) * speed;
+        const s = kind === "coins" ? 0.6 + Math.random() * 0.8 : speed * (0.4 + Math.random() * 0.6);
+        B.pos.set([x, y, z], i * 3); B.v.set([Math.cos(a) * s, up, Math.sin(a) * s], i * 3);
+        B.base.set([c.r, c.g, c.b], i * 3); B.age[i] = 0; B.life[i] = kind === "spark" ? 0.3 + Math.random() * 0.25 : 0.7 + Math.random() * 0.5;
+      }
+      B.alive = 1.4;
+    };
+    ticks.push((dt) => {
+      for (const kind in bursts) {
+        const B = bursts[kind];
+        if (B.alive <= 0) continue;
+        B.alive -= dt;
+        const grav = kind === "coins" ? 7 : kind === "spark" ? 3 : -0.4, drag = Math.exp(-(kind === "coins" ? 0.3 : 2.4) * dt);
+        for (let i = 0; i < B.n; i++) {
+          if (B.age[i] >= B.life[i]) { B.sz[i] = 0; continue; }
+          B.age[i] += dt;
+          const j = i * 3, f = clamp(B.age[i] / B.life[i], 0, 1);
+          B.v[j] *= drag; B.v[j + 2] *= drag; B.v[j + 1] = B.v[j + 1] * drag - grav * dt;
+          B.pos[j] += B.v[j] * dt; B.pos[j + 1] = Math.max(0.03, B.pos[j + 1] + B.v[j + 1] * dt); B.pos[j + 2] += B.v[j + 2] * dt;
+          const fade = (1 - f) ** 1.2;
+          B.col[j] = B.base[j] * fade; B.col[j + 1] = B.base[j + 1] * fade; B.col[j + 2] = B.base[j + 2] * fade;
+          B.sz[i] = kind === "coins" ? 0.35 + 0.65 * Math.abs(Math.cos(clock * 9 + i)) : 1 - f * 0.5;
+        }
+        B.flush();
+      }
+    });
+
+    // ----- mythic+: the aura (snowflakes, electric sparks, a ring of coins or orbiting stars) -----
+    if (SK.aura) {
+      const kind = { snow: "snow", sparks: "sparks", coins: "coins", orbit: "star" }[SK.aura] || "sparks";
+      const N = { snow: 24, sparks: 18, coins: 12, orbit: 26 }[SK.aura] || 18;
+      const A = points(N, kind, kind === "coins" ? 0.3 : kind === "snow" ? 0.28 : 0.24); A.g.setDrawRange(0, N); group.add(A.obj);
+      const rr = rng(hash("aura:" + SK.id));
+      const P = Array.from({ length: N }, (_, i) => ({ a: rr() * 6.283, r: 0.42 + rr() * 0.2, y: 0.1 + rr() * 1.5, w: 0.6 + rr() * 0.6, ph: rr() * 6.283, s: 0.7 + rr() * 0.6, ring: i % 2 }));
+      const cA = new THREE.Color(SK.aura === "coins" ? "#ffffff" : SK.aura === "snow" ? SK.glow || "#dff6ff" : SK.spark || SK.glow || "#ffffff");
+      const cB = new THREE.Color(SK.aura === "snow" ? "#ffffff" : SK.trim || "#ffffff").lerp(new THREE.Color(1, 1, 1), 0.3);
+      // Sparks also throw the odd jagged arc between two of them.
+      let arcs = null, arcT = 0;
+      if (SK.aura === "sparks") {
+        const g = new THREE.BufferGeometry(), m = new THREE.LineBasicMaterial({ color: new THREE.Color(SK.spark || SK.glow).multiplyScalar(2.2), transparent: true, depthWrite: false, ...LIGHT, fog: false });
+        g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(2 * 5 * 2 * 3), 3).setUsage(THREE.DynamicDrawUsage));
+        geos.add(g); mats.add(m);
+        arcs = new THREE.LineSegments(g, m); arcs.frustumCulled = false; arcs.renderOrder = 19; arcs.visible = false; group.add(arcs);
+      }
+      const p3 = [0, 0, 0];
+      ticks.push((dt) => {
+        const n = Math.max(4, Math.round(N * quality));
+        A.g.setDrawRange(0, n);
+        for (let i = 0; i < n; i++) {
+          const p = P[i];
+          let x, y, z, b = 1, s = p.s, c = i % 3 ? cA : cB;
+          if (SK.aura === "snow") { // drifting down in a slow swirl, fading in at the top and out at the feet
+            p.a += p.w * 0.7 * dt; p.y -= (0.1 + p.w * 0.1) * dt; if (p.y < 0.05) p.y = 1.65;
+            x = Math.cos(p.a) * p.r; z = Math.sin(p.a) * p.r; y = p.y + Math.sin(clock * 1.3 + p.ph) * 0.04;
+            b = clamp(p.y / 0.3, 0, 1) * clamp((1.65 - p.y) / 0.3, 0, 1) * (0.75 + 0.25 * Math.sin(clock * 3 + p.ph));
+          } else if (SK.aura === "sparks") { // fast, jittery, flickering
+            p.a += p.w * 3.4 * dt;
+            x = Math.cos(p.a) * p.r + (Math.random() - 0.5) * 0.04; z = Math.sin(p.a) * p.r + (Math.random() - 0.5) * 0.04; y = 0.8 + Math.sin(p.a * 1.7 + p.ph) * 0.55;
+            b = Math.random() < 0.22 ? 0.15 : 1; s *= 0.6 + Math.random() * 0.6;
+          } else if (SK.aura === "coins") { // an even, tilted ring of coins that flip as they go round
+            const a = clock * 1.4 + (i / n) * Math.PI * 2;
+            x = Math.cos(a) * 0.6; z = Math.sin(a) * 0.6; y = 0.82 + Math.sin(a) * 0.16 + Math.sin(clock * 2 + i) * 0.025;
+            s = 0.3 + 0.7 * Math.abs(Math.cos(clock * 4 + p.ph)); c = cA;
+          } else { // orbit: two tilted rings of twinkling stars going opposite ways
+            const a = clock * (p.ring ? -0.6 : 0.85) + p.a, R = 0.55 + p.ring * 0.1, tl = p.ring ? -0.5 : 0.42;
+            x = Math.cos(a) * R; const zz = Math.sin(a) * R; y = 0.85 + zz * Math.sin(tl) + Math.sin(clock + p.ph) * 0.03; z = zz * Math.cos(tl);
+            b = 0.45 + 0.55 * Math.abs(Math.sin(clock * 2.6 + p.ph));
+          }
+          p3[0] = x; p3[1] = y; p3[2] = z; A.pos.set(p3, i * 3);
+          A.col[i * 3] = c.r * b; A.col[i * 3 + 1] = c.g * b; A.col[i * 3 + 2] = c.b * b; A.sz[i] = s;
+        }
+        A.flush();
+        if (arcs && (arcT -= dt) <= 0) { // redraw the arcs a dozen times a second
+          arcT = 0.08;
+          arcs.visible = quality >= 0.7 && Math.random() < 0.55;
+          if (arcs.visible) {
+            const L = arcs.geometry.attributes.position, pa = A.pos;
+            for (let k = 0; k < 2; k++) {
+              const i0 = Math.floor(Math.random() * n), i1 = (i0 + 1 + Math.floor(Math.random() * 3)) % n;
+              let px = pa[i0 * 3], py = pa[i0 * 3 + 1], pz = pa[i0 * 3 + 2];
+              for (let sgm = 0; sgm < 5; sgm++) {
+                const f = (sgm + 1) / 5, j = (k * 5 + sgm) * 2;
+                const nx = pa[i0 * 3] + (pa[i1 * 3] - pa[i0 * 3]) * f + (sgm < 4 ? (Math.random() - 0.5) * 0.12 : 0);
+                const ny = pa[i0 * 3 + 1] + (pa[i1 * 3 + 1] - pa[i0 * 3 + 1]) * f + (sgm < 4 ? (Math.random() - 0.5) * 0.12 : 0);
+                const nz = pa[i0 * 3 + 2] + (pa[i1 * 3 + 2] - pa[i0 * 3 + 2]) * f + (sgm < 4 ? (Math.random() - 0.5) * 0.12 : 0);
+                L.setXYZ(j, px, py, pz); L.setXYZ(j + 1, nx, ny, nz); px = nx; py = ny; pz = nz;
+              }
+            }
+            L.needsUpdate = true;
+          }
+        }
+      });
+    }
+
+    // ----- house: a crown or a halo, bobbing above the head -----
+    if (SK.crown) {
+      const cr = new THREE.Group(); head.add(cr);
+      const kasa = t.hat === "wizard" || t.hat === "bucket";
+      const y0 = kasa ? HR * 0.78 + (t.hat === "wizard" ? 0.5 : 0.34) : HR * HSY + (t.hat === "beanie" ? 0.24 : 0.15);
+      if (SK.crown === "halo") {
+        const hc = new THREE.Color(SK.glow || "#fff3a0");
+        const ring = (r, k, op) => { const m = new THREE.MeshBasicMaterial({ color: hc.clone().multiplyScalar(k), transparent: true, opacity: op, ...LIGHT, depthWrite: false, fog: false }); mats.add(m);
+          const o = new THREE.Mesh(G(`halo${r}`, () => new THREE.TorusGeometry(0.2, r, Math.max(6, Math.round(8 * detail)), Math.round(40 * detail))), m); o.rotation.x = Math.PI / 2; cr.add(o); return o; };
+        ring(0.02, 2.4, 1); ring(0.055, 1, 0.22);
+      } else {
+        const gold = toon("#ffc83d", { gloss: 1, ei: 0.3, emissive: "#ff9d00" }), gem = toon(SK.glow || "#ffe27a", { gloss: 1, ei: 0.8 });
+        part(cyl(0.135, 0.125, 0.075, 18), gold, cr, { outline: 0.6 });
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2, sx = Math.sin(a) * 0.12, sz = Math.cos(a) * 0.12;
+          const spike = part(G("crownSpike", () => new THREE.ConeGeometry(0.036, 0.1, Math.max(4, Math.round(6 * detail)))), gold, cr, { outline: 0.5 }); spike.position.set(sx, 0.085, sz);
+          const ball = part(sphere(8, 6), gem, cr, { outline: 0.4 }); ball.position.set(sx, 0.14, sz); ball.scale.setScalar(0.02);
+        }
+        const front = part(sphere(10, 8), gem, cr, { outline: 0.4 }); front.position.set(0, 0, -0.13); front.scale.set(0.028, 0.028, 0.014);
+      }
+      cr.position.y = y0;
+      ticks.push(() => { cr.position.y = y0 + Math.sin(clock * 2.2 + W.phase) * 0.03; cr.rotation.y = clock * 0.5; cr.rotation.z = Math.sin(clock * 1.6) * 0.06; });
+    }
+
+    const toGroup = (o, v) => group.worldToLocal(o.getWorldPosition(v));
+    const _b = V();
+    fx = {
+      id: SK.id, tier: SK.tier, rank: SK.rank, spark: SK.spark, trail: SK.trail, aura: SK.aura, crown: SK.crown, dance: SK.dance, body: SK.body,
+      /** 0.2..1: fewer aura sprites below 1, no body trail under 0.55, no spark arcs under 0.7. */
+      quality(k) { quality = clamp(Number(k) || 1, 0.2, 1); },
+      /** A burst of "coins", "star" or "spark" sprites at the chest (or at a point in the walker's own space). */
+      burst(kind, n = 18, color, p) { p = p || _b.set(0, 0.85, 0); burst(kind, p.x, p.y, p.z, n, color || (kind === "coins" ? "#ffd23d" : SK.spark || SK.glow || "#ffffff")); },
+      swing(dur) { if (SK.spark) spark = dur * 0.45; },
+      tick(dt) {
+        if (spark >= 0 && (spark -= dt) < 0) { const p = toGroup(tip, _b); burst("spark", p.x, p.y, p.z, 12, SK.spark, 3.2); }
+        for (let i = 0; i < ticks.length; i++) ticks[i](dt);
+      },
+      dispose() { for (const o of owned) o.parent?.remove(o); },
+    };
+  }
+
   // ---------- animation ----------
   const ph = (t.seed % 1000) / 1000;
   const W = { phase: opts.phase ?? ph * Math.PI * 2, omega: (2 * Math.PI) / (1.5 + ph * 0.5) };
@@ -824,6 +1284,22 @@ export function buildWalker(THREE, answers, opts = {}) {
     wobblers.forEach((w, i) => { w.rotation.x = w.userData.rx0 + Math.sin(clock * 5.5 + i * 1.3 + W.phase) * flap - (p.pz < 0 ? p.pz * 0.8 : 0); });
     for (let i = 0; i < gearTicks.length; i++) gearTicks[i](clock, flap);
     if (pulse) { const k = 0.82 + 0.22 * Math.sin(clock * 2.6 + W.phase); for (let i = 0; i < glowMats.length; i++) glowMats[i].emissiveIntensity = glowMats[i].userData.ei * k; }
+    if (SK) {
+      SKU.t.value = clock;
+      // Skin glow breathes slowly (flash), or holds brighter while its pattern flows (neon+); flares up in action.
+      const hype = act.name === "attack" || act.name === "big" || act.name === "cast" || LOOPS[act.name] && act.name !== "idle" && act.name !== "block" ? 1.3 : 1;
+      const k = (SK.rank >= 2 ? 0.88 + 0.12 * Math.sin(clock * 3.1 + W.phase) : 0.7 + 0.3 * Math.sin(clock * 2.2 + W.phase)) * hype;
+      for (let i = 0; i < skGlow.length; i++) skGlow[i].emissiveIntensity = skGlow[i].userData.ei * k;
+      // The dances: warp blinks out of sight for a moment; both throw bursts on their beats.
+      const D = DANCE[act.name];
+      mover.visible = true;
+      if (D && act.name === SK.dance) {
+        const prev = (act.t - dt) / D.period, now = act.t / D.period, p = now % 1;
+        if (D.blink && p >= D.blink[0] && p < D.blink[1]) mover.visible = false;
+        for (const [b, kind] of D.beats) if (dt > 0 && Math.floor(prev - b) < Math.floor(now - b)) fx.burst(kind, kind === "coins" ? 22 : 16);
+      }
+      fx.tick(dt);
+    }
     group.getWorldScale(_a); wu.uOutScale.value = (_a.x + _a.y + _a.z) / 3;
   }
   function startAction(name, bd) {
@@ -834,25 +1310,28 @@ export function buildWalker(THREE, answers, opts = {}) {
     if (name === "cast") wu.uFlash.value.set(opts.castColor || "#5dff95");
   }
   function play(name) {
+    if (name === "cheer" && SK?.dance) name = SK.dance; // House skins celebrate with their own dance
     if (!ACTIONS[name] && !LOOPS[name]) name = "idle";
     if (downed && !["revive", "down", "idle"].includes(name)) return;
     if (downed && name === "down") return;
     fromDown = downed && name === "revive";
     startAction(name, name === "idle" ? 0.15 : name === "revive" && fromDown ? 0.01 : 0.06);
     downed = name === "down";
+    if (fx && ACTIONS[name] && (name === "attack" || name === "big")) fx.swing(ACTIONS[name].dur);
   }
   function setTint(color) {
     if (color == null || color === false) { wu.uTintAmt.value = 0; return; }
     wu.uTint.value.set(color); wu.uTintAmt.value = 0.42;
   }
   function dispose() {
+    fx?.dispose(); // trails sit outside the group
     if (group.parent) group.parent.remove(group);
     geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose()); texs.forEach((x) => x.dispose());
     geos.clear(); mats.clear(); texs.clear();
   }
   update(0);
   return {
-    group, height, update, play, setTint, dispose,
+    group, height, update, play, setTint, dispose, skinFx: fx,
     get action() { return act.name; },
     colors: { body: C.suit, belly: C.wrap, accent: C.band },
   };

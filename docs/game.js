@@ -9,8 +9,10 @@ const DEFAULT_RULES = {
   stepsPerEffort: 100,      // 100 steps = 1 Effort
   effortsPerEndeavour: 100, // 100 Efforts = 1 Endeavour
   dailyEffortCap: 300,      // 30k steps a day, max
-  scrollMinPer1kSteps: 5,   // scroll budget earned per 1,000 steps
-  scrollBudgetMax: 60,
+  scrollFreeMin: 30,        // app time everyone gets before it counts (it's time in the apps, not just scrolling)
+  scrollMinPer1kSteps: 8,   // plus this much more per 1,000 steps
+  scrollBudgetMax: 150,
+  unlinkedOverMin: 20,      // apps not linked: counts as this far over your budget, so not tracking never pays
   baseTax: 0.20,            // the Taxman takes 20% of today's Efforts if you don't fight
   taxPerOverMin: 0.005,     // +0.5% tax per minute scrolled over budget
   taxMaxExtra: 0.20,
@@ -130,7 +132,10 @@ function money(efforts, short) {
   if (!en) return `${sign}${ef} Effort${ef === 1 ? "" : "s"}`;
   return `${sign}${en} Endeavour${en === 1 ? "" : "s"}${ef ? ` ${ef} Effort${ef === 1 ? "" : "s"}` : ""}`;
 }
-const scrollBudget = (steps) => Math.min(RULES.scrollBudgetMax, Math.floor((steps || 0) / 1000) * RULES.scrollMinPer1kSteps);
+const scrollBudget = (steps) => Math.min(RULES.scrollBudgetMax, RULES.scrollFreeMin + Math.floor((steps || 0) / 1000) * RULES.scrollMinPer1kSteps);
+// The minutes that count against you. linked: their apps report automatically (the Effort app on Android, the
+// open/close automation on iPhone); a linked day with nothing reported is zero. Not linked: always over budget.
+const scrollCounted = (steps, minutes, linked) => (linked ? Math.max(0, Number(minutes) || 0) : scrollBudget(steps) + RULES.unlinkedOverMin);
 const overBudget = (steps, scrollMin) => Math.max(0, (scrollMin || 0) - scrollBudget(steps));
 // Your cut depends on scrolling, and on how you walked against the squad today (if we know their average).
 function pace(steps, squadAvg) {
@@ -525,33 +530,33 @@ function weekTable(members) {
 // everything twice as tough (and twice as rich) each lap, so it never stops getting harder. hp/dmg/reward are multipliers; speed scales the gap between attacks.
 // Each boss has its own signature move and its own rhythm: `pattern` is the pool it draws from in phases 1, 2 and 3.
 const BOSSES = [
-  { id: "notification", name: "Brett", title: "A slime made of every unread buzz. First through the seam when a town sits down.", hp: 1, dmg: 1, speed: 1, reward: 1,
+  { id: "notification", name: "Brett", title: "A big fat round slime monster. Defeat it.", hp: 1, dmg: 1, speed: 1, reward: 1,
     sig: "ooze", style: "Slow and heavy. Slimes a whole row at a time",
     pattern: [["swipe", "swipe", "stomp", "stomp", "ooze"], ["swipe", "stomp", "stomp", "ooze", "scream", "feast"], ["swipe", "stomp", "ooze", "scream", "feast"]],
     attacks: { swipe: "Slap", stomp: "Belly Flop", scream: "Screech", feast: "Gorge", ooze: "Ooze" } },
-  { id: "autoplay", name: "Rory", title: "Crawled out of the swamp of 'next episode in 5'. Its spores sit you back down.", hp: 1.03, dmg: 1.0, speed: 0.97, reward: 1.4,
+  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 1.03, dmg: 1.0, speed: 0.97, reward: 1.4,
     sig: "spores", style: "Stampedes and clouds of spores that keep on hurting",
     pattern: [["swipe", "swipe", "stomp", "spores", "scream"], ["swipe", "stomp", "stomp", "spores", "spores", "feast"], ["stomp", "spores", "scream", "scream", "feast"]],
     attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Bellow", feast: "Gorge", spores: "Spore Cloud" } },
-  { id: "leftonread", name: "Wisp", title: "Every message nobody answered. It knows exactly what it's like to be left behind.", hp: 0.95, dmg: 1.15, speed: 0.94, reward: 1.9,
+  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 0.95, dmg: 1.15, speed: 0.94, reward: 1.9,
     sig: "vanish", style: "Fades out where you can't hit it, then picks off the weakest",
     pattern: [["swipe", "swipe", "scream", "vanish"], ["swipe", "scream", "vanish", "vanish", "feast"], ["swipe", "scream", "scream", "vanish", "feast"]],
     attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain", vanish: "Vanish" } },
-  { id: "scroll", name: "Gale", title: "The endless scroll made into weather. It never stops spinning, so you can't either.", hp: 1.1, dmg: 1.3, speed: 0.91, reward: 2.5,
+  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.1, dmg: 1.3, speed: 0.91, reward: 2.5,
     sig: "gust", style: "Fast, and blows the front row out of position",
     pattern: [["swipe", "swipe", "gust", "stomp", "scream"], ["swipe", "gust", "stomp", "scream", "feast", "gust"], ["swipe", "gust", "scream", "scream", "feast"]],
     attacks: { swipe: "Slice", stomp: "Downdraft", scream: "Howl", feast: "Siphon", gust: "Gust" } },
-  { id: "kraken", name: "The Kraken", title: "Lives at the bottom of the feed, where it's always three in the morning.", hp: 1.14, dmg: 1.45, speed: 0.88, reward: 3.2,
+  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.14, dmg: 1.45, speed: 0.88, reward: 3.2,
     sig: "grab", style: "Two tentacles hit at once, and it grabs people",
     swipeHits: 2, swipeMult: 0.65,
     pattern: [["swipe", "swipe", "grab", "stomp", "scream"], ["swipe", "swipe", "grab", "stomp", "feast"], ["swipe", "grab", "scream", "stomp", "feast", "grab"]],
     attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour", grab: "Grab" } },
-  { id: "algorithm", name: "Grimm", title: "The Algorithm. Decides what everyone sees, and wants the Long Count switched off.", hp: 1.5, dmg: 1.6, speed: 0.85, reward: 4,
+  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.5, dmg: 1.6, speed: 0.85, reward: 4,
     sig: "slam", style: "Slow, crushing club swings. Stop the Ground Slam or it flattens you",
     swipeMult: 1.3,
     pattern: [["swipe", "swipe", "stomp", "slam"], ["swipe", "stomp", "slam", "scream", "feast"], ["swipe", "slam", "slam", "scream", "feast"]],
     attacks: { swipe: "Club Swing", stomp: "Boot Stomp", scream: "War Cry", feast: "Feast", slam: "Ground Slam" } },
-  { id: "dragon", name: "Vex", title: "Sleeps on a hoard of every hour ever lost to the glow. The last one before dawn.", hp: 1.76, dmg: 1.9, speed: 0.82, reward: 5,
+  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.76, dmg: 1.9, speed: 0.82, reward: 5,
     sig: "breath", style: "Fire that keeps burning. Only a Shield Wall covers the rows behind",
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
@@ -1352,6 +1357,57 @@ const WARDROBE = [
 ];
 const wardrobeById = (id) => WARDROBE.find((w) => w.id === id) || null;
 
+// ---------- The House: skins for real money ----------
+// Purely cosmetic: no stats, no advantage. Every penny goes into The House fund. The dearer the tier, the more the
+// skin changes your ninja and the more it moves: each tier keeps everything the one below has and adds more.
+// look: what ninja3d draws. pay: the Stripe Payment Link for it (empty until it's set up).
+const SKIN_TIERS = [
+  { id: "street", label: "Street", pence: 99, color: "#9aa6c4", adds: "A whole new outfit and pattern" },
+  { id: "flash", label: "Flash", pence: 299, color: "#3d9bff", adds: "Glowing trims that shimmer as you move" },
+  { id: "neon", label: "Neon", pence: 499, color: "#a86bff", adds: "A light trail behind every step and swing" },
+  { id: "mythic", label: "Mythic", pence: 999, color: "#ffb21e", adds: "An aura that circles you, and hit sparks in your colours" },
+  { id: "house", label: "House", pence: 1999, color: "#ff4d6a", adds: "A full transformation, a floating crown and a victory dance" },
+];
+const SKINS = [
+  { id: "skin-tracksuit", tier: "street", name: "Tracksuit Tony", look: { base: "#1f6d3a", trim: "#ffffff", pattern: "stripes" }, text: "Three stripes. Zero cardio. All attitude." },
+  { id: "skin-camo", tier: "street", name: "Camo Commuter", look: { base: "#4f5b3a", trim: "#c9b98a", pattern: "camo" }, text: "Blends in at the bus stop. Nowhere else." },
+  { id: "skin-hivis", tier: "flash", name: "Hi-Vis Hero", look: { base: "#d7f22b", trim: "#c0c6cf", pattern: "bands", glow: "#f6ff9a" }, text: "Reflective strips that catch every streetlight." },
+  { id: "skin-disco", tier: "flash", name: "Disco Shell", look: { base: "#3a1f6e", trim: "#e9e3ff", pattern: "tiles", glow: "#ff8bf0" }, text: "A mirrorball that learned to walk." },
+  { id: "skin-nightbus", tier: "neon", name: "Night Bus", look: { base: "#14122b", trim: "#ff3fd1", pattern: "circuits", glow: "#3fe7ff", trail: "#ff3fd1" }, text: "The last N29 home, neon still buzzing." },
+  { id: "skin-ember", tier: "neon", name: "Ember Walker", look: { base: "#2a1210", trim: "#ff7a2f", pattern: "cracks", glow: "#ffb13d", trail: "#ff5a1f" }, text: "Leaves scorch marks on every pavement." },
+  { id: "skin-frost", tier: "mythic", name: "Frost Monarch", look: { base: "#cfe8ff", trim: "#5fb6ff", pattern: "crystal", glow: "#9fe6ff", trail: "#bff4ff", aura: "snow", spark: "#bff4ff" }, text: "Rules the north. Never feels the cold." },
+  { id: "skin-thunder", tier: "mythic", name: "Thunder Courier", look: { base: "#20263f", trim: "#ffe14a", pattern: "bolts", glow: "#fff38a", trail: "#ffe14a", aura: "sparks", spark: "#fff38a" }, text: "Delivers in the storm. Is the storm." },
+  { id: "skin-gilded", tier: "house", name: "The Gilded House", look: { base: "#d9a520", trim: "#fff2b0", pattern: "filigree", glow: "#ffe27a", trail: "#ffd23d", aura: "coins", spark: "#ffe27a", body: "gold", crown: "crown", dance: "flex" }, text: "The house always wins. Now it walks too." },
+  { id: "skin-void", tier: "house", name: "Void Walker", look: { base: "#0a0620", trim: "#b48cff", pattern: "stars", glow: "#c9a8ff", trail: "#8f6bff", aura: "orbit", spark: "#e6d8ff", body: "galaxy", crown: "halo", dance: "warp" }, text: "Stepped out of the space between screens." },
+];
+const skinById = (id) => SKINS.find((k) => k.id === id) || null;
+const skinTier = (k) => SKIN_TIERS.find((t) => t.id === (k?.tier || k)) || null;
+const pounds = (p) => `£${(p / 100).toFixed(2)}`;
+
+// ---------- Winny's Gamba Bucket ----------
+// A bucket of Efforts for a price. Like a roulette wheel the odds are fixed and public, and on average it pays back
+// less than it costs: the House always wins (about 12p in every £1 here). Most buckets lose; a few win big.
+const GAMBA = {
+  price: 200, perDay: 5,
+  // [chance, payout in Efforts, label, rarity colour the reveal climbs to]
+  prizes: [
+    [0.50, 0, "Empty bucket", "dud"],
+    [0.20, 100, "Half back", "common"],
+    [0.15, 200, "Money back", "rare"],
+    [0.09, 400, "Double", "epic"],
+    [0.045, 800, "Quadruple", "legendary"],
+    [0.012, 2500, "Big bucket", "mythic"],
+    [0.003, 8000, "Winny's Jackpot", "jackpot"],
+  ],
+};
+const gambaReturn = () => GAMBA.prizes.reduce((s, [p, v]) => s + p * v, 0) / GAMBA.price;
+// u: a uniform 0–1 roll (the server's).
+function gambaRoll(u) {
+  let x = u;
+  for (let i = 0; i < GAMBA.prizes.length; i++) { x -= GAMBA.prizes[i][0]; if (x < 0) return i; }
+  return 0;
+}
+
 // ---------- events ----------
 // Every year, on these dates (inclusive). While one's on, its boss is an extra choice in the Sunday lobby: same
 // strength as your ladder boss, 25% more loot, a cosmetic the first time you beat it, and the ladder doesn't move.
@@ -1436,7 +1492,7 @@ function raidImport(d) {
 addSeasonGear();
 root.Game = {
   DEFAULT_RULES, get RULES() { return RULES; }, setRules,
-  hash, rng, effortsFromSteps, money, scrollBudget, overBudget, taxRate,
+  hash, rng, effortsFromSteps, money, scrollBudget, scrollCounted, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
   pace, weekTable,
   STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex,
@@ -1446,6 +1502,6 @@ root.Game = {
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
-  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
+  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
 })(typeof window !== "undefined" ? window : globalThis);

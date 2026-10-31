@@ -182,6 +182,21 @@ function gear(a) {
   return { weapon, armour, trinket, key: [a._weapon || "", a._armour || "", a._trinket || ""].join(",") };
 }
 
+// ---------- paid skins (cosmetic only) ----------
+// answers._skin = { id, tier, look } (or a bare skin id from game.js). The 3D ninja does the full show (ninja3d.js);
+// here a skin sets the suit, headband and sash colours, a pattern on the gi, and for the dearer tiers a soft glow,
+// a few sparkles and a crown or halo. Tiers stack, so look fields above the skin's tier are ignored.
+const SKIN_RANK = { street: 0, flash: 1, neon: 2, mythic: 3, house: 4 };
+function skinOf(a) {
+  let s = a && a._skin;
+  if (typeof s === "string") { try { s = (typeof window !== "undefined" ? window.Game?.skinById?.(s) : null) || null; } catch { s = null; } }
+  if (!s || typeof s !== "object" || !s.look) return null;
+  const L = s.look, r = SKIN_RANK[s.tier] ?? 0, hex = (c) => (/^#[0-9a-f]{6}$/i.test(String(c || "")) ? String(c).toLowerCase() : null);
+  const trim = hex(L.trim), glow = r >= 1 ? hex(L.glow) || trim : null;
+  return { id: String(s.id || ""), rank: r, base: hex(L.base), trim, pattern: L.pattern || null, glow,
+    spark: r >= 3 ? hex(L.spark) || glow : null, body: r >= 4 ? L.body || null : null, crown: r >= 4 ? L.crown || null : null };
+}
+
 function traits(a) {
   const sig = signature(a);
   const r = rng(hash(sig));
@@ -189,8 +204,9 @@ function traits(a) {
   const num = Math.max(1, Math.min(99, Number(a.number) || 7));
   const hue = Number.isFinite(Number(a.hue)) ? Number(a.hue) : Math.floor(r() * 360);
   const pal = (PALETTES[a.time] || PALETTES.noon)(hue);
+  const skin = skinOf(a);
   return {
-    sig, hue, num, time: a.time, wear: { suit: a._suit || null, band: a._band || null }, gear: gear(a),
+    sig, hue, num, time: a.time, skin, wear: { suit: skin?.base || a._suit || null, band: skin?.trim || a._band || null }, gear: gear(a),
     pal: { ...pal, accent: hsl(hue + 150 + num * 3, 72, 54), accent2: hsl(hue + 200 + num * 5, 68, 62), cheek: "#ff8a8a" },
     shape: SHAPES[a.pace] ? a.pace : "stroll",
     pattern: a.land || "forest", carry: a.carry || "none", feature: a.creature || "bear",
@@ -227,9 +243,22 @@ const SUIT = { dawn: [40, 44], noon: [48, 33], golden: [44, 35], night: [26, 20]
 const darker = (hex, k = 0.72) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * k).toString(16).padStart(2, "0")).join("");
 function ninjaPalette(t) {
   const [s, l] = SUIT[t.time] || SUIT.noon, W = t.wear || {};
-  return { suit: W.suit || hsl(t.hue, s, l), dark: W.suit ? darker(W.suit) : hsl(t.hue, s, Math.max(10, l - 12)), band: W.band || t.pal.accent, sash: t.pal.accent2,
+  return { suit: W.suit || hsl(t.hue, s, l), dark: W.suit ? darker(W.suit) : hsl(t.hue, s, Math.max(10, l - 12)), band: W.band || t.pal.accent, sash: t.skin?.trim || t.pal.accent2,
     wrap: "#ece6d6", skin: SKIN[t.num % SKIN.length], metal: "#cfd8e0", straw: "#d9b46a", wood: "#3a2a22" };
 }
+// A skin's pattern as a small SVG tile [width, height, content] (stripes and bands are drawn straight on instead).
+// P: shade (darker suit), light (lighter suit), trim, hi (the glow colour, or a lighter trim).
+const lighter = (hex, k = 0.3) => "#" + [1, 3, 5].map((i) => { const v = parseInt(hex.slice(i, i + 2), 16); return Math.round(v + (255 - v) * k).toString(16).padStart(2, "0"); }).join("");
+const SKIN_TILES = {
+  camo: [18, 16, (P) => `<ellipse cx="4" cy="5" rx="5.5" ry="3.2" fill="${P.shade}"/><ellipse cx="13" cy="12" rx="5" ry="3" fill="${P.trim}"/><ellipse cx="14" cy="3" rx="3.2" ry="2" fill="${P.light}"/>`],
+  tiles: [8, 8, (P) => `<rect x=".6" y=".6" width="6.8" height="6.8" fill="${P.trim}" opacity=".35"/><rect x="4.4" y=".6" width="3" height="3" fill="${P.hi}" opacity=".85"/>`],
+  circuits: [16, 16, (P) => `<path d="M2,2 H9 V9 H14 M4,14 V10" fill="none" stroke="${P.trim}" stroke-width="1.4"/><circle cx="14" cy="9" r="1.6" fill="${P.hi}"/><circle cx="4" cy="10" r="1.4" fill="${P.hi}"/>`],
+  cracks: [18, 18, (P) => `<path d="M1,4 L6,7 L5,12 L11,15 M6,7 L12,5 L17,8" fill="none" stroke="${P.trim}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M1,4 L6,7 L5,12" fill="none" stroke="${P.hi}" stroke-width=".7"/>`],
+  crystal: [14, 14, (P) => `<path d="M0,0 L14,0 L0,14Z" fill="${P.light}" opacity=".55"/><path d="M0,0 L14,0 L0,14Z M14,0 L14,14 L0,14Z" fill="none" stroke="${P.trim}" stroke-width="1"/>`],
+  bolts: [18, 22, (P) => `<path d="M10,0 L6,9 L11,10 L7,22" fill="none" stroke="${P.trim}" stroke-width="2.2" stroke-linejoin="round"/><path d="M10,0 L6,9 L11,10 L7,22" fill="none" stroke="${P.hi}" stroke-width=".8"/>`],
+  filigree: [18, 18, (P) => `<path d="M9,9 m-1,0 a1,1 0 1,1 2,0 a2.5,2.5 0 1,1 -5,0 a4,4 0 1,1 8,0" fill="none" stroke="${P.trim}" stroke-width="1.2"/><circle cx="16" cy="16" r="1" fill="${P.hi}"/>`],
+  stars: [16, 16, (P) => `<circle cx="3" cy="4" r=".9" fill="${P.trim}"/><circle cx="11" cy="12" r="1.2" fill="${P.hi}"/><path d="M12,1 l.8,2.2 2.2,.8 -2.2,.8 -.8,2.2 -.8,-2.2 -2.2,-.8 2.2,-.8Z" fill="${P.hi}"/>`],
+};
 
 // ---------- 2D gear ----------
 // A held weapon, drawn with its grip at 0,0 and its business end pointing up (-y). Rare+ gets tier-colour trims,
@@ -314,6 +343,8 @@ function svg(input, opts = {}) {
 
   let out = "";
   out += `<ellipse cx="${cx}" cy="212" rx="${f(tw * 1.35)}" ry="7" fill="${INK}" opacity=".14"/>`;
+  // flash+ skins: a soft glow behind the ninja in the skin's glow colour, breathing slowly (not in canvas exports)
+  if (t.skin?.glow) out += `<ellipse cx="${cx}" cy="140" rx="${f(tw * 2.1)}" ry="82" fill="${t.skin.glow}" opacity=".16">${opts.standalone ? "" : `<animate attributeName="opacity" values=".1;.26;.1" dur="${t.skin.rank >= 2 ? 1.6 : 2.6}s" repeatCount="indefinite"/>`}</ellipse>`;
   // what's on your back (behind everything)
   if (t.carry === "stick") out += `<path d="M${cx + 46},${66} L${cx - 40},${196}" stroke="${INK}" stroke-width="9" stroke-linecap="round"/><path d="M${cx + 46},${66} L${cx - 40},${196}" stroke="#8a5a2b" stroke-width="5" stroke-linecap="round"/>`;
   else if (t.carry === "book") out += `<g transform="rotate(-14 ${cx} 132)"><rect x="${cx - 54}" y="124" width="108" height="16" rx="8" fill="#efe3c4" ${o}/><rect x="${cx - 60}" y="121" width="9" height="22" rx="3" fill="${C.wood}" ${o}/><rect x="${cx + 51}" y="121" width="9" height="22" rx="3" fill="${C.wood}" ${o}/></g>`;
@@ -334,7 +365,25 @@ function svg(input, opts = {}) {
     (A.rank >= 1 ? [-1, 1].map((d) => `<path d="M${f(cx + d * 5)},176 V188" stroke="${at}" stroke-width="3"/>`).join("") : "");
   // torso: gi with a crossed collar, sash, knot and chest badge (a vest, coat, robe or hoodie recolours it)
   const torsoFill = A && look !== "plate" ? ac : C.suit;
-  out += `<path d="M${f(cx - tw)},${126} Q${f(cx - tw - 5)},${180} ${f(cx - tw + 8)},${182} H${f(cx + tw - 8)} Q${f(cx + tw + 5)},${180} ${f(cx + tw)},${126} Q${cx},${114} ${f(cx - tw)},${126}Z" fill="${torsoFill}" ${o}/>`;
+  const torsoD = `M${f(cx - tw)},${126} Q${f(cx - tw - 5)},${180} ${f(cx - tw + 8)},${182} H${f(cx + tw - 8)} Q${f(cx + tw + 5)},${180} ${f(cx + tw)},${126} Q${cx},${114} ${f(cx - tw)},${126}Z`;
+  out += `<path d="${torsoD}" fill="${torsoFill}" ${o}/>`;
+  // a skin's pattern on the gi (when no armour covers it), and a sheen on a gold body
+  const SK = t.skin;
+  if (SK && torsoFill === C.suit) {
+    const isHex = (c) => /^#[0-9a-f]{6}$/i.test(c);
+    const P = { shade: isHex(C.suit) ? darker(C.suit, 0.7) : C.dark, light: isHex(C.suit) ? lighter(C.suit, 0.3) : C.suit, trim: C.band, hi: SK.glow || (isHex(C.band) ? lighter(C.band, 0.5) : C.band) };
+    out += `<defs><clipPath id="${id}t"><path d="${torsoD}"/></clipPath></defs>`;
+    let pat = "";
+    if (SK.pattern === "stripes") pat = [-1, 1].map((d) => [0, 1, 2].map((k) => `<path d="M${f(cx + d * (tw - 4 - k * 4))},118 V184" stroke="${P.trim}" stroke-width="2.2"/>`).join("")).join("");
+    else if (SK.pattern === "bands") pat = [138, 158].map((y) => `<rect x="${f(cx - tw - 6)}" y="${y}" width="${f(2 * tw + 12)}" height="7" fill="${P.trim}"/><path d="M${f(cx - tw - 6)},${y + 3.5} H${f(cx + tw + 6)}" stroke="${P.hi}" stroke-width="1.4"/>`).join("");
+    else if (SKIN_TILES[SK.pattern]) {
+      const [pw, ph, draw] = SKIN_TILES[SK.pattern];
+      out += `<defs><pattern id="${id}p" width="${pw}" height="${ph}" patternUnits="userSpaceOnUse">${draw(P)}</pattern></defs>`;
+      pat = `<rect x="${f(cx - tw - 8)}" y="110" width="${f(2 * tw + 16)}" height="76" fill="url(#${id}p)"/>`;
+    }
+    if (SK.body === "gold") pat += `<ellipse cx="${f(cx - tw * 0.4)}" cy="136" rx="${f(tw * 0.32)}" ry="15" fill="#fff8d0" opacity=".45" transform="rotate(-18 ${f(cx - tw * 0.4)} 136)"/>`;
+    if (pat) out += `<g clip-path="url(#${id}t)">${pat}</g><path d="${torsoD}" fill="none" ${o}/>`;
+  }
   if (look === "vest" || look === "coat") { // open down the front, the gi showing through
     out += `<path d="M${cx - 9},119 L${cx - 7},181 H${cx + 7} L${cx + 9},119Z" fill="${C.suit}"/>`;
     if (look === "vest" && ac === "#d4f23c") out += `<path d="M${f(cx - tw + 1)},146 H${cx - 9} M${cx + 9},146 H${f(cx + tw - 1)}" stroke="#eef2f4" stroke-width="4"/>`;
@@ -399,6 +448,18 @@ function svg(input, opts = {}) {
     if (t.hat === "cap") out += `<rect x="${cx - 14}" y="${f(by - 8)}" width="28" height="15" rx="3" fill="${C.metal}" ${o}/><path d="M${cx - 5},${f(by)} a5,5 0 1,1 5,4" fill="none" stroke="${INK}" stroke-width="1.8"/>`;
     else if (t.hat === "flowers") out += `<g transform="translate(${f(cx - R * 0.5)},${f(by - 1)})">${[0, 72, 144, 216, 288].map((a) => `<circle cx="${f(5 * Math.cos((a * Math.PI) / 180))}" cy="${f(5 * Math.sin((a * Math.PI) / 180))}" r="4.2" fill="#ff9ec7" stroke="${INK}" stroke-width="1.6"/>`).join("")}<circle r="3" fill="#ffd34d" stroke="${INK}" stroke-width="1.6"/></g>`;
     else if (t.hat === "beanie") out += `<circle cx="${cx}" cy="${f(hy - R - 6)}" r="10" fill="${C.dark}" ${o}/><rect x="${cx - 7}" y="${f(hy - R + 1)}" width="14" height="6" rx="2" fill="${C.band}" stroke="${INK}" stroke-width="2"/>`;
+  }
+  // mythic+ skins: sparkles round the ninja; house: a crown or a halo floating over the head
+  if (SK?.spark) out += [[-1, 120, 5], [1, 98, 4], [-1, 172, 3.5], [1, 160, 5.5], [-1, 74, 3]].map(([d, y, r], i) => { const x = cx + d * (tw + 16 + (i % 2) * 8);
+    return `<path d="M${f(x)},${f(y - r)} L${f(x + r * 0.28)},${f(y - r * 0.28)} L${f(x + r)},${y} L${f(x + r * 0.28)},${f(y + r * 0.28)} L${f(x)},${f(y + r)} L${f(x - r * 0.28)},${f(y + r * 0.28)} L${f(x - r)},${y} L${f(x - r * 0.28)},${f(y - r * 0.28)}Z" fill="${SK.spark}"/>`; }).join("");
+  if (SK?.crown) {
+    const kasa = t.hat === "wizard" || t.hat === "bucket", top = kasa ? 22 : hy - R - 8; // on a straw hat it perches on the point
+    out += `<g transform="translate(${cx} ${f(top)}) scale(${kasa ? 0.75 : 1}) translate(${-cx} ${f(-top)})">`;
+    out += SK.crown === "halo"
+      ? `<ellipse cx="${cx}" cy="${f(top - 4)}" rx="26" ry="6.5" fill="none" stroke="${SK.glow || "#fff3a0"}" stroke-width="7" opacity=".35"/><ellipse cx="${cx}" cy="${f(top - 4)}" rx="26" ry="6.5" fill="none" stroke="#fff" stroke-width="2.4"/>`
+      : `<path d="M${cx - 18},${f(top + 4)} L${cx - 21},${f(top - 14)} L${cx - 9},${f(top - 5)} L${cx},${f(top - 18)} L${cx + 9},${f(top - 5)} L${cx + 21},${f(top - 14)} L${cx + 18},${f(top + 4)}Z" fill="#ffc83d" ${o}/>` +
+        [-21, 0, 21].map((dx) => `<circle cx="${cx + dx}" cy="${f(top - (dx ? 15 : 19))}" r="2.6" fill="${SK.glow || "#ffe27a"}" stroke="${INK}" stroke-width="1.4"/>`).join("");
+    out += "</g>";
   }
   // head and shoulder trinkets
   if (TR && TR.look === "feather") out += t.hat === "wizard" || t.hat === "bucket" ? trinket2d(TR, f(cx - R * 0.78), f(hy - R * 0.52)) : trinket2d(TR, f(cx - R + 8), f(by - 3));

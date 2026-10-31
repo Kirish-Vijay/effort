@@ -705,18 +705,6 @@ button.mate.pick > svg:last-child { flex: none; opacity: .5; }
 .jhero h1 { font-size: 32px; margin: 4px 0 6px; line-height: 1.05; }
 .jhero .caps { font: 800 11px/1 var(--ui); letter-spacing: .1em; text-transform: uppercase; }
 .fogchip { background: rgba(185,200,255,.14); border-color: rgba(185,200,255,.35); }
-.jmap { border-radius: 16px; overflow: hidden; background: radial-gradient(120% 90% at 50% 40%, #1d3a6e, #0d1838); border: 2px solid var(--ink); }
-.jmap svg { display: block; width: 100%; height: auto; max-height: 460px; }
-.jmap .land { fill: #2e5a3c; stroke: #9fd18f; stroke-width: 3; stroke-linejoin: round; opacity: .95; }
-.jmap .route { fill: none; stroke: rgba(255,255,255,.55); stroke-width: 5; stroke-dasharray: 2 12; stroke-linecap: round; }
-.jmap .walked { fill: none; stroke: var(--gold); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 6px rgba(255,200,61,.7)); }
-.jmap .lm { fill: #0d1838; stroke: rgba(255,255,255,.7); stroke-width: 3; }
-.jmap .lm.reached { fill: var(--gold); stroke: var(--ink); }
-.jmap .lm.next { stroke: var(--gold); stroke-width: 4; }
-.jmap .you { fill: #fff; stroke: var(--ink); stroke-width: 4; }
-.jmap .you-glow { fill: rgba(255,200,61,.35); animation: youpulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-@keyframes youpulse { 50% { transform: scale(1.35); opacity: .35; } }
-.jmap .lmt { fill: #fff; font: 400 26px/1 var(--display); paint-order: stroke; stroke: var(--ink); stroke-width: 6px; }
 .jstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
 .jstats div { display: grid; gap: 2px; text-align: center; padding: 8px 4px; border-radius: 12px; background: var(--inset); }
 .jstats b { font: 400 22px/1 var(--display); }
@@ -751,7 +739,7 @@ button.mate.pick > svg:last-child { flex: none; opacity: .5; }
 .story p { margin: 0; font: 400 15.5px/1.6 var(--ui); color: var(--text-2); }
 .arena.fogged::after { content: ""; position: absolute; inset: 0; z-index: 6; pointer-events: none; background: linear-gradient(180deg, rgba(200,210,235,.0) 10%, rgba(200,210,235,.16) 45%, rgba(200,210,235,.08) 80%); animation: fogdrift 9s ease-in-out infinite alternate; }
 @keyframes fogdrift { from { opacity: .7; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .jmap .you-glow, .track .tt.ready, .arena.fogged::after { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .track .tt.ready, .arena.fogged::after { animation: none !important; } }
 .teaser .ic-badge { flex: none; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 21px; border: 2px solid var(--ink); background: linear-gradient(180deg, var(--gold-hi), var(--gold) 55%, var(--gold-lo)); color: var(--ink); }
 .jhero .chip { height: auto; min-height: 26px; padding-block: 4px; white-space: normal; line-height: 1.3; text-align: left; }
 /* ---------- Phase 3: events, the Hunt, the Den, the wardrobe ---------- */
@@ -775,7 +763,6 @@ button.mate.pick > svg:last-child { flex: none; opacity: .5; }
 .wcard .sw.title { background: rgba(255,200,61,.12); }
 .wcard .chip { flex: none; max-width: 46%; white-space: normal; text-align: center; line-height: 1.15; font-size: 9.5px; padding: 3px 6px; }
 .linkbtn { border: 0; background: none; color: var(--gold); font: inherit; text-decoration: underline; cursor: pointer; padding: 0; }
-.jmap .grid { stroke: rgba(255,255,255,.07); stroke-width: 2; }
 .arena.frosted::before { content: ""; position: absolute; inset: 0; z-index: 6; pointer-events: none; box-shadow: inset 0 0 60px 10px rgba(190,230,255,.35); }
 /* ---------- squad chat ---------- */
 .chatview { position: fixed; inset: 0; z-index: 35; display: flex; flex-direction: column; background: var(--bg, #0b1027); max-width: 640px; margin: 0 auto; }
@@ -876,3 +863,63 @@ body.typing .chatview .ccomposer { padding-bottom: calc(env(safe-area-inset-bott
 .gp b { font: 400 14.5px/1.15 var(--display); }
 .gp small { font: 500 11.5px/1.3 var(--ui); color: var(--text-2); }
 .rlobby .loadout { margin: 0; }
+
+/* ---------- Winny's Gamba Bucket ---------- */
+.bucket-stage { display: grid; place-items: center; height: 150px; margin: 2px 0 8px; background: radial-gradient(closest-side, rgba(255,178,30,.18), transparent 70%); }
+.bucket-stage .bucket-svg { width: 128px; height: 128px; animation: idle 2.4s ease-in-out infinite; filter: drop-shadow(0 10px 10px rgba(0,0,0,.5)); }
+.oddsbar { display: flex; height: 16px; border-radius: 99px; overflow: hidden; border: 2px solid var(--ink); margin-bottom: 12px; }
+.oddsbar i { display: block; min-width: 3px; }
+.oddsrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.oddsrow .dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); flex: none; }
+.oddsrow .pc { font: 400 16px/1 var(--display); min-width: 52px; text-align: right; }
+.gamba-reveal { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px 16px calc(env(safe-area-inset-bottom) + 24px);
+  background: radial-gradient(70% 50% at 50% 45%, color-mix(in srgb, var(--rc) 38%, transparent), transparent 75%), rgba(6,10,26,.94); transition: background .35s ease; }
+.gamba-reveal .gr-top { position: absolute; top: calc(env(safe-area-inset-top) + 18px); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; }
+.gamba-reveal .gr-taps { font: 400 16px/1 var(--display); color: var(--gold-hi); }
+.gamba-reveal .gr-bucket { background: none; border: 0; padding: 0; cursor: pointer; }
+.gamba-reveal .gr-bucket .bucket-svg { width: min(56vw, 220px); height: auto; filter: drop-shadow(0 0 28px color-mix(in srgb, var(--rc) 70%, transparent)); }
+.gamba-reveal .gr-bucket.bump { animation: bump .28s cubic-bezier(.3,1.6,.5,1); }
+@keyframes bump { 0% { transform: scale(1); } 35% { transform: scale(1.14, .88) rotate(-4deg); } 100% { transform: scale(1); } }
+.gamba-reveal .gr-hint { margin: 0; font: 400 18px/1 var(--display); color: var(--text-2); }
+.gamba-reveal.rays::before { content: ""; position: absolute; inset: -30%; pointer-events: none; opacity: .5;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--rc) 70%, transparent) 0 8deg, transparent 8deg 20deg); animation: spin 9s linear infinite; mask: radial-gradient(closest-side, #000, transparent 75%); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.gamba-reveal.flood { background: radial-gradient(90% 70% at 50% 45%, color-mix(in srgb, var(--rc) 70%, transparent), rgba(6,10,26,.92) 80%); }
+.gamba-reveal .gr-card { position: relative; width: min(92vw, 360px); text-align: center; padding: 22px 18px 18px; border-radius: 22px; background: var(--panel); border: 3px solid var(--rc); box-shadow: 0 6px 0 var(--ink), 0 0 40px color-mix(in srgb, var(--rc) 50%, transparent); animation: pop .4s cubic-bezier(.3,1.5,.5,1); }
+@keyframes pop { from { transform: scale(.6) rotateY(80deg); opacity: 0; } }
+.gamba-reveal .gr-rar { font: 700 12px/1 var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--rc); }
+.gamba-reveal .gr-card h2 { margin: 8px 0 6px; font-size: 32px; }
+.gamba-reveal .gr-win { font: 400 26px/1.1 var(--display); color: var(--gold-hi); margin-bottom: 6px; }
+.gamba-reveal.jackpot .gr-card, .gamba-reveal.mythic .gr-card { animation: pop .4s cubic-bezier(.3,1.5,.5,1), glow 1.4s ease-in-out .4s infinite; }
+
+/* ---------- The House ---------- */
+.tbadge { display: inline-block; width: 20px; height: 20px; flex: none; background: var(--tc); border: 2px solid var(--ink); vertical-align: middle; }
+.tbadge.circle { border-radius: 50%; }
+.tbadge.square { border-radius: 5px; }
+.tbadge.shield { border: 0; clip-path: polygon(50% 0, 100% 15%, 92% 62%, 50% 100%, 8% 62%, 0 15%); }
+.tbadge.hex { border: 0; clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+.tbadge.star { border: 0; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 92%, 50% 70%, 21% 92%, 32% 57%, 2% 35%, 39% 35%); }
+.tierrow { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 8px; }
+.tierrow small { display: block; color: var(--text-2); font-size: 12px; margin-top: 2px; }
+.skins { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.skincard { display: grid; justify-items: center; gap: 6px; padding: 12px 8px 10px; border-radius: 16px; background: var(--panel-lo); border: 2px solid color-mix(in srgb, var(--tc) 60%, var(--ink)); box-shadow: var(--lip); cursor: pointer; text-align: center; }
+.skincard b { font: 400 15px/1.15 var(--display); }
+.skincard .tiny { color: var(--text-2); }
+.skinsw { position: relative; width: 64px; height: 64px; border-radius: 50%; overflow: hidden; background: var(--b); border: 3px solid var(--ink); box-shadow: inset 0 0 0 3px var(--t), 0 0 14px color-mix(in srgb, var(--g) 45%, transparent); }
+.skinsw i { position: absolute; inset: 0; opacity: .55; }
+.skinsw .p-stripes, .skinsw .p-bands { background: repeating-linear-gradient(90deg, transparent 0 12px, var(--t) 12px 16px); }
+.skinsw .p-camo { background: radial-gradient(circle at 30% 30%, var(--t) 0 9px, transparent 10px), radial-gradient(circle at 70% 65%, var(--t) 0 11px, transparent 12px), radial-gradient(circle at 20% 80%, rgba(0,0,0,.35) 0 8px, transparent 9px); }
+.skinsw .p-tiles { background: conic-gradient(var(--t) 25%, transparent 0 50%, var(--t) 0 75%, transparent 0) 0 0 / 14px 14px; opacity: .4; }
+.skinsw .p-circuits, .skinsw .p-cracks, .skinsw .p-bolts { background: repeating-linear-gradient(55deg, transparent 0 9px, var(--g) 9px 11px), repeating-linear-gradient(-35deg, transparent 0 13px, var(--t) 13px 14px); }
+.skinsw .p-crystal { background: linear-gradient(135deg, rgba(255,255,255,.7), transparent 40%, var(--t) 60%, transparent 80%); }
+.skinsw .p-filigree { background: radial-gradient(circle, var(--t) 0 2px, transparent 3px) 0 0 / 10px 10px; opacity: .8; }
+.skinsw .p-stars { background: radial-gradient(circle, #fff 0 1px, transparent 2px) 0 0 / 9px 11px, radial-gradient(circle, var(--g) 0 1.5px, transparent 2.5px) 4px 5px / 13px 13px; opacity: .9; }
+.skin-preview { height: 260px; margin: 0 -4px 10px; border-radius: 18px; background: radial-gradient(60% 60% at 50% 60%, color-mix(in srgb, var(--rc, #ffc83d) 22%, transparent), var(--inset)); border: 2px solid var(--line-2); display: grid; place-items: center; overflow: hidden; position: relative; }
+.skin-preview .has-fallback { width: 180px; }
+.skin-preview canvas { width: 100% !important; height: 100% !important; display: block; }
+.ticks { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; font-size: 13.5px; }
+.ticks li { display: flex; align-items: center; gap: 8px; }
+.ticks li .ic, .ticks li svg { color: var(--green-hi); flex: none; }
+.ticks li.off { color: var(--text-3); }
+.ticks li.off svg { color: var(--text-3); }
+@media (prefers-reduced-motion: reduce) { .gamba-reveal.rays::before, .bucket-stage .bucket-svg { animation: none; } }

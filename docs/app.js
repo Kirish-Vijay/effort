@@ -251,7 +251,10 @@ function signOut(msg) {
 // ---------- derived ----------
 const ANS = {}; // player id -> walker answers (for portraits and the 3D team)
 // A player's walker answers, plus any wardrobe colours they wear (_suit, _band).
-const wearOf = (w) => { const s = G.wardrobeById(w?.suit), b = G.wardrobeById(w?.band); return { ...(s ? { _suit: s.color } : {}), ...(b ? { _band: b.color } : {}) }; };
+const wearOf = (w) => {
+  const s = G.wardrobeById(w?.suit), b = G.wardrobeById(w?.band), k = G.skinById(w?.skin);
+  return { ...(s ? { _suit: s.color } : {}), ...(b ? { _band: b.color } : {}), ...(k ? { _skin: { id: k.id, tier: k.tier, look: k.look } } : {}) };
+};
 const gearLook = (g) => Object.fromEntries(G.SLOTS.filter((s) => g?.[s]).map((s) => [`_${s}`, g[s]]));
 const answersOf = (p) => ({ ...(p?.character && p.character.time ? p.character : Walker.fallbackAnswers(p?.id || "x")), ...wearOf(p?.wear), ...gearLook(p?.gear || p?.equipped) });
 const me = () => S.D.me;
@@ -260,7 +263,7 @@ const myClass = () => G.classOf(myStats());
 const level = () => G.levelOf(S.D.xp);
 const squad = () => S.D.squad;
 const squadAvgToday = () => { const m = squad()?.members || []; return m.length > 1 ? m.reduce((s, x) => s + x.todaySteps, 0) / m.length : 0; };
-const taxSetup = () => G.taxmanSetup({ steps: S.D.today.steps, scrollMin: S.D.today.scroll ?? S.D.today.noScrollMin, stats: myStats(), equipped: me().gear, inv: S.D.inv, level: level(), squadAvg: squadAvgToday() });
+const taxSetup = () => G.taxmanSetup({ steps: S.D.today.steps, scrollMin: G.scrollCounted(S.D.today.steps, S.D.today.scroll, S.D.today.scrollLinked), stats: myStats(), equipped: me().gear, inv: S.D.inv, level: level(), squadAvg: squadAvgToday() });
 const weekRows = () => G.weekTable((squad()?.members || []).map((m) => ({ id: m.id, name: m.name, you: m.id === me().id, weekSteps: m.weekSteps, fresh: m.fresh, goalDays: m.goalDays })));
 const ledgerFor = (kind, ref) => S.D.ledger.find((r) => r.kind === kind && r.ref === ref);
 function taxState() {
@@ -415,6 +418,7 @@ function viewMain() {
   const app = $("#app");
   if (app.firstElementChild?.matches("header.header")) morph(app, html, 3);
   else { app.innerHTML = html; for (const c of app.children) stamp(c, 3); }
+  if (S.tab === "journey") mountRealm(); else { S.realm?.dispose?.(); S.realm = null; }
 }
 // Today's walking that isn't in the wallet yet. Before the Taxman's settled it's the full amount so far, shown as a
 // badge (his cut isn't known). Once he's settled (beaten, fought or missed) his rate covers the whole day, midnight
@@ -776,30 +780,25 @@ function journeyTeaser() {
         <span class="tiny muted">${Z.upcoming ? esc(Z.route) : `${fmt(Z.miles)} of ${fmt(Z.total)} miles`}${n ? ` · <span class="gold-t">${n} to claim</span>` : ""}</span></span>
       ${ic("arrowRight")}</button>`;
 }
-function journeyMap(Z, C) {
-  // Squash longitude by the route's middle latitude, so any part of the world keeps its shape.
-  const lats = C.landmarks.map((l) => l.at[1]), k = Math.cos((((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI) / 180);
-  const fit = ([lon, lat]) => [(lon + 180) * k * 100, (90 - lat) * 100];
-  const coast = (C.coast || []).map(fit), P = C.landmarks.map((l) => fit(l.at));
-  const frame = C.coast ? coast : P;
-  const xs = frame.map((p) => p[0]), ys = frame.map((p) => p[1]);
-  const pad = C.coast ? 30 : 80, x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad, w = Math.max(...xs) - x0 + pad, h = Math.max(...ys) - y0 + pad;
-  const S1 = G.seasonById(Z.id), m = Z.miles, M = S1.miles;
-  let i = 0; while (i < M.length - 2 && m >= M[i + 1]) i++;
-  const f = Math.max(0, Math.min(1, (m - M[i]) / (M[i + 1] - M[i]))), at = [P[i][0] + (P[i + 1][0] - P[i][0]) * f, P[i][1] + (P[i + 1][1] - P[i][1]) * f];
-  const done = [...P.slice(0, i + 1), at], line = (ps) => ps.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ");
-  const next = C.landmarks.findIndex((_, k) => M[k] > m);
-  return `<div class="jmap"><svg viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Map of the route, ${fmt(m)} of ${fmt(Z.total)} miles walked">
-      ${C.coast ? `<path d="M${line(coast)}Z" class="land"/>` : Array.from({ length: 9 }, (_, g) => `<line x1="${x0}" x2="${x0 + w}" y1="${y0 + (h * (g + 1)) / 10}" y2="${y0 + (h * (g + 1)) / 10}" class="grid"/><line y1="${y0}" y2="${y0 + h}" x1="${x0 + (w * (g + 1)) / 10}" x2="${x0 + (w * (g + 1)) / 10}" class="grid"/>`).join("")}
-      <polyline points="${line(P)}" class="route"/>
-      <polyline points="${line(done)}" class="walked"/>
-      ${P.map((p, k) => `<circle cx="${p[0]}" cy="${p[1]}" r="${k === next ? 9 : 7}" class="lm ${M[k] <= m ? "reached" : ""} ${k === next ? "next" : ""}"/>`).join("")}
-      <circle cx="${at[0]}" cy="${at[1]}" r="22" class="you-glow"/><circle cx="${at[0]}" cy="${at[1]}" r="11" class="you"/>
-      ${next >= 0 ? `<text x="${P[next][0] + 16}" y="${P[next][1] + 6}" class="lmt">${esc(C.landmarks[next].name)}</text>` : ""}
-    </svg></div>
-    <div class="jstats"><div><b>${fmt(m)}</b><small>of ${fmt(Z.total)} miles</small></div>
-      ${next >= 0 ? `<div><b>${fmt(M[next] - m)}</b><small>miles to ${esc(C.landmarks[next].name)}</small></div>` : `<div><b>${ic("check")}</b><small>Route walked</small></div>`}
-      <div><b>${fmt(G.RULES.stepsPerMile)}</b><small>steps a mile, by your squad's average walker</small></div></div>`;
+// This week's walk: through the boss's realm to its lair, as the squad's steps fill the weekly goal.
+const realmWeek = () => { const d = new Date(S.D.today.day + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+function realmPanel() {
+  if (!window.EffortRealms) return "";
+  const tier = raidTier(), boss = G.bossFor(G.baseTier(tier)), g = goalNow(tier), sq = squad();
+  const key = `realm:${realmWeek()}:${boss.id}`, prev = Math.min(g.steps, Number(store.get(key)) || 0);
+  const trailOf = (m) => { const k = G.skinById(m.wear?.skin); return k?.look.trail || null; };
+  const members = (sq ? sq.members : [me()]).map((m) => ({ id: m.id, name: m.name, faceHtml: face(m.id, 28), weekSteps: m.weekSteps ?? 0, todaySteps: m.todaySteps ?? S.D.today.steps, trail: trailOf(m) }));
+  return `<section class="panel realm-root" data-realm-key="${key}" data-realm-steps="${g.steps}">${EffortRealms.html({ bossId: boss.id, bossName: boss.name, steps: g.steps, target: g.target, prevSteps: prev, members })}
+    ${sq ? "" : `<p class="small muted" style="margin:10px 0 0">Join a squad to walk it together.</p>`}</section>`;
+}
+// Animate the squad's walk once per visit, then remember how far we've shown them.
+function mountRealm() {
+  const el = $(".realm-root");
+  if (!el || !window.EffortRealms || el.dataset.mounted === el.dataset.realmSteps) return;
+  S.realm?.dispose?.();
+  S.realm = EffortRealms.mount(el);
+  el.dataset.mounted = el.dataset.realmSteps;
+  store.set(el.dataset.realmKey, Number(el.dataset.realmSteps));
 }
 function tabJourney() {
   const Z = season(), C = seasonContent();
@@ -809,16 +808,16 @@ function tabJourney() {
       <div class="caps gold-t">Season ${Z.n} · ${Z.upcoming ? `starts ${longDate(Z.start)}` : `week ${Z.week} of 13 · ends ${longDate(Z.end)}`}</div>
       <h1 class="ol disp">${esc(Z.name)}</h1>
       <p class="small muted" style="margin:0">${esc(C.blurb)}</p>
-      <div class="chips" style="margin-top:8px"><span class="chip">${ic("flag")} ${esc(Z.route)}</span>${affixLine(Z)}</div>
+      ${affixLine(Z) ? `<div class="chips" style="margin-top:8px">${affixLine(Z)}</div>` : ""}
     </section>`;
-  if (Z.upcoming) return `${updateBanner()}${hero}<section class="panel">${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">Starts ${longDate(Z.start)} from ${esc(C.landmarks[0].name)}. A chapter a week and three bounties every Monday.${G.affixInfo(Z.affix) ? ` This season's twist: ${esc(G.affixInfo(Z.affix).name)}.` : ""}</p></section>`;
+  if (Z.upcoming) return `${updateBanner()}${hero}${realmPanel()}<section class="panel"><p class="small muted" style="margin:0">The season starts ${longDate(Z.start)}: a story chapter a week and three bounties every Monday.${G.affixInfo(Z.affix) ? ` This season's twist: ${esc(G.affixInfo(Z.affix).name)}.` : ""}</p></section>`;
   const firstLocked = C.chapters.findIndex((_, i) => !Z.chapters.includes(i + 1));
   const hidden = firstLocked < 0 ? 0 : C.chapters.length - firstLocked - 1;
   const chapters = C.chapters.slice(0, firstLocked < 0 ? undefined : firstLocked + 1).map((ch, i) => {
     const k = i + 1, open = Z.chapters.includes(k), read = got.has(`${Z.id}:ch:${k}`), M = G.seasonById(Z.id).miles;
-    const why = !open ? (Z.week < k ? `opens in week ${k}` : `at ${C.landmarks[i].name}, ${fmt(M[i] - Z.miles)} miles on`) : "";
+    const why = !open ? (Z.week < k ? `opens in week ${k}` : `${fmt(M[i] - Z.miles)} more miles of walking`) : "";
     return `<button class="chap ${open ? "open" : "locked"} ${read ? "read" : ""}" ${open ? `data-act="chapter" data-k="${k}"` : "disabled"}>
-        <span class="n">${read ? ic("check") : k}</span><span class="grow"><b>${open ? esc(ch.title) : "Locked"}</b><small>${esc(C.landmarks[i].name)}${why ? ` · ${why}` : ""}</small></span>
+        <span class="n">${read ? ic("check") : k}</span><span class="grow"><b>${open ? esc(ch.title) : "Locked"}</b><small>${why || `Chapter ${k}`}</small></span>
         ${open && !read ? `<span class="chip gold">+${G.RULES.chapterReward}</span>` : open ? "" : ic("lock")}</button>`;
   }).join("");
   const bounty = (b) => {
@@ -834,11 +833,11 @@ function tabJourney() {
   const titles = Object.entries(G.TRACK_TITLES).filter(([k]) => got.has(`${Z.id}:tr:${k}`)).map(([, t]) => t);
   const set = I.ITEMS.filter((i) => i.set === Z.set);
   return `${updateBanner()}${hero}
-    <section class="panel">${sq ? journeyMap(Z, C) : `${journeyMap(Z, C)}<p class="small muted" style="margin:10px 0 0">Join a squad to walk the route together.</p>`}</section>
+    ${realmPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("receipt")}</span><h2 class="ol-sm">The story</h2><span class="side chip">${Z.chapters.length} of 13 open</span></div>
-      <p class="small muted" style="margin:-4px 0 10px">One a week, once you reach its landmark. ${G.RULES.chapterReward} Efforts each.</p>
-      <div class="chaps">${chapters}${hidden ? `<div class="chap locked more"><span class="n">${ic("lock")}</span><span class="grow"><b>${hidden} more to come</b><small>${esc(C.landmarks.slice(-hidden).map((l) => l.name).join(", "))}</small></span></div>` : ""}</div>
+      <p class="small muted" style="margin:-4px 0 10px">One a week, once the squad has walked far enough. ${G.RULES.chapterReward} Efforts each.</p>
+      <div class="chaps">${chapters}${hidden ? `<div class="chap locked more"><span class="n">${ic("lock")}</span><span class="grow"><b>${hidden} more to come</b><small>One a week</small></span></div>` : ""}</div>
     </section>
     ${sq ? `<section class="panel">
       <div class="ptitle"><span class="ic-badge red">${ic("target")}</span><h2 class="ol-sm">This week's bounties</h2><span class="side chip">New on Monday</span></div>
@@ -1050,7 +1049,7 @@ function dayTiles() {
       <div class="tile gold"><div class="k">${ic("coin")} Earned today</div><div class="v">${effortTag(T.efforts)}<small>${fmt(S.D.today.steps)} steps</small></div></div>
       <div class="tile red"><div class="k">${ic("warning")} At stake</div><div class="v">${Math.round(T.taxRate * 100)}%<small>${stake} Efforts</small></div></div>
       <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(T.hp)}</div></div>
-      <div class="tile cyan"><div class="k">${ic("phone")} Scrolling</div><div class="v">${sc ?? "–"}<small>/ ${G.scrollBudget(S.D.today.steps)} min budget</small></div></div>
+      <div class="tile cyan"><div class="k">${ic("phone")} App time</div><div class="v">${S.D.today.scrollLinked ? sc ?? 0 : "Not linked"}<small>${S.D.today.scrollLinked ? `/ ${G.scrollBudget(S.D.today.steps)} min allowed` : `counts as ${G.RULES.unlinkedOverMin} min over`}</small></div></div>
     </div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">
       ${T.pace > 0 ? `<span class="chip green">${ic("steps")} Ahead of the squad · −${Math.round(G.RULES.paceTax * 100)}% tax</span>` : T.pace < 0 ? `<span class="chip red">${ic("steps")} Behind the squad · +${Math.round(G.RULES.paceTax * 100)}% tax</span>` : squad()?.members.length > 1 ? `<span class="chip">${ic("steps")} Level with the squad</span>` : ""}
@@ -1268,7 +1267,7 @@ function tabShop() {
     deals: dealsToday().map(G.itemById).filter(Boolean),
     bag: I.ITEMS.filter((i) => i.id in inv).sort(sort),
   };
-  const tab = lists[S.shopTab] ? S.shopTab : "class";
+  const tab = lists[S.shopTab] || S.shopTab === "gamba" || S.shopTab === "house" ? S.shopTab : "class";
   const next = I.TIERS.find((t) => t.lvl > lvl);
   const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
   return `
@@ -1280,15 +1279,147 @@ function tabShop() {
           : `<div class="slot"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[s])}<span>${slotName[s]}</span></div></div>`;
       }).join("")}</div>
     </section>
-    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
+    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length], ["gamba", "Winny's", 0], ["house", "The House", 0]].map(([k, l, n]) =>
       `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
     ${tab === "season" ? setNote() : ""}
     ${tab === "all" ? `<p class="small muted" style="margin:0">Gear any class can wear. Five styles in every tier, each with its own perk. Your class gear is a slightly better fit for you; these let you build your own way.</p>
       <div class="chips-row">${[["any", "All"], ["weapon", "Weapons"], ["armour", "Armour"], ["trinket", "Trinkets"]].map(([k, l]) => `<button class="fchip" data-shopslot="${k}" aria-pressed="${(S.shopSlot || "any") === k}">${l}</button>`).join("")}</div>
       <div class="chips-row">${[["any", "Any style"], ["power", "Power"], ["guard", "Guard"], ["speed", "Speed"], ["brains", "Brains"], ["luck", "Luck"]].map(([k, l]) => `<button class="fchip" data-shopstyle="${k}" aria-pressed="${(S.shopStyle || "any") === k}">${l}</button>`).join("")}</div>` : ""}
     ${tab === "deals" ? `<p class="small muted" style="margin:0">Three picks for your class each day, about ${Math.round(G.RULES.dealDiscount * 100)}% off. New ones at midnight.</p>` : ""}
-    <div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i, { deal: tab === "deals" })).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`;
+    ${tab === "gamba" ? gambaPanel() : tab === "house" ? housePanel() : `<div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i, { deal: tab === "deals" })).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`}`;
 }
+
+// ---------- Winny's Gamba Bucket ----------
+// Bought with Endeavours only (never real money, and nothing in it can be cashed out). The server rolls; the bucket
+// then plays that result out over three taps, climbing the rarity ladder no higher than what you actually won.
+const GAMBA_RANK = { dud: 0, common: 1, rare: 2, epic: 3, legendary: 4, mythic: 5, jackpot: 6 };
+const GAMBA_COL = { dud: "#5b6584", common: "#9aa6c4", rare: "#3d9bff", epic: "#a86bff", legendary: "#ffb21e", mythic: "#ff4d6a", jackpot: "#ffc83d" };
+const bucketArt = (rar = "dud") => `<svg class="bucket-svg" viewBox="0 0 120 120" aria-hidden="true">
+  <path d="M30 34 Q60 4 90 34" fill="none" stroke="#0a0f26" stroke-width="7" stroke-linecap="round"/><path d="M30 34 Q60 4 90 34" fill="none" stroke="#c9cfe6" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M22 40 L98 40 L88 108 Q60 116 32 108 Z" fill="${GAMBA_COL[rar]}" stroke="#0a0f26" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M28 50 L92 50" stroke="rgba(255,255,255,.35)" stroke-width="4"/><path d="M33 96 Q60 103 87 96" stroke="rgba(0,0,0,.22)" stroke-width="5" fill="none"/>
+  <ellipse cx="60" cy="40" rx="38" ry="7" fill="#1b2350" stroke="#0a0f26" stroke-width="5"/>
+  <circle cx="45" cy="37" r="5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/><circle cx="62" cy="35" r="5" fill="#ffe58a" stroke="#0a0f26" stroke-width="2"/><circle cx="76" cy="38" r="4.5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/>
+  <text x="60" y="84" text-anchor="middle" font-family="Lilita One, sans-serif" font-size="30" fill="#fff" stroke="#0a0f26" stroke-width="5" paint-order="stroke">W</text></svg>`;
+function gambaPanel() {
+  const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), rtp = Math.round(G.gambaReturn() * 100);
+  return `<section class="panel gamba">
+      <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
+      <div class="bucket-stage">${bucketArt("legendary")}</div>
+      <p class="small" style="margin:0 0 6px">A bucket of Efforts from Winny, who runs the Taxman's back room. Some buckets are empty, most come up short and a lucky few overflow.</p>
+      <p class="small muted" style="margin:0 0 12px">On average a bucket pays back ${rtp}% of what it costs. The House always wins.</p>
+      <button class="btn gold xl block" data-act="gamba-buy" ${left && S.D.wallet >= Gm.price ? "" : "disabled"}>Buy a bucket ${priceTag(Gm.price)}</button>
+      <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "That's your lot today. Back at midnight"} · Endeavours only, never real money. Winnings can't be cashed out.</p>
+    </section>`;
+}
+function gambaOdds() {
+  const Gm = G.GAMBA, pc = (p) => `${(p * 100).toFixed(1)}%`;
+  openSheet(`${sheetHead("The odds")}
+    <div class="oddsbar">${Gm.prizes.map(([p, , , r]) => `<i style="flex:${p};background:${GAMBA_COL[r]}"></i>`).join("")}</div>
+    <div class="oddsrows">${Gm.prizes.map(([p, v, l, r]) => `<div class="oddsrow"><span class="dot" style="background:${GAMBA_COL[r]}"></span><b class="grow">${esc(l)}</b><span class="muted">${v ? `${fmt(v)} Efforts` : "Nothing"}</span><span class="pc">${pc(p)}</span></div>`).join("")}</div>
+    <p class="small muted" style="margin:12px 0 0">Each bucket costs ${fmt(Gm.price)} Efforts. You win more than you paid ${pc(Gm.prizes.filter(([, v]) => v > Gm.price).reduce((a, [p]) => a + p, 0))} of the time. Over many buckets you get back about ${Math.round(G.gambaReturn() * 100)}%. The result is decided the moment you pay; the taps only reveal it.</p>`);
+}
+async function gambaBuy() {
+  if (S.busy) return; S.busy = true;
+  let r;
+  try { r = await call("gamba", { token: S.token }); }
+  catch (e) { toast(e.message); return; }
+  finally { S.busy = false; }
+  S.D.gamba = { today: G.GAMBA.perDay - r.left };
+  FX.play("buy");
+  gambaReveal(r);
+}
+// Three taps, then the flood of colour and the prize. Rarities only ever climb to what was really won.
+function gambaReveal(r) {
+  const [, win, label, rar] = G.GAMBA.prizes[r.prize], top = GAMBA_RANK[rar], names = Object.keys(GAMBA_RANK);
+  const el = document.createElement("div");
+  el.className = "gamba-reveal"; el.style.setProperty("--rc", GAMBA_COL.dud);
+  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-taps">3 taps</span></div>
+    <button class="gr-bucket" aria-label="Tap the bucket">${bucketArt("dud")}</button><p class="gr-hint">Tap the bucket</p><div class="gr-prize" hidden></div>`;
+  document.body.appendChild(el);
+  FX.init(el);
+  let taps = 0, done = false;
+  const bucket = el.querySelector(".gr-bucket");
+  const finish = () => {
+    done = true; el.style.setProperty("--rc", GAMBA_COL[rar]); el.classList.add("flood", rar);
+    const [x, y] = FX.centre(bucket);
+    setTimeout(() => {
+      el.querySelector(".gr-hint").hidden = true; bucket.hidden = true;
+      const P = el.querySelector(".gr-prize"); P.hidden = false;
+      P.innerHTML = `<div class="gr-card"><span class="gr-rar">${win ? esc(rar === "jackpot" ? "Jackpot" : rar) : "Empty"}</span><h2 class="ol disp">${esc(label)}</h2>
+        <div class="gr-win">${win ? `+${fmt(win)} Efforts` : "Nothing this time"}</div><p class="small muted">${win > G.GAMBA.price ? "Winny is not happy about this." : win === G.GAMBA.price ? "Your money back. Winny shrugs." : "Winny thanks you for your custom."}</p>
+        <button class="btn gold block" data-act="gamba-close">${win ? "Collect" : "Fair enough"}</button></div>`;
+      if (win) { FX.coins(x, y, Math.min(60, 6 + top * 9)); FX.play("coin"); }
+      if (top >= 5) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); } else if (top >= 3) { FX.shake(el, 10, 400); FX.buzz(40); }
+    }, 600);
+  };
+  bucket.onclick = () => {
+    if (done) return;
+    taps++;
+    const lv = Math.floor((top * taps) / 3), at = names[lv];
+    bucket.innerHTML = bucketArt(at); el.style.setProperty("--rc", GAMBA_COL[at]);
+    el.querySelector(".gr-taps").textContent = taps < 3 ? `${3 - taps} tap${3 - taps === 1 ? "" : "s"}` : "";
+    bucket.classList.remove("bump"); void bucket.offsetWidth; bucket.classList.add("bump");
+    const [x, y] = FX.centre(bucket);
+    FX.play(lv >= 3 ? "crit" : "hit"); FX.buzz(lv >= 3 ? 25 : 10);
+    if (lv >= 1) FX.coins(x, y - 30, 3 + lv * 2);
+    if (lv >= 2) FX.shake(el, 4 + lv * 2, 200);
+    if (lv >= 4) el.classList.add("rays");
+    if (taps >= 3) finish();
+  };
+  el.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-act=gamba-close]")) return;
+    FX.destroy(); el.remove(); S.D.wallet = r.wallet; render();
+    load().then(render).catch(() => {});
+  });
+}
+
+// ---------- The House: skins for real money ----------
+// Paid through a Stripe Payment Link; the effort-house function grants the skin when Stripe says it's paid.
+const TIER_SHAPE = { street: "circle", flash: "square", neon: "shield", mythic: "hex", house: "star" };
+const tierBadge = (t) => `<span class="tbadge ${TIER_SHAPE[t.id]}" style="--tc:${t.color}" aria-hidden="true"></span>`;
+const skinSwatch = (k) => `<span class="skinsw" style="--b:${k.look.base};--t:${k.look.trim};--g:${k.look.glow || k.look.trim}"><i class="p-${k.look.pattern}"></i></span>`;
+function housePanel() {
+  const owned = new Set(me().owned || []), wear = me().wear || {}, H = S.D.house || { pence: 0, count: 0 };
+  return `<section class="panel house">
+      <div class="ptitle"><span class="ic-badge red">${ic("crown")}</span><h2 class="ol-sm">The House</h2><span class="side chip gold">${G.pounds(H.pence)} raised</span></div>
+      <p class="small" style="margin:0 0 4px">Skins for real money. They change how you look and move, never how you play. Every penny goes into The House.</p>
+      <p class="tiny faint" style="margin:0 0 12px">Each tier has everything the one below it has, and more.</p>
+      ${G.SKIN_TIERS.map((t) => `<div class="tierrow">${tierBadge(t)}<span class="grow"><b>${esc(t.label)}</b> <span class="muted small">${G.pounds(t.pence)}</span><small>${esc(t.adds)}</small></span></div>
+        <div class="skins">${G.SKINS.filter((k) => k.tier === t.id).map((k) => `<button class="skincard" data-skin="${k.id}" style="--tc:${t.color}">${skinSwatch(k)}<b>${esc(k.name)}</b>
+          <span class="tiny">${wear.skin === k.id ? "Wearing" : owned.has(k.id) ? "Owned" : G.pounds(t.pence)}</span></button>`).join("")}</div>`).join("")}
+    </section>`;
+}
+function skinSheet(id) {
+  const k = G.skinById(id); if (!k) return;
+  const t = G.skinTier(k), ti = G.SKIN_TIERS.indexOf(t), owned = (me().owned || []).includes(k.id), on = me().wear?.skin === k.id;
+  const look = { ...ANS[me().id], _skin: { id: k.id, tier: k.tier, look: k.look } };
+  openSheet(`<div class="row spread" style="margin-bottom:10px"><span class="chip" style="border-color:${t.color}">${tierBadge(t)} ${esc(t.label)} skin</span><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>
+    <div class="skin-preview" id="skin-preview"><div class="has-fallback"><span class="fb">${Walker.svg(look, { mood: "fresh" })}</span></div></div>
+    <h2 class="ol-sm">${esc(k.name)}</h2><p class="flavour">${esc(k.text)}</p>
+    <ul class="ticks">${G.SKIN_TIERS.slice(0, ti + 1).map((x) => `<li>${ic("check")} ${esc(x.adds)}</li>`).join("")}${G.SKIN_TIERS.slice(ti + 1).map((x) => `<li class="off">${ic("lock")} ${esc(x.adds)} <span class="muted">(${esc(x.label)})</span></li>`).join("")}</ul>
+    <div class="btn-row" style="margin-top:12px">${owned ? (on ? `<button class="btn" data-act="wear" data-kind="skin" data-id="">Take off</button>` : `<button class="btn blue block" data-act="wear" data-kind="skin" data-id="${k.id}">Wear it</button>`)
+      : k.pay ? `<button class="btn green xl block" data-act="skin-pay" data-id="${k.id}">Buy for ${G.pounds(t.pence)}</button>` : `<button class="btn block" disabled>Payments open soon</button>`}</div>
+    <p class="tiny faint" style="margin:10px 0 0;text-align:center">Paid by card through Stripe. Purely cosmetic: no stats, no advantage. It's yours on this account for good.</p>`, { rc: t.color });
+  // The live turntable, if this phone does 3D.
+  const host = $("#skin-preview");
+  S.skinPreview?.dispose?.(); S.skinPreview = null;
+  if (host && window.Arena3D?.preview && use3d()) {
+    const flat = host.innerHTML;
+    try {
+      host.innerHTML = ""; S.skinPreview = Arena3D.preview(host, look);
+      if (!S.skinPreview?.ok) { S.skinPreview = null; host.innerHTML = flat; }
+    } catch { host.innerHTML = flat; }
+  }
+}
+// Off to Stripe. client_reference_id tells the webhook who bought which skin.
+function skinPay(id) {
+  const k = G.skinById(id); if (!k?.pay) return;
+  const url = `${k.pay}${k.pay.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(`${me().id}__${k.id}`)}`;
+  toast("Opening Stripe. Your skin appears here once it's paid");
+  window.open(url, "_blank", "noopener");
+}
+
 function itemSheet(id, deal) {
   const item = G.itemById(id); if (!item) return;
   const inv = S.D.inv, t = G.tierOf(item.tier), up = inv[id] || 0, own = id in inv, on = me().gear[item.slot] === id, wallet = S.D.wallet;
@@ -1347,12 +1478,12 @@ function tabMe() {
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
       <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Set it up once and your steps sync by themselves."}</p>
-      <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button><button class="btn sm" data-act="log-steps">${ic("edit")} Type them in</button></div>
+      <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button></div>
     </section>
     <section class="panel">
-      <div class="ptitle"><span class="ic-badge blue">${ic("phone")}</span><h2 class="ol-sm">Scrolling</h2><span class="side chip">${S.D.today.scroll ?? "–"} min today</span></div>
-      <p class="small muted" style="margin:0 0 10px">Scrolling over your budget (${G.RULES.scrollMinPer1kSteps} min per 1,000 steps) adds to the Taxman's cut. No data counts as ${S.D.today.noScrollMin} min.</p>
-      <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} Track it</button><button class="btn sm" data-act="log-scroll">${ic("edit")} Type it in</button></div>
+      <div class="ptitle"><span class="ic-badge blue">${ic("phone")}</span><h2 class="ol-sm">Scrolling</h2><span class="side chip ${S.D.today.scrollLinked ? "green" : "red"}">${S.D.today.scrollLinked ? `${S.D.today.scroll ?? 0} min today` : "Not linked"}</span></div>
+      <p class="small muted" style="margin:0 0 10px">You get ${G.RULES.scrollFreeMin} min of app time free, plus ${G.RULES.scrollMinPer1kSteps} min for every 1,000 steps (${G.scrollBudget(S.D.today.steps)} min today). Anything over adds to the Taxman's cut. ${S.D.today.scrollLinked ? "" : `<b>Not linked yet: every day counts as ${G.RULES.unlinkedOverMin} min over, so link it.</b>`}</p>
+      <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} ${S.D.today.scrollLinked ? "Tracking setup" : "Link my apps"}</button></div>
     </section>
     ${wardrobePanel()}
     <section class="panel">
@@ -1401,7 +1532,7 @@ function openSheet(html, { rc } = {}) {
   sh.hidden = false;
   hydratePortraits();
 }
-function closeSheet() { const sh = $("#sheet"); sh.hidden = true; sh.innerHTML = ""; S.sheetKind = null; }
+function closeSheet() { const sh = $("#sheet"); sh.hidden = true; sh.innerHTML = ""; S.sheetKind = null; S.skinPreview?.dispose?.(); S.skinPreview = null; }
 const sheetHead = (title) => `<div class="row spread" style="margin-bottom:12px"><h2 class="ol-sm disp" style="margin:0;font-size:22px">${title}</h2><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>`;
 
 // Inside the Android app: one button each, and the phone asks.
@@ -1454,13 +1585,12 @@ function iphoneHome(kind) {
 function setupBody(kind) {
   if (NATIVE) return nativeSetup(kind);
   const p = setupPlat(), t = S.token;
-  const toggle = `<div class="seg" style="margin-bottom:12px">${[["ios", "iPhone"], ["android", "Android"], ["other", "Type it in"]].map(([v, l]) => `<button type="button" data-setup="${v}" data-kind="${kind}" aria-pressed="${v === p}">${l}</button>`).join("")}</div>`;
+  const toggle = `<div class="seg" style="margin-bottom:12px">${[["ios", "iPhone"], ["android", "Android"]].map(([v, l]) => `<button type="button" data-setup="${v}" data-kind="${kind}" aria-pressed="${v === p}">${l}</button>`).join("")}</div>`;
   const box = (url) => `<div class="copybox"><code>${esc(url)}</code><button class="btn xs" data-copy="${esc(url)}">${ic("copy")} Copy</button></div>`;
   let body;
   if (p === "ios") body = iphoneHome(kind);
   else if (p === "android") body = androidApp(t);
-  else if (kind === "steps") body = `<p class="small">Type your steps in from <b>Me → Steps → Type them in</b> each day, before you fight the Taxman and again before bed. You can fix the last week.</p>`;
-  else body = `<p class="small">Each evening, check Screen Time (iPhone) or Digital Wellbeing (Android) and type your short-video minutes into <b>Me → Scrolling → Type it in</b>.</p>`;
+  else body = `<p class="small">Effort counts ${kind === "steps" ? "steps" : "app time"} straight from your phone, so it can't be typed in. Pick iPhone or Android above.</p>`;
   return `${toggle}<div class="guide">${body}</div>`;
 }
 function setupSheet(kind) {
@@ -1469,18 +1599,6 @@ function setupSheet(kind) {
   openSheet(`${sheetHead(title)}${setupBody(kind)}
     ${NATIVE || setupPlat() === "other" ? "" : `<button class="btn green block" style="margin-top:12px" data-act="check-sync" data-kind="${kind}">${ic("refresh")} Check it worked</button>
     <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0 0"></p>`}`);
-}
-function logSheet(kind) {
-  const days = [0, 1, 2, 3, 4, 5, 6].map((i) => { const d = new Date(Date.parse(S.D.today.day + "T12:00:00Z") - i * 86400000).toISOString().slice(0, 10); return [d, i === 0 ? "Today" : i === 1 ? "Yesterday" : new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long" })]; });
-  openSheet(`${sheetHead(kind === "steps" ? "Type in your steps" : "Type in your scrolling")}
-    <form data-form="log-${kind}">
-      <span class="field-label">Day</span>
-      <select name="date" class="select">${days.map(([d, l]) => `<option value="${d}">${l}</option>`).join("")}</select>
-      <span class="field-label">${kind === "steps" ? "Steps" : "Minutes on TikTok and Reels"}</span>
-      <input type="number" name="n" inputmode="numeric" min="0" max="${kind === "steps" ? 200000 : 1440}" required placeholder="${kind === "steps" ? "8421" : "45"}">
-      <button class="btn green block" style="margin-top:14px">Save</button>
-    </form>
-    ${kind === "steps" ? `<p class="tiny faint" style="margin:10px 0 0">The number from your phone's Health or Fit app. A synced total for the same day replaces it.</p>` : ""}`);
 }
 // Anyone in the squad: their walker, class, raid spot, steps and stats with gear (all from the squad data /game sends).
 function profileSheet(id) {
@@ -1800,10 +1918,10 @@ function viewSetup() {
       <p class="tiny faint" style="text-align:center;margin:10px 0 0">Both are needed to carry on. The code can take a minute, and might be in spam.</p>`
     : step === "steps" && NATIVE ? `<h1 class="ol disp ob-title">Connect your phone</h1>
       <p class="muted">Two taps. Your steps and scrolling count by themselves from then on.</p>
-      <section class="panel"><span class="field-label">Steps</span>${nativeSetup("steps")}<span class="field-label">Scrolling (optional)</span>${nativeSetup("scroll")}</section>
+      <section class="panel"><span class="field-label">Steps</span>${nativeSetup("steps")}<span class="field-label">App time (unlinked counts as over your allowance)</span>${nativeSetup("scroll")}</section>
       <div class="btn-row" style="margin-top:12px"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : step === "steps" ? `<h1 class="ol disp ob-title">${setupPlat() === "ios" ? "Set up Effort on your iPhone" : setupPlat() === "android" ? "Get the Effort app" : "Your steps"}</h1>
-      <p class="muted">${setupPlat() === "ios" ? "About five minutes, once. Then your steps flow in on their own." : setupPlat() === "android" ? "One download. Your steps and scrolling count by themselves from then on." : "Type them in each day."}</p>
+      <p class="muted">${setupPlat() === "ios" ? "About five minutes, once. Then your steps flow in on their own." : setupPlat() === "android" ? "One download. Your steps and scrolling count by themselves from then on." : "Pick your phone below."}</p>
       ${setupBody("steps")}
       ${setupPlat() !== "other" ? `<button class="btn green block" style="margin-top:14px" data-act="check-sync" data-kind="steps">${ic("refresh")} Check it worked</button>
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
@@ -2788,14 +2906,6 @@ document.addEventListener("submit", async (e) => {
       S.auth = { ...(S.auth || {}), has_password: true }; closeSheet(); render(); toast("Password saved");
       if (needsAccount()) promptAccount(true);
     }); break;
-    case "log-steps": await busy(async () => {
-      const r = await call("log", { token: S.token, steps: data.n, date: data.date, source: "manual" });
-      closeSheet(); await load(); render(); toast(r.message.replace(/^✅ /, ""));
-    }); break;
-    case "log-scroll": await busy(async () => {
-      await call("scroll_minutes", { token: S.token, minutes: data.n, date: data.date });
-      closeSheet(); await load(); render(); toast("Scrolling saved");
-    }); break;
   }
 });
 document.addEventListener("input", (e) => {
@@ -2841,6 +2951,7 @@ document.addEventListener("click", async (e) => {
   if (d.shopstyle) { S.shopStyle = d.shopstyle; render(); return; }
   if (d.profile) { profileSheet(d.profile); FX.play("tap"); return; }
   if (d.item) { itemSheet(d.item, d.deal === "1"); FX.play("tap"); return; }
+  if (d.skin) { skinSheet(d.skin); FX.play("tap"); return; }
   if (d.buy) { const item = G.itemById(d.buy); return shopAction("buy", { item: d.buy, deal: d.deal === "1" }, () => { FX.play("buy"); itemSheet(item.id, false); toast(`${item.name} equipped`); }); }
   if (d.upgrade) return shopAction("upgrade", { item: d.upgrade }, () => { FX.play("levelup"); itemSheet(d.upgrade, false); });
   if (d.equip) { const it = G.itemById(d.equip); return shopAction("equip", { slot: it.slot, item: it.id }, () => { FX.play("buy"); itemSheet(it.id, false); }); }
@@ -2890,8 +3001,6 @@ document.addEventListener("click", async (e) => {
     case "setup-done": S.view = "main"; S.tab = "today"; render(); scrollTo(0, 0); break;
     case "setup-steps": setupSheet("steps"); break;
     case "setup-scroll": setupSheet("scroll"); break;
-    case "log-steps": logSheet("steps"); break;
-    case "log-scroll": logSheet("scroll"); break;
     case "check-sync": {
       const out = $("#sync-status"), kind = d.kind;
       out.textContent = "Checking…";
@@ -2939,7 +3048,10 @@ document.addEventListener("click", async (e) => {
     case "den-room": denSheet(d.room); break;
     case "den-give": denGive(d.room, Number(d.amount)); break;
     case "wear-buy": { const w = G.wardrobeById(d.id); if (w) wardrobe({ buy: w.id }, `Bought the ${w.name}`); break; }
-    case "wear": wardrobe({ [d.kind]: d.id || null }, d.id ? "Looking sharp" : null); break;
+    case "wear": wardrobe({ [d.kind]: d.id || null }, d.id ? "Looking sharp" : null); if (d.kind === "skin") closeSheet(); break;
+    case "gamba-buy": gambaBuy(); break;
+    case "gamba-odds": gambaOdds(); break;
+    case "skin-pay": skinPay(d.id); break;
     case "chapter": playChapter(Number(d.k)); break;
     case "claim": claim(d.what, Number(d.k), d.ref); break;
     case "claim-track": claimTrack(); break;

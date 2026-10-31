@@ -191,8 +191,8 @@ function dressTaxman(obj) {
 // One shared offscreen renderer, one render at a time; results are cached for the session.
 let pRenderer = null, pQueue = Promise.resolve();
 const pCache = new Map();
-// What a walker is wearing (wardrobe colours and equipped gear), so a change of outfit renders a fresh portrait.
-const wearKey = (a) => (a ? ["_suit", "_band", "_weapon", "_armour", "_trinket"].map((k) => a[k] || "").join(",") : "");
+// What a walker is wearing (wardrobe colours, equipped gear and skin), so a change of outfit renders a fresh portrait.
+const wearKey = (a) => (a ? ["_suit", "_band", "_weapon", "_armour", "_trinket"].map((k) => a[k] || "").join(",") + "," + (a._skin?.id || (typeof a._skin === "string" ? a._skin : "")) : "");
 function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) {
   const key = `${kind}:${id}:${w}x${h}:${frame}${kind === "walker" ? ":" + wearKey(answers) : ""}`;
   if (pCache.has(key)) return pCache.get(key);
@@ -250,6 +250,89 @@ function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) 
   pQueue = job;
   pCache.set(key, job);
   return job;
+}
+
+// ---------- store preview ----------
+// A small live turntable for the skin store: the ninja turning slowly, idling, swinging every few seconds and, in a
+// House skin, doing its victory dance, with its trail and aura running. It has its own WebGL context (freed by
+// dispose()), draws only while on screen, and step(dt) moves it on by hand (tests, or a pane that never paints).
+//   const p = Arena3D.preview(host, answers, { spin: 0.45, every: 2.6, detail: 1.5, fx: 1, autoplay: true });  p.dispose();
+function preview(host, answers, opts = {}) {
+  const none = { ok: false, walker: null, canvas: null, step() {}, play() {}, dispose() {} };
+  if (!buildWalker || !host) return none;
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" }); } catch { return none; }
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
+  const cv = renderer.domElement;
+  cv.className = "arena3d-preview"; cv.style.cssText = "width:100%;height:100%;display:block";
+  host.appendChild(cv);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x24305a, 1.4));
+  const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(-3, 6, 8); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x8fc3ff, 1.5); rim.position.set(4, 3, -6); scene.add(rim);
+  const w = buildWalker(THREE, answers || {}, { detail: opts.detail ?? 1.5, fx: (opts.fx ?? 1) * (PHONE ? 0.8 : 1) });
+  scene.add(w.group);
+  w.group.rotation.y = Math.PI + 0.5; // three-quarters on to start
+  const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 50), shot = { y: 1, z: 4, look: 0.7 };
+  const fit = () => {
+    const r = host.getBoundingClientRect(), W = Math.max(1, r.width), H = Math.max(1, r.height);
+    renderer.setSize(W, H, false);
+    cam.aspect = W / H;
+    // Room for a crown overhead and an aura either side.
+    const top = (w.height || 1.5) + (w.skinFx?.crown ? 0.4 : 0.15), halfW = w.skinFx?.aura ? 0.9 : 0.72, cy = top / 2;
+    const tn = Math.tan((cam.fov * Math.PI) / 360);
+    Object.assign(shot, { y: cy + 0.3, z: Math.max((top * 0.56) / tn, halfW / (tn * cam.aspect)), look: cy - 0.02 });
+    cam.updateProjectionMatrix();
+  };
+  // The camera eases after the body, so a lunge stays in frame and its trail streams out behind it.
+  const body = w.group.getObjectByName("mover") || w.group, follow = new THREE.Vector3(), bodyAt = new THREE.Vector3();
+  const aim = (dt) => {
+    body.getWorldPosition(bodyAt);
+    follow.x += (bodyAt.x - follow.x) * Math.min(1, dt * 7); follow.z += (bodyAt.z - follow.z) * Math.min(1, dt * 7);
+    cam.position.set(follow.x, shot.y, shot.z + follow.z); cam.lookAt(follow.x, shot.look, follow.z);
+  };
+  // The show, on repeat: idle, a swing, a big swing, then a third swing or (House) the dance.
+  const every = opts.every ?? 2.6, dance = !!w.skinFx?.dance;
+  const show = dance ? [[every, "attack"], [every * 2, "big"], [every * 3, "cheer"], [every * 3 + 3.4, "idle"]] : [[every, "attack"], [every * 2, "big"], [every * 3, "attack"]];
+  const cycle = dance ? every * 3 + 4.2 : every * 3.4, spin = (opts.spin ?? 0.45) * (CALM ? 0.4 : 1);
+  let t = 0, raf = 0, last = 0, onScreen = true, gone = false;
+  function step(dt) {
+    if (gone) return;
+    const prev = t % cycle; t += dt; const now = t % cycle;
+    if (opts.autoplay !== false) for (const [at, name] of show) if (now >= prev ? prev < at && at <= now : at > prev || at <= now) w.play(name);
+    w.group.rotation.y += dt * spin;
+    w.update(dt);
+    aim(dt);
+    renderer.render(scene, cam);
+  }
+  function frame(ms) {
+    raf = requestAnimationFrame(frame);
+    const dt = last ? Math.min(0.05, (ms - last) / 1000) : 0; last = ms;
+    if (onScreen && !document.hidden) step(dt);
+  }
+  fit(); step(0);
+  raf = requestAnimationFrame(frame);
+  const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => { if (!gone) { fit(); aim(0); renderer.render(scene, cam); } }) : null;
+  ro?.observe(host);
+  const io = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; }) : null;
+  io?.observe(host);
+  return {
+    ok: true, walker: w, canvas: cv,
+    step: (dt = 1 / 60) => step(dt),
+    play: (name) => w.play(name),
+    dispose() {
+      if (gone) return;
+      gone = true;
+      cancelAnimationFrame(raf); ro?.disconnect(); io?.disconnect();
+      w.dispose(); // its geometry, materials, textures and trails
+      renderer.dispose();
+      renderer.forceContextLoss(); // browsers cap live WebGL contexts
+      cv.remove();
+    },
+  };
 }
 
 // Effects make their own materials; shared geometry, textures and materials are flagged "keep" and survive the effect.
@@ -830,7 +913,7 @@ class Arena {
 
   // ---------- heroes ----------
   addHero(m) {
-    const w = buildWalker ? buildWalker(THREE, m.answers || {}, { you: !!m.you }) : simpleWalker(m.answers);
+    const w = buildWalker ? buildWalker(THREE, m.answers || {}, { you: !!m.you, fx: this.skinQuality() }) : simpleWalker(m.answers);
     // Heroes are sized by how far they walked this week (m.scale, about 0.85 to 1.3) on top of the mode's own scale.
     const base = this.mode === "tax" ? 0.95 : 1, s = heroScale(m.scale);
     w.group.scale.setScalar(base * s);
@@ -878,7 +961,10 @@ class Arena {
     h.scaleFrom = h.s; h.scaleTo = s; h.scaleK = 0;
     this.layout(false);
   }
+  // How much skin effect (trails, auras) each walker draws: phones and a slow arena get less.
+  skinQuality() { return this.fxScale * (PHONE ? 0.7 : 1) * (CALM ? 0.6 : 1); }
   updateHero(h, dt, real) {
+    if (h.w.skinFx && h.fxK !== this.fxScale) { h.fxK = this.fxScale; h.w.skinFx.quality(this.skinQuality()); }
     if (h.scaleK < 1) { h.scaleK = Math.min(1, h.scaleK + real / 0.4); h.s = h.scaleFrom + (h.scaleTo - h.scaleFrom) * easeIO(h.scaleK); h.w.group.scale.setScalar(h.base * h.s); }
     // The week's big walkers get a faint gold glow at their feet and the odd rising spark.
     const on = h.s > 1.15 && !h.down;
@@ -994,11 +1080,16 @@ class Arena {
     const from = h.w.group.position.clone().add(V3(0, 1.1 * h.w.group.scale.y, -0.3));
     const to = this.bossPoint(0.45 + Math.random() * 0.3, (Math.random() - 0.5) * 1.2);
     const strong = crit || big;
-    this.projectile(from, to, strong ? 0xff9f43 : h.m.you ? 0xffd166 : 0x9fd0ff, strong ? 0.22 : 0.13, strong, () => {
+    // Mythic and House skins shoot (and land) in their own spark colour, a touch brighter on the strong ones.
+    const sk = h.w.skinFx?.spark ? new THREE.Color(h.w.skinFx.spark).getHex() : null;
+    const col = sk ?? (strong ? 0xff9f43 : h.m.you ? 0xffd166 : 0x9fd0ff);
+    this.projectile(from, to, col, strong ? 0.22 : 0.13, strong, () => {
+      if (sk != null && !strong) this.flare(to, sk, 1.4);
       if (!strong) return;
       // Your own hits already got their hit-stop from bossHit; teammates' big ones get a lighter one on landing.
       if (!h.m.you) this.hitStop(big ? 70 : 45, { punch: big ? 0.5 : 0.25, minor: true });
-      this.flare(to, 0xffc37a, big ? 3.2 : 2.2);
+      this.flare(to, sk ?? 0xffc37a, big ? 3.2 : 2.2);
+      if (sk != null) this.shockwave(to, sk, big ? 2.8 : 1.8, 0.35, true);
     });
   }
   bossHit(crit) {
@@ -1662,5 +1753,6 @@ window.Arena3D = {
   },
   hasWalkers: !!buildWalker,
   portrait,
+  preview,
 };
 window.dispatchEvent(new Event("arena3d-ready"));

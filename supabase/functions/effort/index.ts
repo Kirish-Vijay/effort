@@ -4,7 +4,7 @@
 //   POST /join                         join a squad (existing player token, or a new profile); you're only ever in one
 //   POST /squad_create                 make a squad and join it
 //   POST /leave                        leave your squad
-//   GET  /log?t=TOKEN&steps=8421       log today's steps (iPhone Shortcut / typed in)
+//   GET  /log?t=TOKEN&steps=8421       log today's steps (iPhone Shortcut; typed-in steps are refused)
 //   POST /hc?t=TOKEN                   HC Webhook (Android Health Connect) payload
 //   GET  /scroll?t=TOKEN&ev=open|close   short-video app opened/closed (Shortcut / MacroDroid automation)
 //   GET  /scroll?t=TOKEN&minutes=42      the day's scroll minutes in one go (Tasker)
@@ -394,6 +394,8 @@ Deno.serve(async (req) => {
         const requested = clip(q.get("date") ?? body.date, 10);
         const day = requested && dayIsSane(requested, player.tz) ? requested : localDate(new Date(), player.tz);
         const source = clip(q.get("src") ?? body.source, 20) || "shortcut";
+        // Steps only come from a phone's step counter now, never typed in.
+        if (source === "manual") return fail("Steps can't be typed in. Set up sync in Me → Steps.", 403);
         await saveDay(player.id, day, steps, source);
         await touchSteps(player.id, source);
         const msg = `✅ ${steps.toLocaleString("en-GB")} steps logged for ${prettyDay(day)}`;
