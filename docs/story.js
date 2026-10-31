@@ -321,6 +321,116 @@ const BG = {
     [[260, 452], [300, 458], [340, 450]].map(([x, y]) => `<path d="M${x - 10} ${y} Q${x} ${y - 26} ${x + 10} ${y} Z" fill="#6a4418"/>`).join("") +
     `<path d="M30 452 L30 410 L70 410 L70 452 Z M26 410 L50 390 L74 410 Z" fill="#2a1a20"/><rect x="44" y="418" width="8" height="8" fill="#ffcf7a"/>`) },
 };
+
+// ---------- realm scenes ----------
+// The seven realms behind the seam, plus the seam itself. They use the journey map's prop silhouettes (realms.js
+// PROPS, origin at the base centre) and its palettes (realms.css .rlm--swamp and so on), so a chapter looks like the
+// place the squad is walking through on the map that week.
+const RP = {
+  deadtree: "M-3 0L-2-38L-15-56L-12-58L-1-44L0-70L3-70L3-47L14-62L17-59L4-40L5 0Z",
+  reeds: "M-9 0L-8-30L-6 0ZM-2 0L-1-44L2 0ZM5 0L7-34L9 0ZM-2.5-44h3v-10h-3Z",
+  mushroom: "M-3 0Q-5-28-2-47H2Q5-28 3 0ZM-24-45Q0-78 24-45Q0-51-24-45Z",
+  toad: "M-14 0Q-15-10-12-15H-8Q-6-10-7 0ZM-22-14Q-10-30 2-14Q-10-17-22-14ZM8 0Q7-14 10-22H14Q16-14 15 0ZM0-21Q12-44 24-21Q12-25 0-21Z",
+  puff: "M-16 0A9 9 0 0 1 2 0ZM0 0A12 12 0 0 1 24 0Z",
+  peak: "M-42 0L-14-58L-2-44L14-82L46 0Z",
+  shard: "M-7 0L-3-50L4-34L8 0Z",
+  drift: "M-36 0Q-12-14 8-8Q24-14 36 0Z",
+  isle: "M-30-40H30L18-26L6-8L0 6L-6-10L-20-24ZM-14-40L-12-54L-8-40ZM9-40V-52H13V-40Z",
+  cloud: "M-30 0A11 11 0 0 1-18-16A16 16 0 0 1 10-20A12 12 0 0 1 32 0Z",
+  kelp: "M-2 0C-12-20 8-34-2-56C-6-66 0-78 2-82C5-70 2-62 5-56C13-36-4-20 5 0Z",
+  coral: "M-2 0V-14L-14-26V-38H-10V-28L-2-20V-44H3V-22L12-32V-46H16V-30L5-16V0Z",
+  rockarch: "M-34 0Q-30-40 0-44Q30-40 34 0H22Q20-26 0-28Q-20-26-22 0Z",
+  cube: "M0-42L20-31V-9L0 2L-20-9V-31Z",
+  pixels: "M-20 0h10v-10h-10ZM-10-10h10v-10h-10ZM0 0h10v-22h-10ZM12-30h8v-8h-8Z",
+  pyramid: "M-24 0L0-50L24 0ZM-18-58h36v4h-36Z",
+  planet: "M-18 0A18 18 0 1 0 18 0A18 18 0 1 0-18 0ZM-36 2A36 7 0 1 0 36 2A36 7 0 1 0-36 2ZM-27 2A27 4 0 1 0 27 2A27 4 0 1 0-27 2Z",
+  rock: "M-14-2L-10-12L0-16L12-10L14 2L6 12L-8 12Z",
+  moonc: "M-16 0A16 16 0 1 0 16 0A16 16 0 1 0-16 0ZM-8-4A4 4 0 1 0 0-4A4 4 0 1 0-8-4ZM4 6A3 3 0 1 0 10 6A3 3 0 1 0 4 6Z",
+};
+const RP_EO = { planet: 1, moonc: 1 };
+const prop = (k, x, y, s, fill, attrs = "") => `<path transform="translate(${f1(x)} ${f1(y)}) scale(${f1(s)})" d="${RP[k]}" fill="${fill}"${RP_EO[k] ? ' fill-rule="evenodd"' : ""}${attrs}/>`;
+// n props from keys along a band, back to front so the lower (nearer) ones overlap the higher ones.
+function scatter(seed, keys, n, { y0, y1, s0, s1, fill, x0 = -10, x1 = 410, attrs = "" }) {
+  const r = rng(seed); let s = "";
+  for (let i = 0; i < n; i++) {
+    const k = keys[Math.floor(r() * keys.length)], x = x0 + r() * (x1 - x0), y = y0 + (n > 1 ? i / (n - 1) : 0) * (y1 - y0), sc = s0 + r() * (s1 - s0), fl = r() < 0.5 ? -1 : 1;
+    s += `<path transform="translate(${f1(x)} ${f1(y)}) scale(${f1(sc * fl)} ${f1(sc)})" d="${RP[k]}" fill="${fill}"${RP_EO[k] ? ' fill-rule="evenodd"' : ""}${attrs}/>`;
+  }
+  return s;
+}
+const GLOW = (x, y, r, c, cls = "es-lamp", d = 0) => `<g class="${cls}" style="animation-delay:${f1(d)}s"><circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r * 4)}" fill="${c}" opacity=".12"/><circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="${c}"/></g>`;
+Object.assign(BG, {
+  "the-seam": { sky: "linear-gradient(180deg,#05060f 0%,#10132e 60%,#1b1e44 100%)", layers: ["fog-light"], svg: () => VB(
+    starsSVG(40, 201, 260) + housesSVG(203, { base: 500, blue: 0.85, fill: "#090c1e", minH: 120, maxH: 220 }) +
+    `<rect x="0" y="500" width="400" height="200" fill="#06081a"/>` +
+    `<defs><linearGradient id="es-tear" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7dff4f"/><stop offset=".3" stop-color="#ffa53d"/><stop offset=".55" stop-color="#c9f6ff"/><stop offset=".8" stop-color="#3dffc5"/><stop offset="1" stop-color="#ffc83d"/></linearGradient></defs>` +
+    `<path d="M200 120 L214 190 L196 250 L218 320 L192 390 L212 460 L198 530 L206 600 L200 640 L186 560 L194 470 L178 400 L200 320 L182 250 L198 180 Z" fill="#000" opacity=".5" transform="translate(4 0)"/>` +
+    `<path d="M200 120 L214 190 L196 250 L218 320 L192 390 L212 460 L198 530 L206 600 L200 640 L186 560 L194 470 L178 400 L200 320 L182 250 L198 180 Z" fill="url(#es-tear)" class="es-lamp"/>` +
+    `<ellipse cx="200" cy="380" rx="90" ry="260" fill="#c9f6ff" opacity=".07"/>` +
+    [170, 230, 290, 350, 420, 490, 560].map((y, i) => `<path d="M${180 + (i % 2) * 4} ${y} L${222 - (i % 2) * 4} ${y + 6}" stroke="#ffc83d" stroke-width="2.4" stroke-linecap="round"/>`).join("")) },
+  "blotmarsh": { sky: "linear-gradient(180deg,#081512 0%,#12302a 50%,#2f5e42 100%)", layers: ["fog", "fog2", "motes-green"], svg: () => VB(
+    starsSVG(16, 211, 170) + MOON(300, 110, 15, "#d8f0c8") +
+    `<path d="M0 440 Q100 418 200 432 Q300 412 400 430 L400 470 L0 470 Z" fill="#1f4a3d"/>` +
+    scatter(212, ["deadtree", "reeds", "deadtree"], 8, { y0: 444, y1: 452, s0: 0.8, s1: 1.4, fill: "#163a30" }) +
+    SEA(466, "#0d241e", "#030a08") + WAVES(466, "#4f8a4a", 213) +
+    `<ellipse cx="120" cy="520" rx="70" ry="7" fill="#2f5e42" opacity=".45"/><ellipse cx="300" cy="560" rx="54" ry="6" fill="#2f5e42" opacity=".35"/>` +
+    `<g class="es-bob"><circle cx="252" cy="500" r="9" fill="none" stroke="#6fca45" stroke-width="2" opacity=".8"/><circle cx="257" cy="494" r="2.6" fill="#ff3b4f"/></g>` +
+    [[60, 430, 0], [150, 470, 1.2], [330, 446, 2.1], [228, 418, 3], [372, 500, 0.6]].map(([x, y, d]) => GLOW(x, y, 2.6, "#a6e05a", "es-lamp", d)).join("") +
+    `<path d="M0 600 Q120 580 220 596 Q320 582 400 592 L400 700 L0 700 Z" fill="#050f0c"/>` +
+    scatter(214, ["reeds", "deadtree", "reeds"], 6, { y0: 600, y1: 640, s0: 1.8, s1: 2.8, fill: "#050f0c" })) },
+  "puffcap": { sky: "linear-gradient(180deg,#24120a 0%,#55321a 45%,#c76a2a 85%,#ffa53d 100%)", layers: ["motes", "fog-light"], svg: () => VB(
+    `<circle cx="96" cy="300" r="30" fill="#ffd27a" opacity=".5"/>` +
+    scatter(221, ["mushroom", "mushroom", "toad"], 7, { y0: 452, y1: 458, s0: 1.4, s1: 2.2, fill: "#6b3a1a" }) +
+    `<path d="M0 458 Q100 440 200 452 Q300 438 400 454 L400 700 L0 700 Z" fill="#3e2717"/>` +
+    scatter(222, ["mushroom", "toad", "puff"], 6, { y0: 500, y1: 530, s0: 2.2, s1: 3.2, fill: "#2e1c11" }) +
+    `<path d="M0 560 Q140 540 260 556 Q340 546 400 552 L400 700 L0 700 Z" fill="#1a0f08"/>` +
+    `<path d="M318 690 Q312 600 322 540 H340 Q350 600 344 690 Z" fill="#0e0704"/><path d="M250 548 Q330 440 410 548 Q330 528 250 548 Z" fill="#0e0704"/>` +
+    `<circle cx="300" cy="512" r="7" fill="#c76a2a" opacity=".55"/><circle cx="334" cy="494" r="9" fill="#c76a2a" opacity=".55"/><circle cx="372" cy="516" r="6" fill="#c76a2a" opacity=".55"/>` +
+    scatter(223, ["puff"], 4, { y0: 640, y1: 680, s0: 2.6, s1: 3.4, fill: "#0e0704", x0: -20, x1: 220 })) },
+  "hushfrost": { sky: "linear-gradient(180deg,#0a1a24 0%,#2c5464 55%,#7cc4d8 100%)", layers: ["snow", "snow2"], svg: () => VB(
+    starsSVG(40, 231, 220) +
+    scatter(232, ["peak"], 4, { y0: 446, y1: 452, s0: 2.6, s1: 3.6, fill: "#3d7187", x0: 0, x1: 400 }) +
+    `<path d="M0 452 Q200 432 400 454 L400 700 L0 700 Z" fill="#dff2f7"/><path d="M0 452 Q200 432 400 454" stroke="#a9d0dc" stroke-width="3" fill="none"/>` +
+    scatter(233, ["shard", "shard", "drift"], 7, { y0: 470, y1: 520, s0: 1.2, s1: 2.2, fill: "#7cc4d8", attrs: ' opacity=".85"' }) +
+    `<path d="M0 560 Q120 540 240 552 Q330 544 400 556 L400 700 L0 700 Z" fill="#c9e6ee"/>` +
+    Array.from({ length: 9 }, (_, i) => { const t = i / 8, x = 120 + t * 150 + (i % 2) * 8, y = 680 - t * 170, s = 1.6 - t * 1.1; return `<ellipse cx="${f1(x)}" cy="${f1(y)}" rx="${f1(3 * s)}" ry="${f1(4.6 * s)}" fill="#8fb8c6"/>`; }).join("") +
+    `<rect x="318" y="470" width="4" height="96" fill="#14303e"/><rect x="306" y="452" width="28" height="22" rx="3" fill="#14303e"/>` + GLOW(320, 463, 6, "#ffd27a") +
+    scatter(234, ["drift"], 3, { y0: 660, y1: 690, s0: 3, s1: 4, fill: "#eef9ff" })) },
+  "spindrift": { sky: "linear-gradient(180deg,#161b26 0%,#374258 50%,#8592ab 100%)", layers: ["wind", "rain-light"], svg: () => VB(
+    `<path d="M300 40 L284 110 L304 110 L286 190" stroke="#ffe14d" stroke-width="3.5" fill="none" class="es-bolt"/>` +
+    scatter(241, ["cloud"], 5, { y0: 150, y1: 260, s0: 2.2, s1: 3.4, fill: "#4a5570", attrs: ' opacity=".7"' }) +
+    `<path d="M110 318 Q190 350 272 304" stroke="#8592ab" stroke-width="1.6" fill="none" stroke-dasharray="3 3"/><path d="M110 324 Q190 356 272 310" stroke="#8592ab" stroke-width="1.6" fill="none"/>` +
+    `<g class="es-bob">${prop("isle", 90, 400, 1.9, "#1d2331")}</g><g class="es-bob" style="animation-delay:1.4s">${prop("isle", 290, 370, 1.5, "#1d2331")}</g><g class="es-bob" style="animation-delay:2.2s">${prop("isle", 200, 470, 1.1, "#2a3141")}</g>` +
+    scatter(242, ["cloud"], 6, { y0: 520, y1: 560, s0: 3, s1: 4.4, fill: "#5b6680" }) +
+    `<path d="M-20 580 H420 L380 630 L300 690 L210 712 L90 676 L20 630 Z" fill="#0f131c"/>` +
+    `<rect x="304" y="510" width="3" height="72" fill="#080b11"/><path d="M286 524 H326 L332 520 V530 L326 526 H286 Z" fill="#080b11"/>` + GLOW(305.5, 506, 2.6, "#ffe14d")) },
+  "lowmost": { sky: "linear-gradient(180deg,#0f4c52 0%,#07252b 45%,#01090c 100%)", layers: ["rays", "bubbles"], svg: () => VB(
+    scatter(251, ["kelp", "coral", "kelp"], 9, { y0: 470, y1: 480, s0: 1.6, s1: 2.6, fill: "#10424a" }) +
+    `<path d="M0 478 Q100 462 200 474 Q300 460 400 476 L400 700 L0 700 Z" fill="#041a1f"/>` +
+    prop("rockarch", 300, 560, 2.6, "#031216") +
+    `<path d="M40 560 L150 548 L140 586 L58 592 Z" fill="#07252b"/><path d="M96 552 L92 494 L96 494 L100 551 Z" fill="#07252b"/><path d="M96 500 L124 512 L97 520 Z" fill="#07252b"/>` +
+    [[60, 500], [140, 470], [250, 520], [330, 480], [200, 600], [370, 610]].map(([x, y], i) => GLOW(x, y, 2.4, "#3dffc5", "es-lamp", i * 0.7)).join("") +
+    `<path d="M0 620 Q140 600 260 616 Q340 606 400 612 L400 700 L0 700 Z" fill="#01090c"/>` +
+    scatter(252, ["kelp", "coral"], 5, { y0: 640, y1: 680, s0: 2.6, s1: 3.6, fill: "#01090c" })) },
+  "misrendered": { sky: "linear-gradient(180deg,#020504 0%,#0f1714 50%,#1d3b2c 100%)", layers: ["scan"], svg: () => VB(
+    `<path d="M20 460 Q90 360 160 460 Z" fill="#1c3a2e"/><path d="M180 460 Q250 360 320 460 Z" fill="#1c3a2e"/><path d="M183 460 Q253 360 323 460 Z" fill="#ff3b6b" opacity=".18"/>` +
+    `<rect x="0" y="460" width="400" height="240" fill="#060c09"/>` +
+    Array.from({ length: 11 }, (_, i) => `<path d="M200 460 L${-200 + i * 80} 700" stroke="#7dff4f" stroke-width="1" opacity=".22"/>`).join("") +
+    [476, 500, 534, 580, 640].map((y) => `<path d="M0 ${y} H400" stroke="#7dff4f" stroke-width="1" opacity=".2"/>`).join("") +
+    prop("cube", 96, 540, 1.6, "#ff3b6b", ' opacity=".3"') + prop("cube", 92, 540, 1.6, "#1c3a2e") + prop("pixels", 300, 520, 2, "#0f1714") + prop("pyramid", 340, 470, 1.2, "#1c3a2e") +
+    `<rect x="236" y="398" width="34" height="62" fill="#3a8a4a" opacity=".55"/><rect x="250" y="460" width="6" height="18" fill="#3a8a4a" opacity=".55"/>` +
+    `<g transform="translate(140 300) rotate(-8)">${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 8}" y="${Math.floor(i / 4) * 8}" width="8" height="8" fill="${((i % 4) + Math.floor(i / 4)) % 2 ? "#ff3b6b" : "#2a0f1a"}"/>`).join("")}</g>` +
+    `<rect x="0" y="606" width="400" height="3" fill="#7dff4f" opacity=".35" class="es-win"/>` +
+    prop("cube", 40, 690, 3, "#020504") + prop("pixels", 380, 690, 3.4, "#020504")) },
+  "gildedvoid": { sky: "radial-gradient(ellipse at 50% 34%,#2b2720 0%,#0c0d15 50%,#020206 100%)", layers: ["motes"], svg: () => VB(
+    starsSVG(130, 261, 700) + prop("planet", 296, 250, 2.4, "#22253a") + prop("moonc", 74, 300, 1.4, "#24252f") +
+    `<ellipse cx="200" cy="430" rx="180" ry="34" fill="#ffc83d" opacity=".1"/>` +
+    `<defs><linearGradient id="es-road" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc83d" stop-opacity=".2"/><stop offset="1" stop-color="#ffc83d" stop-opacity=".95"/></linearGradient></defs>` +
+    `<path d="M196 420 Q180 520 120 700 L280 700 Q220 520 204 420 Z" fill="url(#es-road)"/><path d="M200 430 Q196 560 200 700" stroke="#fff3c4" stroke-width="1.4" stroke-dasharray="6 10" opacity=".7"/>` +
+    scatter(262, ["rock"], 5, { y0: 330, y1: 560, s0: 0.8, s1: 1.8, fill: "#22253a" }) +
+    (() => { const r = rng(263); let s = ""; for (let i = 0; i < 18; i++) { const x = r() * 400, y = 300 + r() * 360, k = 2 + r() * 4; s += `<g class="es-tw" style="animation-delay:${f1(r() * 3)}s"><circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(k)}" fill="#b58a3a"/><circle cx="${f1(x - k * 0.3)}" cy="${f1(y - k * 0.3)}" r="${f1(k * 0.45)}" fill="#ffe58a"/></g>`; } return s; })() +
+    `<path d="M30 640 H140 V652 H30 Z M40 652 V700 M130 652 V700" stroke="#7a5a1e" stroke-width="4" fill="#24252f"/>`) },
+});
 const BG_NAMES = Object.keys(BG);
 
 // ---------- portraits ----------
@@ -636,6 +746,9 @@ const CSS = `
 .es-rays{inset:-10% -20%;background:repeating-linear-gradient(100deg,rgba(150,210,255,0) 0 38px,rgba(150,210,255,.09) 38px 70px);-webkit-mask-image:linear-gradient(180deg,#000,transparent 70%);mask-image:linear-gradient(180deg,#000,transparent 70%);animation:es-sway 9s ease-in-out infinite alternate}
 .es-motes,.es-motes-green{background-image:radial-gradient(2px 2px at 20% 30%,rgba(255,220,150,.8),transparent),radial-gradient(1.6px 1.6px at 70% 60%,rgba(255,220,150,.7),transparent),radial-gradient(1.4px 1.4px at 45% 85%,rgba(255,220,150,.6),transparent);background-size:200px 200px;animation:es-rise 14s linear infinite}
 .es-motes-green{background-image:radial-gradient(2.4px 2.4px at 20% 30%,rgba(190,255,120,.9),transparent),radial-gradient(2px 2px at 70% 60%,rgba(190,255,120,.75),transparent);animation-duration:9s}
+.es-bubbles{background-image:radial-gradient(circle at 20% 70%,transparent 2.6px,rgba(168,255,241,.55) 3px,transparent 3.8px),radial-gradient(circle at 70% 30%,transparent 1.8px,rgba(168,255,241,.45) 2.2px,transparent 3px),radial-gradient(circle at 45% 90%,transparent 3.4px,rgba(168,255,241,.35) 3.8px,transparent 4.6px);background-size:150px 210px;animation:es-rise 8s linear infinite}
+.es-scan{background:repeating-linear-gradient(180deg,rgba(125,255,79,.05) 0 2px,transparent 2px 5px),linear-gradient(180deg,transparent 40%,rgba(255,59,107,.08) 48%,transparent 56%);background-size:100% 5px,100% 220%;animation:es-scanm 5s steps(24) infinite}
+@keyframes es-scanm{from{background-position:0 0,0 0}to{background-position:0 0,0 -220%}}
 .es-tw{animation:es-tw 3.2s ease-in-out infinite}
 .es-win{animation:es-win 5s ease-in-out infinite}
 .es-eye{animation:es-eye 5s ease-in-out infinite}

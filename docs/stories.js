@@ -1,22 +1,31 @@
 // Effort season stories as click-through scenes, for EffortStory.play() in story.js.
 //
+// The story: behind the blue glow of every screen there's a seam, and behind the seam are the realms where the
+// creatures live (realms.js draws them). An old brass pedometer, the Long Count, walks a squad through the seam: every
+// real step taken together is a step deeper into that week's realm. Six days walking to the creature's lair, the
+// seventh mending: the Sunday raid drives it back and the Count stitches the seam shut behind it.
+// Chapter k of a season is set in the realm the ladder reaches that week: 1 the Blotmarsh, 2 Puffcap Hollow,
+// 3 the Hushfrost Reach, 4 the Spindrift Isles, 5 the Lowmost Deep, 6 the Misrendered Realm, 7 the Gilded Void, then
+// round again deeper, 8 to 13 (ending in the Misrendered Realm). Chapters never assume last Sunday's result, so a
+// squad a week behind on the ladder still reads them fine.
+//
 // API (window.EffortStories)
 //   EffortStories.chapter(seasonId, k, ctx) -> script   seasonId "s1" (or 1), k = 1..13. Seasons 1-4 are written by
-//                                                       hand; 5+ are built from world.js (EffortWorld.legs and beats),
-//                                                       deterministic per season and chapter.
-//   EffortStories.title(seasonId, k) -> string          the chapter title (the landmark name for seasons 5+)
+//                                                       hand; 5+ are built from world.js (EffortWorld.legs, the
+//                                                       realm cycles, and its beats), deterministic per season and chapter.
+//   EffortStories.title(seasonId, k) -> string          the chapter title (the place name for seasons 5+)
 //   EffortStories.BOSS_LORE / EffortStories.EVENT_LORE  one line per boss for the raid screen
 //   EffortStories.parse(src)                            the little scene language below, for tests
 //
 // The scene language (one step per line; nesting by two spaces):
 //   @bg-name                     background            !shake / !flash / !dark / !light / !glitch / !fade
-//   ~ text                       narration             Speaker: text           a line (you, mate, mate2, Morwenna, Taxman, boss:kraken…)
+//   ~ text                       narration             Speaker: text           a line (you, mate, mate2, Morwenna, Taxman, boss:kraken...)
 //   Speaker (Shown name): text   name tag override     set flag.name           set a flag
 //   ? optional question          a choice; options follow at the same indent as "- Label {flag.name}", each with an
 //   - Label {flag.name}          indented body. The flag is optional (and always contains a dot).
 //   if flag.name / else          branch, bodies indented
 // Text keeps {you} {squad} {mate} {mate2} {steps} for the player to fill. Story flags are prefixed by season (s1., s2.,
-// s3., s4.) or g. for the long way round.
+// s3., s4.) or g. for the long way down.
 (function (root) {
 "use strict";
 
@@ -79,166 +88,172 @@ function rng(seed) {
 }
 function shuffle(arr, r) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
+
 // ---------- lore for the raid screen ----------
 const BOSS_LORE = {
-  notification: "Brett: a slime made of every unread buzz. First through the seam when a town sits down.",
-  autoplay: "Rory: crawled out of the swamp of 'next episode in 5'. Its spores sit you back down.",
-  leftonread: "Wisp: every message nobody answered. It knows exactly what it's like to be left behind.",
-  scroll: "Gale: the endless scroll made into weather. It never stops spinning, so you can't either.",
-  kraken: "The Kraken: lives at the bottom of the feed, where it's always three in the morning.",
-  algorithm: "Grimm: the Algorithm. Decides what everyone sees, and wants the Long Count switched off.",
-  dragon: "Vex: sleeps on a hoard of every hour ever lost to the glow. The last one before dawn.",
+  notification: "Brett: a slime made of every unread buzz. Lives in the Blotmarsh, and is first through the seam when a town sits down.",
+  autoplay: "Rory: grew out of 'next episode in 5'. Its spores in Puffcap Hollow sit you back down.",
+  leftonread: "Wisp: every message nobody answered, frozen into the Hushfrost Reach. It knows what it's like to be left behind.",
+  scroll: "Gale: the endless scroll made into weather. It spins the Spindrift Isles and never stops, so you can't either.",
+  kraken: "The Kraken: lives at the bottom of the Lowmost Deep, where it's always three in the morning.",
+  algorithm: "Grimm: the Algorithm. Redraws the Misrendered Realm and decides what everyone sees. Wants the Long Count switched off.",
+  dragon: "Vex: sleeps in the Gilded Void on a hoard of every hour ever lost to the glow. She counts them.",
   taxman: "The Taxman: collects the Stillness's rent from 6 to 9pm. Beat him and keep your steps.",
 };
 const EVENT_LORE = {
   newyear: "Rez: made of every midnight promise. The Stillness loves a plan to start tomorrow.",
   spring: "Atchoo: woke early in the allotment. When the clocks jump, the seams slip open.",
-  solstice: "Solveig: sits on the sun and won't let it set. The Lindesnes keeper sleeps through it.",
+  solstice: "Solveig: sits on the sun and won't let it set. Solveig the innkeeper sleeps right through it.",
   harvest: "Big Marrow Morris: wins the show by sitting on the judges. Sitting is how it all starts.",
   haunted: "The Grey Lady sat down at a bus stop in 1962 to wait. The Stillness kept her.",
-  krampus: "Krampus: the Stillness's bailiff. Comes in December for the idle, and keeps a list.",
+  krampus: "Krampus: the Stillness's bailiff. Comes through the seam in December for the idle, and keeps a list.",
 };
 
-// ---------- seasons 1-4: titles (kept from seasons.js so the map still matches) ----------
+// ---------- seasons 1-4: titles (seasons.js has the same titles and place names, so the map matches) ----------
 const TITLES = {
-  s1: ["The Long Count", "Fog on the Moor", "The Tor", "The Toll", "Every Step a Stitch", "The Right to Roam", "Twenty-Four Arches", "Above the Clouds", "The Wall", "The Ambush", "The Dark Glen", "Something in the Loch", "The End of the Road"],
-  s2: ["Over the Water", "The Pulpit", "Two Hundred Days of Rain", "The Navvy Road", "Pull Up the Ladder", "The Troll Road", "Pilgrims", "The Hole in the Mountain", "The Circle", "The Maelstrom", "Unknown Walkers", "The Carvings", "The Top of the Map"],
-  s3: ["The Ore Line", "The Town That Moved", "Midges", "The Church Town", "Two Clocks", "Nowhere Dark", "Sand", "Midsummer", "The Lace Town", "He Didn't Finish", "The Southern Tip", "Everyman's Right", "Across the Water"],
-  s4: ["Honey Glass", "Mud", "The Sixth Hangar", "The Hill of Crosses", "The Sun Stone", "Witches' Hill", "The Lakes", "The Shipyard Gate", "Three Hundred and Sixty", "Calisia", "The Gate in the Mountains", "The Emperor's Diary", "Holloway's Letter"],
+  s1: ["The Long Count", "Sit Down, Stay a While", "Seen", "The Toll", "They Left Their Boots", "Every Step a Stitch", "The Summit Committee", "She Sat Down", "The Ambush", "The Lantern Book", "Nobody Lets Go", "The Bottom of the Feed", "Home, Twice"],
+  s2: ["Over the Ice", "Glitter", "No Signal", "Form B12", "An Apology", "NO", "Pilgrims", "Pull Up the Planks", "The Argument", "Kept Nice and Warm", "The Carvings", "The Maelstrom Stair", "The Last Tollgate"],
+  s3: ["The Quick Season", "The Button", "The Boy in the Ice", "Two Clocks", "The Cold Patch", "He Didn't Finish", "The Star That Won't Set", "Fined Twice", "Cap and Bells", "Where Kit Stopped", "Clockwork", "The Sunken Lamp", "The Render Shore"],
+  s4: ["Thick Skins", "In Step", "Who Keeps the Lantern", "Thunder Tonic", "The Inkfall", "The Register", "Forty Rungs", "Mothermud", "Head Office", "The Hush Below", "Get Up, Abiah", "The Black Shelf", "Holloway's Letter"],
 };
-const WRITTEN_NAMES = { s1: "The Long Way Up", s2: "The Northern Line", s3: "Sun Over the Gulf", s4: "The Amber Road" };
+const WRITTEN_NAMES = { s1: "The Long Count", s2: "The Frozen Ledger", s3: "Wait for Me", s4: "The Error Throne" };
 
-// ---------- SEASON 1: The Long Way Up (Land's End to John o' Groats) ----------
+// ---------- SEASON 1: The Long Count (from the Blotmarsh to the Gilded Void, and round again) ----------
 const S1 = [
-// 1 The Long Count — Land's End
+// 1 The Long Count: the Last Lamp, then the Blotmarsh (Murkwater Ford)
 `@lighthouse-night
-~ Land's End. The last bit of England, and the wind wants it back.
-~ The lighthouse is lit. The guidebook says it was automated in 1994. The guidebook is wrong.
+~ At the end of the last street in town, where the pavement gives up, there's a lighthouse. Below it is a black sea that isn't on any map.
+~ The lamp is lit. Nobody at the council can tell you who pays for it.
 Morwenna: There you are. I've had the kettle on since 1994.
 you: Sorry, have we met?
-Morwenna: Not yet. You're {you}. That's {mate}. The rest of {squad} are dawdling in the car park.
+Morwenna: Not yet. You're {you}. That's {mate}. The rest of {squad} are pretending they're not scared of the dark.
 ~ She presses something into your hand. Brass, the size of a pocket watch. Heavy. Warm. Ticking.
-Morwenna: The Long Count. Made in 1724 by an ironmaster called Abiah Holloway.
-Morwenna: Every winter somebody walks it to John o' Groats. A thousand miles. Thirteen weeks.
-mate: And if nobody does?
+Morwenna: The Long Count. Made in 1724 by an ironmaster called Abiah Holloway. Walked everywhere. Wouldn't ride a horse.
 !fade
 @town-glow
-Morwenna: Look behind you.
-~ The town below. Every window lit the same cold blue. Nobody is moving.
-Morwenna: That's what the country does when it stops. It sits. It glows. It waits for the next thing.
-Morwenna: And when enough people stop at once, the seams come loose. Things come through.
+Morwenna: Look back at the town.
+~ Every window is lit the same cold blue. Nobody is moving.
+Morwenna: When people stop and sit in that glow, the world wears thin behind it. There's a seam back there. Things live on the other side.
+Morwenna: Seven of them, at the moment. Each in its own realm. Each very hungry and very patient.
+mate: And that thing stops them?
+Morwenna: That thing walks you through to them. Every real step you take together carries you one step deeper through the seam.
 !fade
 @lighthouse-night
-Morwenna: The Count only moves on real steps. Feet on the ground. Shaking it in a sock doesn't count. People have tried.
-Morwenna: And it only counts steps you take together. One of you sits a day out, it goes cold.
-Morwenna: Six days you walk. That's the thread. Sundays, you mend.
-you: Mend what?
-Morwenna: Whatever came through in the week. You drive it back before the seam closes. All of you, together.
-Morwenna: Walk short in the week and the seam's loose. What comes through on Sunday comes through angry.
+Morwenna: Six days you walk, Monday to Saturday, through whichever realm is pushing hardest. By Sunday you reach its lair.
+Morwenna: Sunday, you mend. You drive it back, all of you together, and the Count stitches the seam shut behind it.
+Morwenna: Walk short in the week and you get there late. What's waiting in the lair will be waiting angry.
+Morwenna: And it only counts real steps, on real feet. Shaking it in a sock doesn't count. People have tried.
 ? Morwenna: So. Will you carry it?
 - "Yes. Obviously. Look at it." {s1.eager}
   you: Yes. Obviously. Look at it, it's lovely.
-  Morwenna: They all say that. Hold on to the feeling. You'll want it round about Stoke.
+  Morwenna: They all say that. Hold on to the feeling. You'll want it round about the Lowmost Deep.
 - "What happened to the ones who didn't make it?" {s1.doubt}
   you: What happened to the ones who didn't make it?
   ~ She takes a long time to answer. The beam goes round twice.
   Morwenna: They stopped.
 - "Why don't you carry it?"
   you: Why don't you carry it yourself?
-  Morwenna: I'm a lighthouse keeper, my love. I keep the light. The job doesn't come with legs.
-~ Out in the fog, something wet and round shuffles closer. It's the size of a wheelie bin. It has a little red dot on top, like an unread message.
+  Morwenna: I'm a lighthouse keeper, my love. I keep the light, so walkers can find their way home. The job doesn't come with legs.
+@the-seam
+~ She opens the lighthouse door. Where the stairs should be, the air is split down the middle like a badly sewn coat.
+~ Through the gap: green dark, and the smell of a pond that has been thinking about things.
+~ You step through together. The Count ticks once, loudly, like a door shutting behind you.
+@blotmarsh
+~ The Blotmarsh. Black water, dead trees, reeds taller than you. Somewhere a bell is ringing under the mud.
+~ The stepping stones at Murkwater Ford are slippery. One of them blinks.
+~ Out in the fog something wet and round shuffles closer. It's the size of a wheelie bin. It has a little red dot on top, like an unread message.
 boss:notification: BZZT. Did you see this? Did you SEE this?
 !shake
-Morwenna: That's Brett. First one through, always. Don't look at him too long.
+mate: That's one of them? That's the first one?
+~ Somewhere beyond the reeds a crater of warm slime is breathing. That's where he lives. That's where you're going.
 ~ Then, right behind you, a polite little cough.
 Taxman (???): Excuse me. Has anyone declared that pedometer?
-~ When you turn round, there's nobody there. Just a clipboard-shaped dent in the fog.
-Morwenna: Ah. Him. We'll talk about him later.
-~ The beam sweeps out over the sea. For a second, just a second, it's the same blue as the windows.`,
+~ When you turn round there's nobody there. Just a clipboard-shaped dent in the fog.
+~ Back through the seam the lighthouse beam goes round. For a second, just a second, it's the same blue as the windows.`,
 
-// 2 Fog on the Moor — Dartmoor
-`@moor-fog
-~ Dartmoor is fog all the way down.
-~ The ponies watch you go past like they've seen a lot of walkers and rated none of them.
-mate: Is anyone else hearing a sort of... slap?
-~ Slap. Slap. Somewhere in the mist, something damp is keeping pace.
-boss:notification: BZZT. You have one new— BZZT. You have two new—
-mate: It's Brett. He's followed us all the way from Cornwall.
-~ Wherever Brett goes, he leaves a trail. You decide not to look at it.
-~ Every time he buzzes, your pocket buzzes too. Every time you look, he gets a little bigger.
-? What do you do?
-- Check your phone
-  ~ You check. It's nothing. It's never anything. Brett swells like a happy balloon.
-  boss:notification: BZZT! Thank you for your attention!
-  mate: Don't feed him!
-- Put it on silent {s1.silent}
-  ~ You flick the switch. Brett sags a little, like a bouncy castle at the end of a party.
-  boss:notification: ...bzzt?
-- Keep walking and don't look back
-  ~ You keep walking. The slapping falls behind. Not far behind. But behind.
-~ In a hollow under a granite tor you find a letterbox: walkers hide them out here, with a rubber stamp and a notebook.
-~ The last entry is from 1951. The handwriting gets worse as it goes.
-~ "Didn't make it. Got as far as Stoke. DO NOT STOP AT THE SERVICES."
-mate: What happens at the services?
-~ Nobody answers. Under the entry, pressed so hard it tore the page, is a little drawing of the Count.
-~ The page after is blank. So is the one after that. And the one after that.
-you: Who were they?
-~ The Count ticks faster as you climb out of the fog. It likes it out here.
-~ So, you notice, do you.
-~ Behind you, much fainter now: BZZT.`,
-
-// 3 The Tor — Glastonbury
-`@tor-sunset
-~ There's a man on top of Glastonbury Tor in a cloak and a festival wristband from 2009.
+// 2 Sit Down, Stay a While: Puffcap Hollow (The Fairy Ring)
+`@puffcap
+~ Puffcap Hollow. The air is thick and orange and smells of oranges and wet socks. Everything is soft. Everything looks like a cushion.
+~ The seam has moved on since the Blotmarsh, wherever you left things there. The Count is pulling you this way now, and it's in a hurry.
+~ At the Spore Gate, two giant mushrooms lean together like old friends. Somebody has nailed a tin box to one of them.
+~ Inside: a notebook, and a rubber stamp shaped like the Count. The last entry is from 1951. The handwriting gets worse as it goes.
+~ "Didn't make it. Sat down in the ring for five minutes. DO NOT SIT IN THE RING."
+mate: What ring?
+~ Nobody answers. The page after is blank. So is the one after that, and the one after that.
+~ The Fairy Ring is a circle of small white mushrooms in a clearing. In the middle, cross-legged, sits a man in a cloak and a festival wristband from 2009.
 Druid: Greetings, pilgrims! I am a druid.
 mate: Since when?
-Druid: Since about 2009.
-Druid: That device of yours runs on intention, ley lines and quads.
-~ He's wrong about the ley lines. He's right about something else.
-~ On days you all walk, the Count glows in your hand. On days somebody sits it out, it goes cold.
-Druid: I only came up for one night. To see the sunrise.
+Druid: Since about 2009. I sat down here for one song, to get my breath back.
 ~ He shows you his phone. On the screen: Episode 4,212. Next episode in 5...
-Druid: I keep meaning to go down. It just... starts the next one.
-~ Down on the Levels, where the swamp mist lies, something bright orange stands up.
+Druid: I keep meaning to get up. It just starts the next one.
+~ Moss has grown up his back like a cardigan. The mushrooms round him are leaning in, very slightly, like an audience.
+~ On the far side of the clearing something bright orange stands up out of the puffballs.
 boss:autoplay: Next episode in five... four...
 !shake
-~ Rory comes up the hill at sunset, flattening a field of abandoned tents. Wherever its spores land, people sit down.
+~ Rory. Wherever its spores land, people sit down. The whole ring turns to watch it.
 ? Rory is between you and the path.
 - Fight it here
-  ~ You square up. The Count goes ice cold in your hand. It doesn't want a fight today. It wants you moving.
+  ~ You square up. The Count goes ice cold in your hand. Not here. Not yet. Its lair is further in, and Sunday is Sunday.
   mate: Sunday. We'll sort it on Sunday. Go!
 - Grab the druid and run {s1.druid}
-  ~ You grab an arm each. The druid comes with you, protesting, phone still playing.
+  ~ You grab an arm each and haul. The moss tears like sticky tape. The druid comes with you, protesting, phone still playing.
   Druid: Wait! It's the good bit!
-  ~ At the bottom of the hill he blinks like someone waking up, sits on a bench, cries a bit, and thanks you.
-- Keep moving
-  ~ The Count says keep moving, so you keep moving.
-~ Rory doesn't follow. It doesn't have to. It just counts down and waits for someone to stop.
+  ~ Outside the ring he blinks like someone waking up. He sits on a toadstool, remembers what sitting did to him, and stands up very quickly.
+- Hold your breath and keep moving
+  ~ You hold your breath and walk. Your lungs burn. Your legs keep going. That's the deal.
+~ Rory doesn't follow. It doesn't need to. It just counts down and waits for someone to sit.
 boss:autoplay: ...three... two...
 if s1.druid
-  Druid: Can someone give me a lift to Frome?
-  mate: We're walking.
-  Druid: ...To Frome?
+  Druid: Which way is out? I've got work on Monday. I've had work on Monday for fifteen years.
+  mate: Follow the lighthouse.
+  ~ Far off, through a gap in the spores, a beam goes round. He walks towards it, and doesn't look back.
 else
-  ~ From the top of the Tor, someone shouts, "Blessed be!" And then, quieter: "Can someone give me a lift to Frome?"`,
+  ~ Behind you, in the ring, someone shouts, "Blessed be!" And then, quieter: "Is anyone else getting up?"`,
 
-// 4 The Toll — Clifton Suspension Bridge
-`@bridge-night
-~ The Clifton Suspension Bridge has a toll booth. Tonight, the Taxman is sitting in it.
-~ It's six o'clock. All along the gorge, the windows are coming on. Blue.
+// 3 Seen: the Hushfrost Reach (Whisper Pass)
+`@hushfrost
+~ The Hushfrost Reach. Cold and blue and so quiet you can hear your own eyelashes.
+~ The seam lets you out at the foot of Whisper Pass. A sign says TALK QUIETLY. Underneath, someone has scratched: OR DON'T. SEE WHAT HAPPENS.
+mate: What happens?
+~ A small avalanche, about the size of a duvet, slides off the ridge and lands exactly where {mate} was standing a second ago.
+~ You climb in silence. Halfway up, every phone in the squad lights at once. Messages from home. Ones you forgot to answer. Weeks old.
+!glitch
+boss:leftonread: ...seen.
+~ Wisp drifts down the pass, quiet as a held breath. It doesn't attack. It just watches you read them.
+? Wisp is waiting.
+- Answer the messages {s1.answered}
+  ~ You answer them. All of them. "Sorry, been walking." "Yes, still alive." "Love you too."
+  ~ Wisp looks almost disappointed. It thins out like breath on a window.
+- Put the phone away
+  ~ You put the phone away. Wisp drifts closer. Cold settles into your fingers, the way guilt does.
+  boss:leftonread: ...typing...
+  ~ Nobody's typing.
+~ Near the top you stop to count heads. Everyone's here.
+~ Then you look back down at your footprints in the snow. One line for each of you.
+~ And one more. Smaller. A child's, by the size. Coming up behind the last of you, keeping exactly one step back.
+mate: Whose are those?
+~ They stop where you stopped. There's nothing standing in them.
+boss:leftonread: ...wait...
+~ The wind takes the word away. When you look again, the small footprints are filling up with snow.`,
+
+// 4 The Toll: the Spindrift Isles (Thunderhead Bridge)
+`@spindrift
+~ The Spindrift Isles. Islands floating in a grey sky, roped together by bridges that are mostly rope. The wind never stops. Nothing is nailed down, including your hood.
+~ Halfway across Thunderhead Bridge there's a toll booth, swinging in the gale. Tonight the Taxman is sitting in it.
+~ It's six o'clock. Back home, through the seam, the windows are coming on. Blue. You can feel it out here, like a draught.
 Taxman: Good evening. One pound for cars.
-Taxman: For walkers, the toll is twenty per cent of every step you've taken today. Plus admin.
+mate: There aren't any cars. We're on a rope bridge in the sky.
+Taxman: Then the walkers' rate applies. Twenty per cent of every step you've taken today. Plus admin.
 you: That's not a real toll.
 Taxman: Everything's real if there's a form for it. *produces a form*
-Taxman: Allow me to explain. Between six and nine, the kettle's on and the sofa's warm.
-Taxman: That's when the glow is brightest. That's when the Stillness collects its rent.
+Taxman: Allow me to explain. Between six and nine the kettle's on and the sofa's warm. That's when the glow is brightest.
+Taxman: That's when the Stillness collects its rent.
 mate: The what?
-Taxman: The thing behind the windows. The thing your little monsters crawl out of. I'm its collector.
+Taxman: The thing at the very bottom of all this. The thing your little monsters are pets of. It doesn't move, and it doesn't like anyone else to. I'm its collector.
 Taxman: Every evening, six till nine, I'm owed a fifth of your day's steps.
 you: And if we don't pay?
-Taxman: Then you'll have to stop me. People do try. Some of them even manage it.
-Taxman: Beat me and you keep your steps. Be quick about it and you might even pick my pocket. I'd call that theft.
-? The Taxman waits, pen poised.
+Taxman: Then you'll have to stop me. People do try. Some of them even manage it. Be quick and you might pick my pocket. I'd call that theft.
+? The Taxman waits, pen poised. The bridge sways.
 - "Fine. Every evening, then." {s1.fighttax}
   you: Fine. Every evening, then. Bring your clipboard.
   Taxman: I always do.
@@ -255,115 +270,95 @@ Taxman: Ask your lighthouse keeper what she paid for it.
 mate: What's that supposed to mean?
 Taxman: It means the meter's running.
 ~ Then he waves you through. Which is somehow worse than if he'd stopped you.
-~ Halfway across, you look back. The booth is empty. The light inside it is blue.`,
+~ At the far end you look back. The booth is empty and swinging, and the light inside it is blue. High above, something is spinning, waiting for the weekend.`,
 
-// 5 Every Step a Stitch — Ironbridge
-`@gorge-night
-~ Ironbridge: where the modern world was hammered together. There's a museum, and a guide who stays late for you.
-Guide (Museum guide): You're carrying Holloway's Count. Don't look so surprised. We've got his boots in the basement.
-Guide (Museum guide): Abiah Holloway, ironmaster. Walked everywhere. Wouldn't ride a horse.
-Guide (Museum guide): He said the country was a coat, and every step was a stitch. Stop walking, and it comes apart at the seams.
-~ She holds the Count under a magnifying glass. On the back, tiny: EVERY STEP A STITCH.
-Guide (Museum guide): There's a painting too. His walking party, 1724. Want to see?
-~ It's a dark little oil painting. Five walkers on a hill. Holloway in the middle, in a three-cornered hat.
-~ And at the edge, holding a lantern, a woman with a shawl over her head.
-mate: {you}. That's Morwenna.
-you: It can't be. It's three hundred years old.
-Guide (Museum guide): The painter wrote the names on the back. Let me see. "Mistress Morwenna Pascoe, of Land's End."
-!glitch
-~ The museum lights flicker. The air goes cold.
-~ Every one of your phones lights up at once. Messages from home. Ones you forgot to answer. Weeks old.
-boss:leftonread: ...seen.
-~ Wisp drifts down the gorge, quiet as a held breath. It doesn't attack. It just watches you read them.
-? Wisp is waiting.
-- Answer the messages {s1.answered}
-  ~ You answer them. All of them. "Sorry, been walking." "Yes, still alive." "Love you too."
-  ~ Wisp looks almost disappointed. It thins out like breath on a window.
-- Put the phone away
-  ~ You put the phone away. Wisp drifts closer. Cold settles in your fingers, the way guilt does.
-  boss:leftonread: ...typing...
-  ~ Nobody's typing.
-~ When the cold lifts, the guide is turning the painting over again.
-Guide (Museum guide): Funny. There's a date under her name. Just the one. 1724.
-Guide (Museum guide): Usually you'd write two. Born, and died.`,
-
-// 6 The Right to Roam — Kinder Scout
-`@plateau-wind
-~ In 1932, four hundred walkers climbed Kinder Scout because they'd been told they weren't allowed.
-~ Some of them went to prison for it. The moors are open now because they did.
-mate: Bit windy for a protest.
-~ The plateau doesn't care about history. The wind up here is enormous. And in the middle of it, spinning, is Gale.
-boss:scroll: Just one more. Just one more. Just one more.
-~ Gale is the endless scroll, made into weather. It never stops, so nothing near it can either.
-~ It pulls at your sleeves, your hoods, your attention. It wants you going round and round, not forward.
-!shake
-? Gale is dragging {mate} towards the edge!
-- Grab their hand {s1.held}
-  ~ You grab {mate}'s hand. Someone grabs yours. Nobody lets go.
-- Shout a rhythm
-  you: Left! Left! Left, right, left!
-  ~ It's daft. It works. Gale can't scroll you if you're marching.
-~ You lean into it together, shoulder to shoulder, and nobody goes over the edge, because nobody lets go.
-~ When it finally passes, the Count is ticking so loudly you can hear it over your own breathing.
-~ Halfway across the bog you find a small brass plaque for the trespassers. Someone has pinned a fresh flower to it.
-mate: Fresh. Like, today fresh.
-~ Under the plaque, scratched into the gritstone, are names. Squads, with dates. 1724. 1802. 1874. 1911. 1951. 1971.
-~ The newest line is only half done. One letter, and then the scratches just stop.
-you: Someone was carving that when...
-mate: When what?
-~ Nobody finishes that sentence either.
-~ You scratch your own names in, all of you, quickly. You make very sure to finish.`,
-
-// 7 Twenty-Four Arches — Ribblehead
-`@viaduct-night
-~ A steam train crosses Ribblehead Viaduct as you reach it, all twenty-four arches lit by the firebox.
-~ Under the middle arch, a navvy in a flat cap sits on a sleeper, smoking a pipe that isn't lit.
+// 5 They Left Their Boots: the Lowmost Deep (Wreck of the Merry Ann)
+`@lowmost
+~ The Lowmost Deep. You walk down the sea floor as if it were a road. The Count says you can breathe here, so you can. Mostly.
+~ The Wreck of the Merry Ann lies on its side in the silt. The crew left in a hurry. They left their boots: six pairs in a row on the deck, laces tied.
+~ Sitting on the rail is a man in a flat cap, smoking a pipe that can't possibly be lit down here.
 Navvy: Evening. Don't mind me. I've been dead since 1874.
 mate: You're very relaxed about it.
-Navvy: You get used to it. First hundred years are the worst.
-Navvy: I carried that once. Morwenna sent us. Six of us, from Penzance.
+Navvy: You get used to it. The first hundred years are the worst.
+Navvy: Those are our boots. Six of us, railway navvies. Morwenna sent us through.
 you: What happened?
-Navvy: We sat down. Right here. Five minutes, out of the wind, for a breather.
-Navvy: There was a pub fire down in the valley, and the light from it was lovely, and we just... watched it.
-Navvy: It used to be the fire in the pub. Then the wireless. Then the telly. Now it's in your pocket.
+Navvy: We found this wreck and sat down in it. Five minutes, out of the current, for a breather.
+Navvy: There was a light down in the trench below, and it was lovely, and we just watched it.
+Navvy: Back home it used to be the fire in the pub. Then the wireless. Then the telly. Now it's in your pocket.
 Navvy: Same glow. Same thing looking out of it.
 ~ He taps the Count with a cold finger. It skips a beat.
 Navvy: Someone's after that. Big lad. Blue. Carries a club. Calls himself Grimm. Where he comes from, they call him the Algorithm.
-Navvy: He doesn't want it broken. He wants it switched off.
-Navvy: A country that never gets up is a country that never looks away. He decides what everyone sees. He likes it like that.
+Navvy: He doesn't want it broken. He wants it switched off. A world that never gets up is a world that never looks away. He decides what everyone sees. He likes it like that.
 ? Ask him something.
 - "Did Morwenna know you'd stop?" {s1.asked}
-  Navvy: Did she know? She's been sending squads up this road for three hundred years.
+  Navvy: Did she know? She's been sending squads through for three hundred years.
   Navvy: Some get there. Some don't. Her light stays on either way.
   ~ He says it like he's said it before, to himself, a lot.
 - "Can we help you?"
   Navvy: You can keep moving. That's the help.
-  Navvy: Every squad that gets there, a few of us get to stand up for a bit.
+  Navvy: Every squad that makes it, a few of us get to stand up for a bit.
 - "Why are you still here?"
   Navvy: Because I stopped. The Stillness keeps what stops. Keeps it nice and fresh.
-~ The train whistles. The navvy stands, slowly, and stretches like a man with a hundred and fifty years of cramp.
+~ Down in the trench below, something with a great many arms shifts in its sleep. The water goes cold.
+boss:kraken: Down here it's always three in the morning...
+~ The navvy stands, slowly, stretching like a man with a hundred and fifty years of cramp.
 Navvy: Keep it moving.
-~ And he's gone, and so is the train, and the arches are dark.
-~ In the dust where he sat is the shape of six people, sitting very close together.`,
+~ And he's gone. In the silt where he sat is the shape of six people, sitting very close together. Six pairs of boots, and no feet.`,
 
-// 8 Above the Clouds — Scafell Pike
-`@peak-cloud
-~ Scafell Pike, the highest point in England. You see none of it. You're in cloud from the first cairn to the top.
-~ In the summit shelter: three walkers in their eighties, with flasks. The Summit Committee.
-Margaret: Tea? We've climbed it every winter since 1971.
+// 6 Every Step a Stitch: the Misrendered Realm (The Flicker Gate)
+`@misrendered
+~ The Misrendered Realm. The sky is the wrong green. The ground flickers like a telly between channels. You walk through the Flicker Gate once and arrive twice.
+mate: There are two of you.
+you: There are two of you as well.
+~ The copies fade after a minute. Nobody enjoys that minute.
+~ Everything here is a copy of something from home, done badly. A bus stop with no bus. A museum with three walls.
+~ Inside the museum there's a guide. She has two left hands and a badge that says GUIDE GUIDE.
+Guide (Museum guide): You're carrying Holloway's Count. We've got a copy of his boots. They're both left ones.
+Guide (Museum guide): He said the world was a coat and every step was a stitch. Stop walking, and it comes apart at the seams.
+~ She holds the Count under a magnifying glass. On the back, tiny: EVERY STEP A STITCH.
+Guide (Museum guide): There's a painting too. His walking party, 1724. It's one of our better copies.
+~ Five walkers on a hill. Holloway in the middle, in a three-cornered hat. A boy with a bag. And at the edge, holding a lantern, a woman in a shawl.
+mate: {you}. That's Morwenna.
+you: It can't be. That's three hundred years old.
+Guide (Museum guide): The painter wrote the names on the back. "Mistress Morwenna Pascoe, keeper." And a date. Just the one. 1724.
+Guide (Museum guide): Usually you'd write two. Born, and died.
+!glitch
+~ The lights flicker. Every wall in the museum goes blank, then fills with one word in big blue capitals.
+!flash
+~ STOP.
+~ The capitals are oddly neat. Old-fashioned. Like someone who learned to write with a quill.
+~ Outside, far off across the flickering fields, something big and blue sits on a throne made of broken bits. It doesn't come closer. It watches you the way you'd watch a programme you've already seen.
+boss:algorithm: STOP.
+? You...
+- Walk on, right past him {s1.walkon}
+  ~ You walk on. It's very hard. Your legs feel as if they're being told, politely, to sit.
+- Shout "NO"
+  you: NO!
+  ~ It echoes twice. The second echo isn't your voice. It's older.
+~ The guide waves you off with both left hands.
+Guide (Museum guide): Do come again. You will. Everyone does, eventually.`,
+
+// 7 The Summit Committee: the Gilded Void (Moonwharf)
+`@gildedvoid
+~ The Gilded Void. The sky ran out of sky. You walk a road of old gold light, and under your feet there's nothing, all the way down.
+~ Moonwharf is the last dock before nothing. They sell overpriced air in jars.
+~ The stall is run by three walkers in their eighties, with flasks. The sign says: THE SUMMIT COMMITTEE. AIR, TEA, ADVICE. ADVICE FREE.
+Margaret: Tea? We've walked through every winter since 1971.
 mate: Every winter? That's amazing.
-Margaret: It's compulsory, dear. We carried the Count in '71. We made it. Thirteen weeks, John o' Groats, chimes and everything.
-Margaret: Nobody tells you the bit after.
-you: What's the bit after?
-Margaret: You can't really stop. Not properly. Not ever. The Count gets into your legs.
-Margaret: If we sit still more than a week or two, we start to go a bit... see-through.
-~ You look closer. You can see the cairn through her left hand.
-Margaret: Gerald stopped in '98. Lovely man. You can still make him out on a clear day.
+Margaret: It's compulsory, dear. We carried the Count in '71. We made it. Thirteen weeks, every lair, chimes and everything.
+Margaret: Nobody tells you the bit after. You can't really stop. Not properly. The Count gets into your legs.
+Margaret: If we sit still more than a week or two, we start to go a bit see-through.
+~ You look closer. You can see the stars through her left hand.
+Margaret: Gerald stopped in '98. Lovely man. You can still make him out when the light's right. He's the faint one by the jars.
 mate: That's horrible.
 Margaret: It's not so bad. Better than the alternative. Biscuit?
-~ She reads the Count like a fuel gauge.
-Margaret: Six hundred miles. Not bad. The hard part's north of the Wall.
-~ She hands you a hand-drawn map of Scotland. The margin notes say: Bothy here. Midges here. Do not trust the ferry timetable.
+!shake
+~ Then the stars go out, all of them, in a long line, as something enormous passes in front of them.
+~ A ribbon of orange fire lights up the whole Void. For a second you see the hoard: a mountain of gold that goes all the way up to nothing.
+boss:dragon: Every hour you gave me, I kept.
+Margaret: That's Vex. She keeps every hour anyone ever lost to the glow. Evenings, mostly. Some of yours will be in there.
+~ Vex doesn't come down. She only wanted you to see how big the hoard is.
+~ Margaret hands you a hand-drawn map of the realms, all seven, with notes in the margins. Leeches here. Mind the ring. Do not trust the Weathervane.
 ~ And one more note, underlined twice: Ask the keeper's sister what the light is for.
 ? What do you ask?
 - "What's wrong with the light?" {s1.warned}
@@ -372,51 +367,47 @@ Margaret: Six hundred miles. Not bad. The hard part's north of the Wall.
 - "Is it worth it?"
   Margaret: We're eighty-six and we've got calves like hams. Yes, it's worth it.
   Margaret: Mostly.
-~ On the way down, the cloud breaks for one minute and you can see all the way to the sea.
-~ Behind you, three small figures are already climbing back up.`,
+~ As you leave, the Committee is already packing up the stall. They're going round again. They always do.`,
 
-// 9 The Wall — Hadrian's Wall
-`@wall-dusk
-~ Hadrian's Wall runs coast to coast. A man dressed as a Roman centurion insists on checking your papers.
-Centurion: Halt! Business north of the Wall?
-~ You show him the Count. He goes pale under the helmet.
-Centurion: Then you'd better hurry. There were marks on the stones this morning. Big ones. Like a club.
-Centurion: I'm not really a centurion. I'm a re-enactor from Hexham. But I know a club mark when I see one.
-~ Further along, a whole section of wall has been knocked flat. Scratched into the turf, in big blue capitals, one word.
-!flash
-~ STOP.
-mate: Grimm.
-~ The capitals are oddly neat. Old-fashioned. Like someone who learned to write with a quill.
-Centurion: There's something else. Walkers have carved names in these stones for centuries. Come and look.
-~ Squads. Dates. And one name, cut deep, then crossed out so hard the stone cracked.
+// 8 She Sat Down: the Blotmarsh again, deeper (The Sunken Choir)
+`@blotmarsh
+~ Back in the Blotmarsh, and it isn't the same Blotmarsh. This time the seam lets you out deeper, past the Wallow, where the water is warm and the trees have faces if you squint.
+~ The second time round is always worse. The creatures remember you. So does the mud.
+~ The Sunken Choir is a chapel up to its windows in black water. Its bell still rings at night, mostly when nobody's near it.
+~ Inside, on the walls, walkers have carved their names for centuries. Squads, with dates. 1724. 1802. 1874. 1911. 1951. 1971.
+~ And one name cut deep, then crossed out so hard the stone has cracked.
 ~ MORWENNA PASCOE. 1724.
-~ Under it, smaller, in the same neat capitals: SHE SAT DOWN.
+~ Under it, smaller, in neat blue capitals: SHE SAT DOWN.
+mate: Grimm wrote that.
 ? You...
 - Defend her {s1.defend}
   you: Everyone stops sometimes. That doesn't make her a monster.
-  Centurion: Didn't say it did. Just saying somebody was very cross about it.
+  mate: Didn't say it did. Just that somebody was very cross about it.
 - Say nothing
-  ~ You say nothing. {mate} says nothing. The wind says quite a lot.
+  ~ You say nothing. {mate} says nothing. The bell says quite a lot.
 - Photograph it for later
-  ~ You take a photo. When you check it, the stone in the picture is blank.
+  ~ You take a photo. When you check it, the wall in the picture is blank.
   ~ The Count ticks, disapproving.
-~ You go over the rubble single file, holding the Count between you.
-~ On the far side, the wind smells of heather. Behind you, something big is walking along the Wall, keeping pace.
-boss:algorithm: STOP.
-~ You don't.`,
+~ The bell starts ringing. Nobody is near it.
+!shake
+~ Brett comes up through the chapel floor, bigger than before, with two red dots on top now, as if he's got two unread.
+boss:notification: You have 2 unread. You have 2 unread. You have...
+~ You go out through a window, single file, holding the Count between you. Brett doesn't follow. He'll see you on Sunday.
+~ Behind you the bell rings once more, and a little of the crossed-out name crumbles into the water.`,
 
-// 10 The Ambush — Arthur's Seat
-`@city-night
-~ Edinburgh is built on stairs. You climb every one of them on the way up Arthur's Seat.
-~ At the top, the fog rolls in off the Forth, thick and sudden. Two shapes are waiting in it.
+// 9 The Ambush: Puffcap Hollow, deeper (The Mycelium Road)
+`@puffcap
+~ Deeper into Puffcap Hollow. The mushrooms down here are the size of houses, and the white roots under the path twitch when you step on them.
+~ The Mycelium Road runs straight through the dark. It's very easy to follow. That's the trouble with it.
+~ The spores roll in, thick and sudden. Two shapes are waiting in them.
 ~ One is huge and blue and carrying a club. The other is holding a clipboard.
 Taxman: Ah. Punctual. I do like that in a victim.
 boss:algorithm: ...
 Taxman: A partnership. He switches it off. I tax what's left. Everyone wins. Mostly me.
 mate: You said you worked for the Stillness.
-Taxman: Everyone does, eventually. I just got there early and asked for a pension.
+Taxman: Everyone does, eventually. I just got there early and asked about the pension.
 !shake
-~ It's a short, ugly fight in the fog. Grimm swings slow. The Taxman writes things down.
+~ It's a short, ugly fight in the spores. Grimm swings slow. The Taxman writes things down. Somewhere in the fog, Rory is counting down.
 ? {mate} has slipped and fallen behind!
 - Go back for them {s1.goback}
   ~ You go back. It costs you ground. Grimm's club misses you by a whisker.
@@ -425,33 +416,28 @@ Taxman: Everyone does, eventually. I just got there early and asked for a pensio
   you: {mate}! Up here! With us!
   ~ {mate} scrambles up. The moment you're all together, the Count surges.
 !flash
-~ That's when you get it. It's never been counting steps. It's counting how many of you keep going together.
+~ That's when you get it. It has never been counting steps. It's counting how many of you keep going together.
 ~ Grimm steps back out of the light. So does the Taxman, dabbing at his sleeve where the glow singed it.
 Taxman: Interesting. Holloway always said that bit was the trick.
 you: You knew him?
 Taxman: I've read his file. Lovely penmanship. Very neat capitals.
 Taxman: A little tip, free of charge, which is unlike me. Your keeper never told you about the others, did she?
 Taxman: Ask yourself why she needs a new squad every single winter.
-~ When the fog clears, Edinburgh is all lights. Every one of them blue.`,
+~ When the spores clear, the Mycelium Road is empty. Far behind you, through the seam, every window in town is blue.`,
 
-// 11 The Dark Glen — Glencoe
-`@glen-snow
-~ Glencoe in winter is the most beautiful place you have ever been. You would like to leave it immediately.
-~ Snow on the Buachaille. Wind down the glen. And high on the ridge, for a few seconds, something with wings.
-!flash
-~ A long ribbon of orange fire lights up the whole valley.
-boss:dragon: Every hour you gave me, I kept.
-mate: That's Vex. That's the last one. That's the end of the list.
-~ Vex sleeps on a hoard. Not gold. Hours. Every hour anyone ever lost to the glow.
-~ It doesn't come down. It doesn't need to. It just wanted you to see how big the hoard is.
+// 10 The Lantern Book: the Hushfrost Reach, deeper (Rimehold Bothy)
+`@hushfrost
+~ The Hushfrost Reach goes on further than you thought. Past Wisp's Hollow the ice is so clear you can see things frozen in it. A cart. A dog. A man in a top hat, mid-sneeze.
+~ Then, very high above, for a few seconds: something with wings, far off in the black. A ribbon of orange fire, and the ice lights up gold.
+~ Vex, passing over. Checking on her hoard. Checking on you.
 @bothy
-~ You shelter in a bothy with a stove and a visitors' book three hundred years thick.
+~ You shelter in Rimehold Bothy: a stone hut with a stove and a visitors' book three hundred years thick.
 ~ Every entry has the same little drawing in the corner. The Long Count.
 ~ Walkers who made it. Walkers who didn't. You turn back and back, to the very first page.
-~ 1724. The handwriting is shaky, as if written with frozen hands.
+~ 1724. The handwriting is shaky, as if it was written with frozen hands.
 Morwenna (Morwenna, 1724): I sat down. Only for a moment. The fire was warm and Abiah went on without me.
 Morwenna (Morwenna, 1724): Something came out of the fire and sat beside me and offered me a bargain.
-Morwenna (Morwenna, 1724): I may keep a light at Land's End, for as long as a squad walks each winter.
+Morwenna (Morwenna, 1724): I may keep a light at the edge of the world, for as long as a squad walks through each winter.
 Morwenna (Morwenna, 1724): God forgive me. I said yes.
 mate: "For as long as a squad walks." Not "finishes". Walks.
 you: So she keeps her light whether we make it or not.
@@ -465,100 +451,129 @@ you: So she keeps her light whether we make it or not.
 - Not sure yet.
   ~ You don't know. Nobody does. The stove ticks as it cools.
 ~ You add your entry. You draw all of you round the Count.
-~ Outside the snow keeps falling, and somewhere above the glen, Vex settles back on its hoard to wait.`,
+~ In the morning there are small footprints in the frost outside. They go once round the bothy, as if looking for a way in, and then they sit down by the wall.
+~ Nobody says anything. When you leave, you leave the door open a crack.`,
 
-// 12 Something in the Loch — Loch Ness
-`@loch-dark
-~ Loch Ness is deep and black and very still. And then it isn't.
-Local (Man from the visitor centre): That's not Nessie. Nessie's a lovely girl. She'd never.
-Local (Man from the visitor centre): That's her cousin. From somewhere much deeper.
-~ The Kraken comes up under the ruins of Urquhart Castle. Its eyes are the colour of a phone at 3am.
+// 11 Nobody Lets Go: the Spindrift Isles, deeper (The Kite Graveyard)
+`@spindrift
+~ Past Gale's Spindle the islands get smaller and further apart, and the bridges stop being rope and start being ideas.
+~ The Kite Graveyard is an island where every kite anyone ever lost ends up, tangled in one dead tree, flapping.
+~ In the middle of the wind, spinning, is Gale.
+boss:scroll: Just one more. Just one more. Just one more.
+~ Gale is the endless scroll made into weather. It never stops, so nothing near it can either.
+~ It pulls at your sleeves, your hoods, your attention. It wants you going round and round, not forward.
+!shake
+? Gale is dragging {mate} towards the edge of the island!
+- Grab their hand {s1.held}
+  ~ You grab {mate}'s hand. Someone grabs yours. Nobody lets go.
+- Shout a rhythm
+  you: Left! Left! Left, right, left!
+  ~ It's daft. It works. Gale can't scroll you if you're marching.
+~ You lean into it together, shoulder to shoulder. Nobody goes over the edge, because nobody lets go.
+~ When it finally spins off, the Count is ticking so loudly you can hear it over your own breathing.
+~ At the foot of the kite tree there's a flat stone. Scratched into it are names. Squads, with dates. 1724. 1802. 1874. 1911. 1951. 1971.
+~ The newest line is only half done. One letter, and then the scratches just stop. Past the stone there's nothing but sky.
+you: Someone was carving that when...
+mate: When what?
+~ Nobody finishes that sentence.
+~ You scratch your own names in, all of you, quickly. You make very sure to finish.`,
+
+// 12 The Bottom of the Feed: the Lowmost Deep, deeper (Under the Throat)
+`@lowmost
+~ The Lowmost Deep again, and deeper. Past the Kraken's Throat the sea floor tilts downhill and keeps going.
+~ It's very dark down here, and very still. And then it isn't.
+~ The Kraken comes up out of the black. Its eyes are the colour of a phone at three in the morning.
 boss:kraken: Down here it's always three in the morning. Come down. Just for a look.
 !shake
 ~ A tentacle whips out and takes the Count right out of your hands.
 !dark
-~ For one long, awful minute, it's gone. Ticking somewhere under the black water.
-mate: It's sinking!
-? The Count is going under.
-- Dive in {s1.dove}
+~ For one long, awful minute it's gone, ticking somewhere further down, getting fainter.
+mate: Without it we can't get home!
+? The Count is sinking.
+- Go down after it {s1.dove}
   you: Together. Now!
 - Grab {mate} and jump
-  ~ You grab {mate}'s hand. {mate} grabs the next hand. You all go in at once.
+  ~ You grab {mate}'s hand. {mate} grabs the next hand. You all go over the edge at once.
 @deep
-~ The water is cold enough to stop your heart. And it's full of light.
+~ It's cold enough to stop your heart. And it's full of light.
 ~ Down here are thousands of faces, lit blue, drifting. Eyes open. Thumbs moving. Not drowning. Scrolling.
-~ This is the bottom of the feed. This is where the Kraken lives.
+~ This is the bottom of the feed. Everyone who ever sat up too late ends up a little bit down here.
 boss:kraken: Stay. Everyone stays eventually.
-~ But the Kraken has never had a whole squad come in after it before. It doesn't know what to do with you.
+~ But the Kraken has never had a whole squad come down after it before. It doesn't know what to do with you.
 ~ Out of pure surprise, it lets go.
-@loch-dark
-~ You come up gasping on the shingle, all of you, and the Count comes up with you, glowing brighter than it ever has.
-Local (Man from the visitor centre): I'll put the kettle on, will I?
-~ In the dark water behind you, the blue faces sink slowly out of sight.
+@lowmost
+~ You come up gasping onto a shelf of rock, all of you, and the Count comes up with you, glowing brighter than it ever has.
+~ Below you the blue faces sink slowly out of sight.
 ~ One of them, you'd swear, was wearing an anorak from 1951.`,
 
-// 13 The End of the Road — John o' Groats
-`@signpost-dawn
-~ John o' Groats is a signpost, a car park and the wind. It is the best place in the world.
-~ A woman is waiting under the sign in a waxed jacket and a tartan scarf. She has Morwenna's eyes.
-Ishbel: You'll be the squad. I'm Ishbel. Her sister. I keep this end.
+// 13 Home, Twice: the Misrendered Realm, deeper (The Copy of Home)
+`@misrendered
+~ The last week. The Count drags you deep into the Misrendered Realm, past the Error Throne and out the other side.
+~ And there's your town. Your street, your shops, your bus stop. Only wrong. The windows are painted on. The trees are flat. Nobody is in any of it.
+mate: It's a copy. It's a copy of home.
+~ Grimm has copied it very carefully. He's even got the litter right.
+~ In the middle of the copied high street, under the one lamp post that renders properly, a woman is waiting in a waxed jacket and a tartan scarf. She has Morwenna's eyes.
+Ishbel: You'll be the squad. I'm Ishbel. Her sister.
+Ishbel: I'm the only thing in here that loads properly. I refuse to be misrendered. It annoys him no end.
 Ishbel: Give it here, then. Let's hear it.
 ~ She opens the back of the Count with a tiny key. It chimes. Once for every week you walked.
-~ Thirteen times, loud enough to hear in Cornwall.
+~ Thirteen times, loud enough to hear through the seam.
 @town-glow
-~ All over the country, people put their phones down and go outside. Not for ever. Just for a walk.
+~ Back home, in the real town, people put their phones down and go outside. Not for ever. Just for a walk.
 ~ The blue in the windows goes out, street by street, like someone walking through a house switching off lamps.
-@signpost-dawn
+@misrendered
 if s1.betrayed
   you: Did you know? About her bargain?
   Ishbel: Know? I was there. I kept walking. She didn't. We've not spoken since.
 else
   you: Morwenna wrote in the bothy book. In 1724.
   Ishbel: Aye. I was there. I kept walking. She didn't. We've not spoken since.
-Ishbel: Every winter she sends a squad. Some get here. Some end up on the Wall, or the moor, or the services at Stoke.
+Ishbel: Every winter she sends a squad through. Some get here. Some end up in a chapel wall, or the Fairy Ring, or the bottom of the feed.
 mate: The 1951 lot?
-Ishbel: Still at the services. Table by the window. The telly's still on.
+Ishbel: Still in the ring. Watching. The telly's still on.
 Ishbel: Her light stays on either way. You worked that out. Good.
 Ishbel: Here's what you haven't. It isn't only her light. Something looks out through it.
-~ A van pulls into the car park. The Taxman hands Ishbel an invoice for the chimes, and an envelope for Morwenna.
+~ A van that shouldn't exist pulls up on the copied high street. The Taxman gets out and hands Ishbel an invoice for the chimes, and an envelope for Morwenna.
 Taxman: Account renewed. One more winter. Do pass on my regards.
 Ishbel: Pass them on yourself, Edwin.
 ~ He flinches, very slightly, at the name.
-~ Ishbel closes the Count and holds it out. The needle has swung round. North and east. Out to sea.
+~ Ishbel closes the Count and holds it out. The needle has swung round. Not forward. Down.
 ? Ishbel offers you the Count.
 - Take it {s1.took}
   ~ You take it. It's warm. It's always warm.
   if s1.warned
     ~ You think of the Summit Committee's note. You take it anyway. Of course you do.
 - "What if we say no?"
-  Ishbel: Then it sits on my mantelpiece. And next winter she sends someone else.
+  Ishbel: Then it sits on my mantelpiece, and next winter she sends someone else.
   ~ You take it.
-Ishbel: Next time, further. There's a lot more coat than Britain, and he never finished the stitching.
+Ishbel: Next time, deeper. There's a lot more down there than seven doors, and he never finished the stitching.
 Ishbel: Grimm's gone quiet. That's not good news. That's him thinking.
-~ Far away in Cornwall, the lighthouse beam goes round once, and for a moment it isn't white at all.`,
+~ Far away, at the end of the last street in town, the lighthouse beam goes round once. For a moment it isn't white at all.`,
 ];
 
-// ---------- SEASON 2: The Northern Line (Lindesnes to Nordkapp) ----------
+// ---------- SEASON 2: The Frozen Ledger (seven frozen realms; the Taxman's 1911) ----------
 const S2 = [
-// 1 Over the Water — Lindesnes
-`@sea-storm
-~ Ishbel finds you a boat called the Grace II. It smells of diesel and herring.
-Donnie: North Sea in February? Fine, mostly.
-~ It is not fine. It is not fine for two days.
-mate: I've been sick in three different directions.
-@lighthouse-night
-~ On the third morning a lighthouse comes out of the dark. Lindesnes: the bottom corner of Norway.
-~ The keeper is on the rocks with a lantern. She looks at the Count like an old friend who owes her a tenner.
+// 1 Over the Ice: the Blotmarsh, frozen (The Leech Inn)
+`@lighthouse-night
+~ The lighthouse at the end of the last street is lit, but nobody answers the door. Pinned to it is a note in neat, old-fashioned handwriting.
+~ "Gone to see a man about a light. The Count knows the way. Mind the cold. M."
+mate: She's not even here?
+~ The door swings open on its own. Behind it, the seam. Frost is growing out of the gap like fur.
+@blotmarsh
+~ The Blotmarsh has frozen solid. Black ice to the horizon, with bubbles trapped in it, and reeds snapped off like breadsticks.
+~ Every bubble has a tiny red dot in it. Brett is in there somewhere, under the ice, very cross about it.
+~ The Leech Inn stands on stilts in the middle of it all, smoke coming out of the chimney. Rooms by the hour. The leeches charge by the pint, but in this cold they're all asleep.
+~ The innkeeper is on the steps with a lantern. She looks at the Count the way you'd look at an old friend who owes you a tenner.
 Solveig: The last one came through in 1731. Englishman. Wouldn't get on a horse. I have it in the book.
-~ She does have it in the book. Brown ink: "A walker with a brass thing. Going north. Seemed cheerful."
-Solveig: And this. 1911. "Five walkers with the brass thing. One of them carried the purse."
-Solveig: He had a little moustache and asked if the lighthouse was VAT registered.
+~ She does have it in the book. Brown ink: "A walker with a brass thing. Going down. Seemed cheerful."
+Solveig: And this one. 1911. "Five walkers with the brass thing. One of them carried the purse."
+Solveig: He had a little moustache and asked if the inn was VAT registered.
 mate: Is that...?
-Solveig: I don't know. They never came back down.
-~ It's minus eight. Everything you own is stiff with frost: boots, laces, fingers, plans.
-Solveig: In the cold, everything takes twice as long. Decide where you stand before you set off. Not after.
+Solveig: I don't know. They never came back up.
+~ It's bitter cold. Everything you own is stiff with frost: boots, laces, fingers, plans.
+Solveig: In the cold everything takes twice as long. Swapping places on a narrow path takes an age. Decide where you stand before you set off. Not after.
 ? Solveig asks about Morwenna.
-- "She's... complicated." {s2.complicated}
+- "She's complicated." {s2.complicated}
   Solveig: Keepers usually are. We all made a deal of some kind. Mine was cheaper.
   mate: What was yours?
   Solveig: I sleep through the longest day, every year. Ask me about it in June.
@@ -566,42 +581,68 @@ Solveig: In the cold, everything takes twice as long. Decide where you stand bef
   Solveig: She told you to walk. Was that a lie?
 - "What's in her light?"
   Solveig: The same as in all of ours. A little blue. Just a little. Enough to see by.
-~ Down on the quay, someone is unfolding a customs form. It's very long. It's very cold. He doesn't seem to feel it.`,
+~ Down on the ice, someone is unfolding a customs form. It's very long, and it's very cold, and he doesn't seem to feel it.`,
 
-// 2 The Pulpit — Preikestolen
-`@fjord-ice
-~ Preikestolen: a flat slab of rock sticking out over Lysefjord, six hundred metres up, like the mountain stopped mid-sentence.
-~ In summer there are queues for the photo. In February there's ice. And you.
-~ Halfway up, behind you: a soft, frozen crunch. Then another.
-boss:notification: bzzZT. bzzzZZT. You have... four hundred unread...
-mate: Brett stowed away on the boat!
-~ The cold has turned him into something like a slush puppy. He is furious about it.
-~ He comes at you on the ledge, skidding, and nobody can get out of anybody's way.
+// 2 Glitter: Puffcap Hollow, frozen (Gillwood)
+`@puffcap
+~ In Gillwood the trees are mushrooms, and this winter the mushrooms are wearing icicles.
+~ The orange air has frozen into a fine glitter that hangs in the light and never quite falls.
+~ Halfway through the wood, a soft crunch behind you. Then another.
+boss:autoplay: Are you still watching? Are you STILL watching?
+~ Rory comes out of the frost, bright orange against all that white. It coughs a spore cloud that freezes in the air and comes down like glitter.
+~ It still stings. And where it lands, you feel the pull to sit down in the snow. Just for one more.
+mate: Don't sit down. Don't any of you sit down.
 ? It's chaos on the ice!
 - Everyone hold your places {s2.held}
   you: Stop shuffling! Hold where you are!
-  ~ You stop dodging and plant your feet. Brett skids straight past and lands in a snowdrift with a noise like a dropped trifle.
+  ~ You plant your feet. Rory skids straight past and lands in a drift with a noise like a dropped trifle.
 - Swap places with {mate}
-  ~ You try. In the frost it takes for ever. Brett slimes you both mid-swap with a frozen BZZT.
+  ~ You try. In the frost it takes for ever. Rory glitters you both mid-swap.
   mate: Lesson learned. Plan first.
 ~ The frost doesn't care how fast you are. It cares whether you planned.
-~ At the top, the cloud rolls off the fjord. Black water, white walls, all of it.
-~ Someone takes a photo. It's terrible: a row of red faces and a blur that might be Brett. It goes on the fridge anyway.
-~ Later you zoom in on the blur. Behind Brett, far down the path, someone is standing very still in the snow.
+~ Rory slinks off towards its Burrow to wait for Sunday. You keep going.
+~ At the edge of the wood someone takes a group photo. It's terrible: a row of red faces and an orange blur.
+~ Later you zoom in on the blur. Far behind it, on the path, someone is standing very still in the snow.
 ~ A man in an old-fashioned overcoat. Holding a ledger.
-~ When you look down the path for real, there's nobody there.`,
+~ When you look back down the path for real, there's nobody there.`,
 
-// 3 Two Hundred Days of Rain — Bergen
-`@harbour
-~ Bergen gets rain more than two hundred days a year. Today it's sleet. The locals call this a nice change.
-~ The old wharf at Bryggen: leaning wooden warehouses, propping each other up like the end of a good night.
-Clerk (Shipping clerk): This office has been open since the Hanseatic merchants. Here. 1731.
-~ Under Holloway's name, in the payment column, someone has written: Steps. Many.
+// 3 No Signal: the Hushfrost Reach (The Shivering Stones)
+`@hushfrost
+~ The Hushfrost Reach in deep winter. There's no phone signal. There never is in here, but this time nobody has brought a spare battery either.
+~ For the first hour this feels like an emergency. By the second hour nobody mentions it.
+~ By the third, {mate} is telling a story they've been saving for fifteen years.
+mate: ...and that's why I'm not allowed back in the soft play.
+~ It's the best thing you've heard all week.
+~ The Shivering Stones stand in a circle on the ice. Five of them. You count them on the way past, out of habit.
+!dark
+~ Wisp finds you in the middle of the circle. The cold comes with it.
+boss:leftonread: ...seen.
+~ It tries what it always tries. The guilt. The unanswered messages.
+~ But there's no signal. Nothing buzzes. You're all just here, together, in the snow.
+? Wisp hovers between the stones, confused.
+- Say hello to it {s2.hello}
+  you: Hello, Wisp.
+  ~ It flinches, like nobody has spoken to it in a very long time.
+- Wave it off
+  ~ You wave. It doesn't go. It just watches, like someone at a window.
+boss:leftonread: ...wait...
+mate: Did it just talk?
+boss:leftonread: ...wait for me...
+!light
+~ Then it fades into the ice and the cold goes with it.
+~ An ice-cutter is working at the edge of the circle, sawing blocks. He doesn't look up.
+Local (An ice-cutter): The ghost? Been here years. Always says the same thing. We just say sorry and keep walking.
+~ On the way out you count the stones again. Six.`,
+
+// 4 Form B12: the Spindrift Isles (The Weathervane)
+`@spindrift
+~ The Weathervane is an island with a tower on it, and a vane on the tower that points every way at once. Very helpful.
+~ At the foot of the tower, a brass plate has been screwed to the door. OFFICE FOR THE REGISTRATION OF FOREIGN WALKING.
 @office
-~ Next door, the Taxman has rented an office by the month. The sign says: Office for the Registration of Foreign Walking.
-Taxman: You are importing a pedometer. And, I'd argue, a quantity of steps. Form B12. In triplicate. In Norwegian.
-mate: We met you in Bristol.
-Taxman: I've no recollection of Bristol. Bristol has no recollection of me. It's a very good arrangement.
+~ Inside it's warm and dry and smells of ink. The Taxman has rented the whole ground floor by the month.
+Taxman: You are importing a pedometer. And, I would argue, a quantity of steps. Form B12. In triplicate.
+mate: We met you on a rope bridge.
+Taxman: I've no recollection of a rope bridge. The rope bridge has no recollection of me. It's a very good arrangement.
 ~ On the shelf behind him are ledgers going back decades. One spine is older than the rest. 1911.
 ? While he's busy stamping...
 - Read the 1911 ledger {s2.ledger}
@@ -611,79 +652,47 @@ Taxman: I've no recollection of Bristol. Bristol has no recollection of me. It's
 - "Ishbel called you Edwin."
   Taxman: Ishbel calls a lot of people a lot of things. Form B12. Sign there.
 - Leave quietly
-  ~ You leave quietly. He doesn't look up. He doesn't need to. He's already written down that you left.
-@harbour
-~ You take the stairs up Mount Fløyen instead of the funicular, partly for the view and partly because he's standing next to the funicular.
-~ From the top, Bergen is all lights and rain. The Count ticks on, steady, like it's never been rained on in its life.
+  ~ You leave quietly. He doesn't look up. He doesn't need to. He has already written down that you left.
+@spindrift
+~ You take the long way off the island, partly for the view and partly because he's standing by the short way.
+~ Out over the islands Gale is spinning, slow and lazy in the cold, waiting for the weekend.
 mate: Five names. Four crossed out.
 you: What happens when you get crossed out?
-~ Below you, a lot of windows are glowing blue. Some of them have been for a very long time.`,
+~ Through a gap in the cloud, far below, you can see the seam, and through the seam a lot of windows glowing blue. Some of them have been glowing for a very long time.`,
 
-// 4 The Navvy Road — Flåm
-`@forest-mist
-~ The Flåm Railway climbs nearly nine hundred metres in twenty kilometres. You aren't on it.
-~ You're on the old navvy road beside it, which the railway builders walked up and down for years.
-~ There's no phone signal. For the first hour this feels like an emergency.
-~ By the second hour nobody mentions it. By the third, {mate} is telling a story they've been saving for fifteen years.
-mate: ...and that's why I'm not allowed back in Weston-super-Mare.
-~ It's the best thing you've heard all week.
-!dark
-~ Wisp finds you by the tunnels. The cold comes with it.
-boss:leftonread: ...seen.
-~ It tries what it tried at Ironbridge. The guilt. The unanswered messages.
-~ But there's no signal. Nothing buzzes. You're all just here, together, in the snow.
-? Wisp hovers in the tunnel mouth, confused.
-- Say hello to it {s2.hello}
-  you: Hello, Wisp.
-  ~ It flinches like nobody has spoken to it in a very long time.
-- Wave it off
-  ~ You wave. It doesn't go. It just watches, like someone at a window.
-boss:leftonread: ...wait...
-mate: Did it just talk?
-boss:leftonread: ...wait for me...
-!light
-~ Then it fades into the tunnel and the cold goes with it.
-~ At the top, at Myrdal, a man in a railway jacket gets you all a coffee without asking.
-Local (Railway man): Lots of walkers come through. Not in February. Not usually with one of those.
-Local (Railway man): The ghost in the tunnel? Been there years. Always says the same thing. We just say sorry and keep walking.`,
-
-// 5 Pull Up the Ladder — Geirangerfjord
-`@fjord-ice
-~ Geirangerfjord in winter. The cruise ships have gone. The Seven Sisters waterfalls have frozen into seven long white beards.
-~ High above the water, on a shelf of rock, is an old farm called Skageflå. A ranger tells you the story.
-Ranger: The path up was so steep the last bit needed a ladder.
-Ranger: When the tax collector came round, the family pulled the ladder up.
-~ You look at each other. You look down at the jetty.
-~ A small figure with a clipboard is shouting up at the cliff.
-Taxman: This is a formal notice of assessment! I can see you!
-? There's a rope on the steep bit of the path.
-- Pull up the rope {s2.rope}
-  ~ You pull it up. It's the best afternoon of the season.
-  Taxman: I'll be adding this to your file!
-  mate: We'd be disappointed if you didn't.
-- Leave it down. Let him climb.
-  ~ You leave it. He looks at the rope. He looks at his shoes. He doesn't climb.
-  ~ For a second he looks like a man who used to be good at this.
+// 5 An Apology: the Lowmost Deep (Glowmouth Reef)
+`@lowmost
+~ This winter the Lowmost Deep has a lid on it. The top of the sea has frozen, and the light comes down through the ice green and thin.
+~ At Glowmouth Reef the coral glows. So do the teeth.
 !shake
-~ On the way down, Rory finds you. Bright orange against all that white.
-boss:autoplay: Are you still watching? Are you STILL watching?
-~ It coughs a spore cloud that freezes in the air and comes down like glitter. It still stings.
-~ Where the glitter lands, you feel the pull to sit down in the snow. Just for one more.
-mate: Don't sit down. Don't any of you sit down.
-~ You fight it on the shore, carefully, one step at a time, frozen falls behind you, until Rory backs off into the trees.
-Ranger: The farm family? Long gone. Moved down to the town in the end.
-Ranger: Funny thing. They pulled that ladder up for two hundred years and nobody ever called them lazy.`,
+~ The Kraken comes up out of the reef bigger than it ever looked, and takes hold of the shelf you're standing on.
+boss:kraken: You came into my Deep last winter. All of you at once. Nobody does that.
+boss:kraken: I would like an apology.
+? The Kraken wants an apology.
+- "Sorry." {s2.sorry}
+  you: Sorry.
+  ~ The Kraken blinks. Nobody has ever said sorry to it. It doesn't know what to do with sorry.
+  boss:kraken: ...Accepted. I am still going to eat you on Sunday.
+- "No."
+  you: No.
+  boss:kraken: Fine. Sunday, then.
+~ It lets go of the shelf, but slowly, and the whole reef shudders.
+~ The frost has got in down here too. Nobody can move quickly. You stay braced where you stand until the reef stops shaking.
+~ A diver in a brass helmet watches all this from behind a rock. Afterwards he comes out and shakes everyone's hand very formally.
+Local (A diver): I've been down here since 1896. I've never seen anybody talk back to it.
+Local (A diver): There was a squad in 1911 who tried. Five of them. One kept asking the Kraken for a receipt.
+mate: Did it give him one?
+Local (A diver): It did, as it happens. I think it was so surprised.`,
 
-// 6 The Troll Road — Trollstigen
-`@glen-snow
-~ Trollstigen is a mountain road with eleven hairpin bends. It's shut all winter. You walk up it anyway, on snowshoes.
-~ The road signs warn about trolls. You hope that's a joke.
+// 6 NO: the Misrendered Realm (Duplicate Hill)
+`@misrendered
+~ There are two of Duplicate Hill. Both insist they're the real one. You climb the one on the left, which seems more sincere.
+~ The Misrendered Realm has frozen too, in its way. The snow comes down in squares.
 !shake
 ~ Halfway up, boulders start coming down. Not falling. Thrown.
-~ On the ridge above is a big blue shape with a club.
+~ On the top of the other hill is a big blue shape with a club.
 boss:algorithm: STOP.
-mate: For once the old stories and the real thing are the same. A troll on the mountain.
-~ Grimm doesn't come down. He doesn't need to. The cold does his work for him.
+~ Grimm doesn't come over. He doesn't need to. The cold does his work for him.
 ~ Every time someone tries to dodge, their boots skate, and swapping places takes an age.
 ? Boulders incoming!
 - Go up in a line, no swapping {s2.line}
@@ -691,181 +700,160 @@ mate: For once the old stories and the real thing are the same. A troll on the m
 - Scatter!
   ~ You scatter. Everyone skids. It takes ten minutes to get back in order, and Grimm gets three good throws in.
   ~ Lesson learned, painfully: decide where you stand before you set off.
-~ At the top there's a viewing platform hanging out over nothing.
-~ On the rail, scratched in the frost, is the word from Hadrian's Wall, in the same neat capitals: STOP.
+~ The boulders aren't even real boulders. When they land they turn into flat grey pictures of boulders and fade.
+~ At the top there's a stone with a word on it in the neat blue capitals you know: STOP.
 ~ Underneath, in a different hand: NO.
 ~ Next to the NO, tiny initials. E.T. And a date. 1911.
-you: E.T....
+you: E.T.
 mate: Edwin Tally. The Taxman wrote NO at Grimm. In 1911.
 you: So whose side was he on?
-~ The wind takes the frost off the rail while you watch, and both words go with it.`,
+~ On the other hill, Grimm stands very still, looking at the NO. Then the snow comes down in squares and you can't see either of them.`,
 
-// 7 Pilgrims — Trondheim
-`@city-night
-~ For a thousand years pilgrims walked to Trondheim, to the tomb of St Olav. The paths are still marked.
+// 7 Pilgrims: the Gilded Void (The Comet's Tail)
+`@gildedvoid
+~ The Comet's Tail is a long ribbon of ice and light streaking through the Void. You can hitch a lift, as long as you let go before it reaches the sun.
+~ There's a stop halfway along with a little wooden hut and a man with a stamp.
 Trond: Pilgrim passports! Stamp, stamp. And the backs of your hands. Stamp.
 Trond: For the ones who walk without a reason. They're my favourite. They tend to find one.
-~ The Taxman has come too. He has a plan to charge pilgrim dues, backdated to 1031.
-Taxman: With interest, that comes to roughly the economy of Belgium.
+~ The Taxman has come too. He has a plan to charge pilgrim dues, backdated three hundred years.
+Taxman: With interest it comes to roughly the contents of Vex's hoard.
 ~ Trond listens to all of it, nods, and hands him a pilgrim passport.
-Trond: Walk to the next church and I'll stamp it.
+Trond: Walk to the next stop and I'll stamp it.
 ~ The Taxman looks at the passport for a long time.
 ? Say something to him?
 - "You used to walk, didn't you?" {s2.kind}
   you: You used to walk. Didn't you? In 1911.
   Taxman: In 1911 I was a treasurer. Treasurers carry the purse, not the pedometer.
-  Taxman: We walked from Lindesnes. Thirteen weeks. It was very cold. Mabel sang the whole way. Badly.
-  ~ He stops, like he's said far too much.
-- "Go on. One church."
-  Taxman: One church is how it starts. Then it's two. Then you're at Nordkapp in a blizzard with four people who trusted you.
-  ~ He stops, like he's said far too much.
-- Say nothing
-  ~ You say nothing. Trond says nothing. Pilgrims are good at silences.
-~ Then he puts the passport in his inside pocket and leaves.
-~ That night the frost lifts for a few hours and everything turns to slush. Slush, it turns out, is worse.
-~ The Count doesn't mind. It's halfway up Norway and ticking like it knows something.
-mate: Four people who trusted him.
-you: Four names crossed out.`,
+  Taxman: We walked from the lighthouse at the end of a street not unlike yours. Thirteen weeks. It was very cold. Mabel sang the whole way. Badly.
+  ~ He stops, as if he's said far too much.
+- "Go on. One stop."
+  you: Go on. It's one stop.
+  Taxman: I don't walk. I audit walking.
+  ~ But he puts the passport in his inside pocket, not the bin.
+~ Far out in the Void, something huge turns over on a mountain of gold, and every coin chimes at once.
+boss:dragon: Every hour you gave me, I kept.
+~ Vex doesn't come. The cold is too much even for her. Her fire comes out as steam.
+~ When you let go of the comet, the Taxman is still standing at Trond's hut, looking down the ice at the next stop.`,
 
-// 8 The Hole in the Mountain — Torghatten
-`@rock-arch
-~ Torghatten is a mountain with a hole straight through it. A troll fired an arrow at a girl, a king threw his hat in the way, and the hat turned to stone.
-~ The geologists have a different explanation. It's less fun.
-~ You walk into the hole. Wind comes with you. Then a lot more wind. Then Gale.
-boss:scroll: Just one more. Just one more. Just one more. Just one m—
-mate: It's using the hole like a straw!
-~ Inside a mountain there's nowhere to be blown to. Gale howls and shoves and gets nowhere.
-~ The frost has your boots stuck fast. You've stopped trying to move. You just hold your rows and hit back.
-? Gale is spinning itself dizzy.
-- Count the hits out loud {s2.counted}
-  ~ You count every hit together, out loud. Gale hates being counted. It loses its rhythm completely.
-- Wait it out
-  ~ You wait. Gale doesn't. Gale never does. Eventually it scrolls itself out the far side and into the sea.
-~ Out the other side, the sun's out. Low and orange, over a sea full of islands.
-~ It's the first warm light in weeks.
-mate: Spring?
-you: Don't jinx it.
-~ On a rock at the mouth of the hole, someone has left five stones. Four in a row. One set a little apart.
-~ They're old. Moss on the four. None at all on the one.`,
+// 8 Pull Up the Planks: the Blotmarsh, deeper (Sallowmere)
+`@blotmarsh
+~ Past Brett's Wallow there's a village on stilts called Sallowmere, out in the middle of the frozen bog, joined to the bank by a long walk of planks.
+~ A bog-wife tells you the story while she knits something that might be a sock or might be a net.
+Local (A bog-wife): When the tax collector came round, we pulled up the planks.
+~ You look at each other. You look back down the walk. A small figure with a clipboard is shouting from the bank.
+Taxman: This is a formal notice of assessment! I can see you!
+? The planks lift up easily.
+- Pull up the planks {s2.planks}
+  ~ You pull them up. It's the best afternoon of the season.
+  Taxman: I'll be adding this to your file!
+  mate: We'd be disappointed if you didn't.
+- Leave them down. Let him walk.
+  ~ You leave them. He looks at the planks. He looks at his shoes. He doesn't walk.
+  ~ For a second he looks like a man who used to be good at this.
+~ Under the last plank, frozen into the mud, there's a photograph in a tin frame.
+~ A few people in wool, roped together, standing in a line on the ice. The one in the middle is holding something brass and round.
+~ Written on the back: Unknown walkers. 1911. Destination not recorded.
+~ Four of them are smiling. The one at the end, with a little moustache, is looking at the camera like it owes him money.
+Local (A bog-wife): Him on the end came back through, years later. On his own. Never pulled up a plank since.`,
 
-// 9 The Circle — Arctic Circle
-`@snowfield
-~ The Arctic Circle crosses Norway on a bare plateau called Saltfjellet.
-~ There's a visitor centre, a globe on a pole, and hundreds of little stone cairns left by travellers.
-~ You build one too. It isn't very good. {mate} puts a boiled sweet on top, which seems right.
-@aurora
-~ That night the sky goes green. The northern lights pour across it in great slow curtains.
-~ The Count's glass glows the same colour. Nobody says anything for a long time.
-~ Wisp is out there in the green light, keeping its distance. It doesn't attack. It watches the sky with you.
-~ Like someone who didn't get invited, but came anyway.
-? Wisp is close enough to talk to.
-- Ask who it's waiting for {s2.askedwisp}
-  you: Who are you waiting for?
-  boss:leftonread: ...he said he'd come back...
-  boss:leftonread: ...he said don't stop... so I didn't stop... and then I couldn't keep up...
-- Offer it a boiled sweet
-  ~ You hold one out. Wisp drifts closer, then stops, like it's forgotten how hands work.
-- Leave it be
-  ~ You leave it be. Some things just want company, not conversation.
-~ When you look again, it's gone. The green fades. You're north of the Circle.
-~ In the morning there's frost writing on the inside of the tent.
-~ It says: TELL HIM I WAITED.
-mate: Tell who?
-~ The Count, in your hand, ticks once out of rhythm. Like a flinch.`,
-
-// 10 The Maelstrom — Lofoten
-`@harbour
-~ Lofoten: a row of mountains standing in the sea. Red huts on stilts. Every rack hung with drying cod, like very bad bunting.
-~ Between the islands runs the Moskstraumen. The original maelstrom.
-mate: Kraken's a Norwegian word, isn't it?
-~ It is. You hadn't thought about what that meant.
-@sea-storm
+// 9 The Argument: Puffcap Hollow, deeper (The Sleeping Orchard)
+`@puffcap
+~ The Sleeping Orchard is deep in Puffcap Hollow: rows of mushroom trees, each one with a person asleep at the foot of it, smiling.
+~ You walk down the rows on tiptoe. Nobody wakes. The spores here smell of warm toast.
+~ At the end of the orchard two shapes are arguing. One is large and blue. One has a clipboard.
+Taxman: Stopped somewhere I can tax it. That was the arrangement.
+boss:algorithm (Grimm): Stopped. Anywhere.
+Taxman: You'd have the whole world sat in an orchard.
+boss:algorithm (Grimm): Yes.
+Taxman: Where's the revenue in that?
+~ Neither of them notices you. Then Grimm says something very quietly, and the Taxman goes white.
+boss:algorithm (Grimm): Four of them, Edwin. Still warm. Still waiting. Do you want them waiting for ever?
+~ The Taxman doesn't answer. He turns and walks off between the trees, fast, and doesn't look back.
 !shake
-~ The Kraken is home. It comes up through the whirlpool bigger than it ever looked in Loch Ness, and takes the ferry by the bow.
-boss:kraken: You. Scotland. You owe me an apology.
-mate: You nicked our pedometer!
-boss:kraken: I BORROWED it. Down here everybody borrows. Nobody ever gives back.
-? The Kraken wants an apology.
-- Apologise {s2.sorry}
-  you: Sorry. We shouldn't have jumped on your head.
-  boss:kraken: ...
-  boss:kraken: Nobody has ever said sorry to me. They just scroll past.
-  ~ It's so surprised it nearly lets go. Nearly.
-- Refuse
-  you: Not a chance.
-  boss:kraken: Then we do this the deep way.
-~ You fight it on the heaving deck, everyone braced where they stand. Nobody can cross that deck quickly in the frost.
-~ In the end it lets go, sulks and sinks.
-Skipper: Seen worse.
-~ He has not seen worse.
-~ As the whirlpool closes, you see down it for a second. Blue light. Faces.
-~ And four of them, together, in old wool coats, looking up.`,
+~ And Rory comes up out of the orchard floor, spores pouring off it, every sleeper sighing at once.
+boss:autoplay: Because you watched "Sitting Down", you might like "Sitting Down 2".
+? Rory is right there.
+- Wake the nearest sleeper {s2.woke}
+  ~ You shake a woman awake. She blinks at you, says "What year is it?", and runs. Rory sags, like it's lost a viewer.
+- Back away carefully
+  ~ You back away down the rows, step by step. Rory doesn't follow. It just settles among the sleepers to wait for Sunday.
+mate: Four of them. Still warm.
+you: The four names in the ledger.`,
 
-// 11 Unknown Walkers — Tromsø
-`@city-night
-~ Tromsø: the gateway to the Arctic. Amundsen left from here, and Nansen, and a lot of men in beards.
-~ There's a polar museum full of their sledges, and their mistakes.
-~ In a case about expeditions that never came back, there's a photograph from 1911.
-~ Five people in wool, on skis, in a line. The one in the middle holds something brass and round.
-~ The caption: Unknown walkers. Destination not recorded.
-mate: {you}. Look at the one on the end.
-~ Little moustache. Ledger under one arm. Not a day younger than he is now.
-!glitch
-~ The thaw has started. Water runs under the snow in every street.
-~ Outside the Arctic Cathedral, the Taxman and Grimm are arguing. Neither of them notices you.
-Taxman: Stop it somewhere I can tax it. That was the arrangement.
-boss:algorithm: STOP IT.
-Taxman: Stopping isn't the same as keeping, you great blue—
-boss:algorithm: YOU STOPPED.
-~ The Taxman goes very quiet.
-? Do you step in?
-- Step in {s2.stepin}
-  you: Leave him alone.
-  ~ Both of them turn and look at you. It is not a nice feeling.
-  Taxman: Kind. Misguided. But kind.
-  ~ Grimm walks off down the hill. Each footprint he leaves is frosted in the shape of a STOP sign.
-- Slip past
-  ~ You slip past. Neither of them notices. Which, you realise later, is the scariest bit.
-mate: They're falling out. That's good, right?
-you: That's what people always say. Right before they make up.`,
+// 10 Kept Nice and Warm: the Hushfrost Reach, deeper (The Snow Shelter)
+`@hushfrost
+~ Past Wisp's Hollow, a long way down, the Count leads you to a shelter dug into a snowdrift. There's light inside. Warm, yellow light.
+~ You crawl in. It's cosy. It's horribly cosy.
+~ Four people are sitting round a little stove that gives no heat, in wool and scarves from a hundred years ago. Their eyes are shut. Their breath steams. They're perfectly still.
+~ One of them, a woman with a round face, has knitting in her lap. The needles have been halfway through the same stitch for a very long time.
+mate: The 1911 squad.
+~ There's a gap in the circle, about one person wide. Someone used to sit there.
+~ On the stove there's a tin box. Inside is a receipt: Four walkers, kept warm. Paid in full, nightly.
+~ Then a voice from the doorway, very quiet, not at all like him.
+Taxman: Don't wake them.
+~ He's standing in the entrance with snow on his bowler hat. He doesn't come in.
+Taxman: If they wake in here, they fade. If they stay asleep, they keep. That's the arrangement.
+? The Taxman is waiting for you to leave.
+- "Is that Mabel?" {s2.mabel}
+  you: Is that Mabel?
+  Taxman: She sang the whole way. Badly. She never once stopped singing until she stopped.
+  Taxman: Arthur. Ruth. Sidney. Mabel. Out, please. It's draughty with the door open.
+- Leave without a word
+  ~ You crawl out without a word. As you go past him he takes his hat off, which you've never seen him do.
+~ Outside the snow is coming down hard. When you look back, the shelter's light has gone out.
+~ The Taxman is still standing by it, perfectly still, as if he's waiting to be told he can go.`,
 
-// 12 The Carvings — Alta
-`@snowfield
-~ At Alta there are rock carvings six thousand years old: reindeer, boats, bears. And people. Lots of little people, walking in lines.
-Maret: Everyone asks about this one.
-~ A line of figures walking close together. One of them holds up something round.
-Maret: We say it's the sun.
-~ She looks at the Count.
-Maret: People have always walked in lines. And somebody always carries the thing that keeps time.
-Maret: And look. There's always one just here, standing apart. Holding something square.
-mate: A ledger.
-Maret: We've always called him the Counter. He never walks. He just counts the ones who do.
-@midnight-sun
-~ Up on the plateau the snow is going soft, and the light lasts until nearly midnight.
-!flash
-~ Vex comes out of it low and fast, breathing fire across the snowfield.
-boss:dragon: I have six thousand years of your hours. I'd like six thousand more.
-~ The snow becomes steam. The steam becomes fog. For a while it's like being back in Cornwall.
-? Vex circles round for another pass!
-- Stand together {s2.stood}
-  ~ You stand together. The Count goes so hot it hurts. Vex veers off at the last moment, like it touched a stove.
-- Dive into the snow
-  ~ You dive. The fire passes over. When you come up, you're all steaming like puddings.
-~ It's a long fight. When it's over, half the plateau has melted.
-Local (Reindeer herder): Well. That's spring sorted, then.
-~ Vex flies north, ahead of you. Towards the top of the map, where a folding table is waiting.`,
+// 11 The Carvings: the Spindrift Isles, deeper (Gyre Harbour)
+`@spindrift
+~ Gyre Harbour is the last island before the islands start going round each other in slow circles. Its rocks are covered in carvings, very old: boats, birds, and people.
+~ Lots of people, drawn as little stick figures, walking in lines across the rock.
+Guide (A carver): Everyone asks about that one.
+~ A line of figures walking close together, and one of them holding up something round.
+Guide (A carver): We say it's the sun. People have always walked in lines. And somebody always carries the thing that keeps time.
+~ Next to it, much newer, much smaller, five figures roped together. Four with smiles scratched on. One with a little moustache.
+!shake
+~ Gale comes round the harbour wall like a slammed door.
+boss:scroll: Refresh. Refresh. Refresh.
+~ In the frost Gale can't shove you about so easily. Your boots are stuck fast and you've stopped trying to move.
+? Gale is howling at the harbour.
+- Hold your rows and hit back {s2.rows}
+  ~ You hold your rows. Gale howls and shoves and gets nowhere, then spins off to sulk in its Spindle.
+- Get behind the harbour wall
+  ~ You duck behind the wall. Gale screams over the top for an hour, then gets bored. Wind always gets bored.
+~ On the way out you pass the Taxman, sitting on a bollard, writing in the pilgrim passport.
+~ It has two stamps in it now. He sees you looking and puts it away very quickly.`,
 
-// 13 The Top of the Map — Nordkapp
-`@road-night
-~ Nordkapp: a cliff at the top of Europe with a steel globe on it. To reach it, you walk through a tunnel under the sea.
-~ There used to be a toll on the tunnel. They scrapped it in 2012. The Taxman has brought it back, unofficially, with a folding table.
+// 12 The Maelstrom Stair: the Lowmost Deep, deeper
+`@lowmost
+~ The Maelstrom Stair is a whirlpool that goes down like a staircase, round and round, into the dark. The water's frozen at the edges into steps.
+~ One more week. The end of the season is close enough to taste, and it tastes of salt.
+~ The Taxman is walking with you. Not in front, not behind. Alongside, with his clipboard tucked under his arm.
+Taxman: Purely for audit purposes.
+mate: You've done eleven thousand steps today.
+~ He looks horrified. Then, for just a second, rather proud.
+!shake
+~ The Kraken is coiled round the bottom of the Stair, in the eye of the whirlpool.
+boss:kraken: The bottom of the feed is very comfortable. Nobody ever leaves.
+? The Stair is narrow and the frost has everything stiff.
+- Go down in order, one by one {s2.order}
+  ~ You go down in the order you planned. Nobody swaps. Every tentacle misses by inches.
+- Let the Taxman go first
+  ~ The Taxman goes first, clipboard raised like a shield. The Kraken takes one look at it and retreats, as if it's seen a lot of clipboards and none of them were good news.
+~ At the bottom there's a ledge with a view straight down into the black.
+~ The Taxman looks down it for a long time.
+Taxman: Next week, the last tollgate. I'll be there. I'm always there. It's the one thing I'm good at.`,
+
+// 13 The Last Tollgate: the Misrendered Realm, deeper
+`@misrendered
+~ The Last Tollgate stands at the far end of the Misrendered Realm, where the road just stops and the world is a grey chequered nothing.
+~ The Taxman has set up a folding table in front of it.
 Taxman: Steps, please. Exact change.
 ~ You're too tired to argue. It's only steps, and he looks so pleased.
-~ He counts them twice and writes you a receipt. Sticking out of his top pocket: the pilgrim passport. One stamp.
+~ He counts them twice and writes you a receipt. Sticking out of his top pocket: the pilgrim passport.
 ? This is your chance.
 - "Tell us about 1911, Edwin." {s2.truth}
   ~ He puts his pen down. It's the first time you've ever seen him not holding it.
-  Taxman: Nordkapp. Thirteenth week. A blizzard. Mabel said we should wait it out in the shelter. Just for the night.
+  Taxman: The thirteenth week. A blizzard in the Hushfrost. Mabel said we should wait it out in the shelter. Just for the night.
   Taxman: Four of them sat down. I was standing up, counting the money, when it came out of the snow-glare.
   Taxman: It offered terms. I've always been good at terms.
   mate: What terms?
@@ -875,589 +863,445 @@ Taxman: Steps, please. Exact change.
   Taxman: It's paperwork. Paperwork is how monstrous things get done politely.
 - "Why do you still carry that passport?"
   Taxman: Sentimental value. I'm told I have some. It's in a drawer somewhere.
-  Taxman: Four people sat down in a blizzard at the top of this cliff in 1911. I was standing up, counting the money.
+  Taxman: Four people sat down in a blizzard in 1911. I was standing up, counting the money.
   Taxman: I'm still counting.
-@signpost-dawn
-~ At the globe, at the very edge of the cliff, the Count chimes. Thirteen times, one for every week, out over the Barents Sea.
+~ The Count chimes. Thirteen times, one for every week, out over the grey nothing.
 ~ The Taxman flinches at every one. On the ninth, you'd swear he mouths a name.
-~ The sun goes down late and pink and barely bothers. In a fortnight it won't set at all.
-~ When the chimes stop, the needle has swung. Not north. There's no north left.
-~ It points south and east. Inland, over the mountains, towards Sweden and the Gulf of Bothnia.
+@town-glow
+~ Back home the windows go out one by one, blue to dark, and then, here and there, a warm yellow lamp.
+@misrendered
+~ When the chimes stop, the needle has swung. It points back the way you came, and down, towards the Hushfrost. Towards something small and cold, waiting.
 ~ Ishbel sends a text. Nobody knew she had a phone.
-Ishbel (Ishbel, by text): Further.
-Ishbel (Ishbel, by text): Wear sun cream. And keep counting heads. Up there in summer, the numbers go funny.`,
+Ishbel (Ishbel, by text): Deeper.
+Ishbel (Ishbel, by text): And keep counting heads. Next season the numbers go funny.`,
 ];
 
-// ---------- SEASON 3: Sun Over the Gulf (round the Gulf of Bothnia to Tallinn) ----------
+// ---------- SEASON 3: Wait for Me (everything faster; Kit, left on the ice in 1732) ----------
 const S3 = [
-// 1 The Ore Line — Abisko
-`@midnight-sun
-~ From Nordkapp you take the bus to Narvik. That's cheating. But the Count only counts walking, so it doesn't count. It knows.
-~ From Narvik you walk: up the old navvy road beside the iron-ore railway, over the mountains into Sweden.
-~ Every hour a train goes by. Two kilometres of rust-red wagons.
-~ Abisko: a research station, a hostel, and a lake that's still frozen in May.
-Ingrid: I've measured the snow here every day for forty-one years. Hold still.
-~ She measures you too, out of habit.
-Ingrid: Fast. Noted.
-~ It's eleven at night and broad daylight. Nobody's tired. Nobody can sleep, either.
-~ The Count is ticking faster than it ever did in Britain. So is everything: the birds, the meltwater, your heart.
-Ingrid: The sun does that up here. Everything has ten weeks to do a year's work. So everything hurries.
-Ingrid: Whatever's following you will be quicker this summer. So will what you win for beating it.
-~ She counts you, pencil tapping the air.
-? Ingrid: How many of you are there?
-- Count everyone properly {s3.counted}
-  ~ You count. You get the right number. Ingrid frowns.
-  Ingrid: I got one more.
-- "All of us."
-  Ingrid: That's not a number. I'll put down one more than I can see. Up here, it's usually right.
-~ She writes it down, and underlines it.
-mate: Why would there be one more?
-Ingrid: White nights. Sometimes the light gets in the gaps between people.
-~ That night nobody sleeps. Somebody swears they hear footsteps outside the hostel, keeping pace with nobody.`,
-
-// 2 The Town That Moved — Kiruna
-`@town-day
-~ Kiruna is moving. The iron mine underneath has grown so big the ground is giving way.
-~ So the whole town is being picked up and put down three kilometres east. In 2025 they moved the church in one piece, on a lorry, at walking pace.
-~ You walk beside a yellow wooden house on its way to its new street. The owner's still in it, making coffee. She waves.
-~ At the edge of the new town: the Taxman, with a sign. STAMP DUTY: MOVING HOUSE.
-Taxman: You're changing address. That's a transaction.
-~ A crowd of retired miners explains to him, at length, that the houses didn't ask to move.
-~ He looks shaken. It's the first time you've seen anyone out-argue him.
-? The miners look at you.
-- Join in {s3.joined}
-  you: And the house is walking. Walking's exempt. Section one.
-  Taxman: There is no section one.
-  mate: There is now.
-- Watch
-  ~ You watch. It's better than television. That's rather the point.
-~ In the old town, the streets are fenced off and empty. Something wet and round is living in an abandoned shop.
-boss:notification: BZT-BZT-BZT-BZT-BZT—
-mate: He's faster! He's buzzing in double time!
-~ Brett got here first. Everything's quicker up here. You see him off between the fences, in full sunshine, at ten past midnight.
-~ Afterwards, in the dark shop window, you catch the squad's reflection.
-~ You count it twice. There's one more of you in the glass than there is on the pavement.
-~ A thin figure at the back. Old-fashioned coat. Too short in the sleeves.
-~ You turn round. Nobody. Just the town, moving.`,
-
-// 3 Midges — Jokkmokk
-`@lake-mist
-~ Jokkmokk is the heart of Sámi Sweden. Its winter market has run every February for over four hundred years.
-~ Just south of town you cross the Arctic Circle again, southbound. It feels like going downhill.
-~ It's nearly June. The midges have arrived. They come in clouds. They get in your ears.
+// 1 The Quick Season: the Blotmarsh (Hangman's Willow)
+`@the-seam
+~ This season the seam opens before you've even reached the lighthouse door. It's waiting for you at the end of the street, flapping like a curtain in a draught.
+~ Everything is in a hurry. Your watch runs fast. The Count ticks double-time, like a heart after stairs.
+@blotmarsh
+~ Hangman's Willow stands at the edge of the Blotmarsh. Nobody was ever hanged here. The tree just looks like that.
+~ Under it, a woman in a bobble hat is crouched by the water with a stopwatch and a notebook.
+Ingrid: Forty-one years I've been timing the marsh. It breathes, you know. In, out. Every bubble is a breath.
+Ingrid: This year it's breathing twice as fast. Everything is. Whatever's down there will be quicker this season.
+Ingrid: So will what you get for beating it. It works both ways. Most things do.
+~ She measures you too, out of habit. She clicks the stopwatch and writes it down.
+Ingrid: Fast.
 !shake
-boss:autoplay: Skip intro? Skip intro? SKIP INTRO?
-~ Rory has caught up. It coughs a spore cloud, and the midges fly straight into it.
-~ For one beautiful minute, the two problems cancel each other out.
+~ Brett comes up out of the marsh twice as quick as you remember, bouncing like a dropped jelly.
+boss:notification: BZZT BZZT BZZT. You have a new... you have another new... you have...
+? Brett's too fast to dodge!
+- Stand still and let him bounce off {s3.still}
+  ~ You stand together, perfectly still. Brett hits the wall of you at full speed and goes flying back into the reeds.
+- Run!
+  ~ You run. He's faster. He slimes the back of everyone's coat on the way past, buzzing happily.
+~ That night, in the tent, nobody can sleep. Everything outside is going too fast: the frogs, the bubbles, the clouds.
+~ In the morning there's frost on the glass of the Count, though it wasn't cold.
+~ A small handprint. A child's. From the inside.`,
+
+// 2 The Button: Puffcap Hollow (The Puffball Fields)
+`@puffcap
+~ The Puffball Fields: every step sends up a cloud, and every cloud makes you sneeze. This season the puffballs are going off like popcorn.
+~ Rory has caught up with you, quicker than ever, bounding across the field in great orange leaps.
+boss:autoplay: Skip intro? Skip intro? Skip intro?
+~ When it coughs out a spore cloud the puffballs all go off at once, and for one beautiful minute the two clouds cancel each other out.
 ~ Then they don't, and you have both.
-? Midges AND spores!
-- Slap and fight {s3.slap}
-  ~ You fight Rory by a lake in the light that never ends, slapping your own necks between hits.
-- Run for the lake
-  ~ You run in up to your knees. The midges hate it. Rory hates it more. Orange things don't like cold water.
-~ It's fast. Everything is fast. And you're getting better at fast.
-@town-day
-~ In the town museum there's a brass button in a case. English. Eighteenth century. Found on the old trading path.
-~ The label says: Trader? Traveller?
-~ The Count ticks louder near it. That's either very meaningful or the radiator.
-mate: It's a kid's button. Look how small it is.
-~ Then the glass case fogs up from the inside, as if someone in there just breathed on it.
-~ In the fog, a fingertip writes: MINE.`,
+? Rory is coming round for another go.
+- Keep the rhythm, left, right {s3.rhythm}
+  ~ You walk in step through the clouds, breathing on the count. It's fast, everything's fast, and you're getting better at fast.
+- Hit the dirt
+  ~ You hit the dirt. Puffballs go off all round you. Everyone comes up orange and sneezing, but Rory has bounded past.
+~ When the spores settle, {mate} finds something in a squashed puffball. A brass button.
+~ Old. English. A tiny lantern stamped on it.
+mate: Same lantern as on the Count.
+~ The Count ticks louder when you hold the button near it, like a dog that's heard its name.
+~ On the back of the button someone has scratched two letters, very carefully, the way a child writes. K.P.`,
 
-// 4 The Church Town — Gammelstad
-`@town-day
-~ Gammelstad, outside Luleå: four hundred little red cottages round a stone church.
-~ Nobody lived in them. Families who lived too far away to get home after Sunday service built them to sleep in.
-Guide (Caretaker): Some walked thirty miles to church. Thirty there, thirty back.
-Guide (Caretaker): I suppose you lot can imagine it.
-~ The Taxman has written to the council claiming all four hundred cottages are second homes.
-~ The council has written back. The letter is long and very polite and says no in nine different ways.
-@bothy
-~ You sleep in one of the cottages, all of you in one room, curtains pinned shut against the sun at two in the morning.
-~ Someone snores. Someone laughs at the snoring until everyone's laughing.
-!dark
-~ Later, you wake. Something's wrong with the number of sleeping bags.
-~ There's one more lump than there should be, by the door. Very still. Very cold. The air above it is frosting.
-? You...
-- Whisper "Hello?" {s3.hello}
-  you: ...Hello?
-  Kit (???): ...you didn't wait...
-  ~ Then the lump is just a coat on the floor, and the coat is nobody's.
-- Wake {mate}
-  ~ You shake {mate} awake. By the time they sit up, the lump is just a coat on the floor. Nobody's coat.
-- Pull the covers over your head
-  ~ You pull the covers over your head, which is a perfectly reasonable thing to do.
-  ~ In the morning there's a coat on the floor by the door. Nobody's coat.
-!light
-~ The window has condensation on the inside. Someone has written in it, with one finger.
-~ WAIT FOR ME.
-mate: OK. I'm officially scared.
-~ On the windowsill, the Count ticks along. One beat slow, as if it's waiting too.`,
-
-// 5 Two Clocks — Haparanda-Tornio
-`@town-day
-~ Haparanda is in Sweden. Tornio is in Finland. Really they're one town, with a river and a border down the middle.
-~ Finland is an hour ahead. You can walk out of one shop and into the next and lose an hour on the way.
-~ There's a golf course on the border. Tee off in one country and land in the other, an hour later.
-Taxman: Walkers crossing here lose an hour. I would like to tax it.
-mate: You can't tax an hour that doesn't exist.
-Taxman: Watch me.
-~ He raises his stamp.
+// 3 The Boy in the Ice: the Hushfrost Reach (Icetooth Arch)
+`@hushfrost
+~ Icetooth Arch: icicles the size of lamp posts. Walk under it, not near it.
+~ This season they're dripping. Fast. Everything up here has ten weeks to do a year's work, so everything hurries.
+~ Under the arch the cold gets suddenly worse. Then a voice. Small. Behind you.
+Kit (???): ...you didn't wait...
 !glitch
-!dark
-~ And then you're in it. The lost hour. Between the clocks.
-~ Everything has stopped. Birds hang in the air. The river doesn't move. The Taxman's stamp hangs an inch above the paper.
-~ Only the Count is still ticking. And only you lot are still moving.
-~ No. Not only you.
-~ A boy, maybe fifteen, in a brown coat too short in the sleeves. One brass button missing. Frosted all over, though it's June.
+~ You turn round. There's a boy standing in the arch. About ten. Freckles. Wild red hair. A coat from three hundred years ago and a bag across his chest.
+~ He's frosted all over, like a window in January. You can see the icicles through him.
 Kit (The boy): You can see me. In here, in between, you can see me.
 Kit (The boy): I'm Kit. Kit Penhallow. I was Mr Holloway's apprentice. I carried the bag.
 ? Kit is staring at the Count.
-- "What happened to you?" {s3.kitasked}
+- "What happened to you?" {s3.asked}
   Kit: We crossed the ice at night. Mr Holloway said never stop, whatever happens. The Count won't abide it.
   Kit: I went through. Only up to my knees. I shouted. Nobody turned round.
-- "Come with us." {s3.kitinvited}
+- "Have you been following us?"
   Kit: I've been trying. You're very fast. Everyone's always very fast.
-- Hold out the Count
-  ~ Kit reaches for it. His fingers go straight through. He looks at his hand like it belongs to someone else.
+- Hold out the Count to him {s3.offered}
+  ~ Kit reaches for it. His fingers go straight through. He looks at his hand as if it belongs to someone else.
 Kit: Is he still out there? Mr Holloway? Did he finish?
-!light
-!flash
-~ The hour ends. The birds move. The stamp comes down.
-~ The Count ticks double time to catch up, and by evening it's as if the Taxman never stamped anything.
-~ Kit is gone. On the riverbank where he stood, the grass is white with frost.
-~ You've walked round the top of the Gulf of Bothnia. From here the coast runs south all the way to Helsinki. Light the whole way.`,
+you: We don't know.
+Kit: Oh.
+~ He looks very small. Then the icicles drip, all at once, and Kit is gone.
+~ Where he stood, the ice is white with frost in the shape of two small boots.
+~ You leave the button there for him. When you look back, it's gone.`,
 
-// 6 Nowhere Dark — Oulu
-`@town-day
-~ Oulu is a city of bicycles. People cycle here in minus thirty on studded tyres. In June they're unstoppable.
-~ In the park, a man is practising for the Air Guitar World Championships. Alone. With total commitment.
-~ You watch the whole solo. He nods at you. You nod back. A deal has been made.
-!dark
-~ Wisp hates it here. A ghost needs somewhere dark to fade into, and at the end of June there isn't anywhere.
-boss:leftonread: ...seen... seen... seen...
-~ You catch it at one in the morning in the park. It keeps vanishing, but there's no shadow to vanish into. You can still sort of see it.
-~ And in the full light, you can see what it's made of.
-~ Messages. Thousands of them, faint, layered like frost. "where are you." "are you coming." "please wait." "did you finish."
-mate: {you}... they're all to the same person.
-~ Every unanswered message is addressed to Mr Holloway.
-? Wisp is cornered in the light.
+// 4 Two Clocks: the Spindrift Isles (Kite Rock)
+`@spindrift
+~ Kite Rock is the first island, and this season it's two islands, drifting side by side, an hour apart.
+~ Step off one onto the other and you lose an hour on the way. Step back and you get it back, if you're lucky.
+~ The Taxman is standing on the rope bridge between them with a clipboard.
+Taxman: Walkers crossing here lose an hour. That hour has to go somewhere. I'd like it to go on my books.
+mate: You can't tax an hour that doesn't exist.
+Taxman: Watch me.
+~ He stamps a form with great satisfaction.
+? The Taxman holds out the form.
+- Sign it {s3.signed}
+  ~ You sign it. He looks deeply pleased. Then the Count ticks double-time to catch up the missing hour, and by evening it's as if he never stamped anything.
+  Taxman: That's cheating.
+  you: That's Holloway.
+- Walk round him
+  ~ You walk round him, which on a rope bridge is quite something. He's so surprised he forgets to stamp you.
+~ Gale is spinning between the two islands, faster than you've ever seen it, stirring the hours together like soup.
+boss:scroll: Next! Next! Next! Next!
+~ It doesn't come for you yet. It's busy. But it watches you go.
+~ When you count heads at the far side, everyone's there. And, for a second, one more: a small frosted shape at the very back, waving, an hour behind.`,
+
+// 5 The Cold Patch: the Lowmost Deep (Kelpwood)
+`@lowmost
+~ Kelpwood: long dark weed swaying in the current. Keep your ankles to yourself.
+~ A cold patch follows you in. It stays a few steps behind the last of you, all day, never closer, never further.
+~ Then, in the middle of the wood, the water goes very dark and very warm, and something enormous uncurls.
+boss:kraken: Come down. Just for a look. Just for an hour.
+!shake
+~ And between you and the Kraken, the cold patch thickens into a shape. Pale. Thin. Hanging in the water like breath.
+boss:leftonread: ...seen...
+~ Wisp. Here. Down in the Deep, between you and the thing with all the arms.
+? Wisp is shielding you. Or it's in the way. It's hard to tell.
 - Call it Kit {s3.named}
   you: Kit?
-  ~ Wisp stops. For a second the cold shape has a face. Fifteen. Freckled. Frightened.
+  ~ Wisp goes very still.
   boss:leftonread (Kit): ...nobody says my name...
-- Fight it
-  ~ You fight it in the sunshine. It isn't much of a fight. It keeps looking past you, down the road, as if it's expecting someone.
-!light
-~ Afterwards it hangs about at the edge of the park, looking sorry for itself.
-~ {mate} offers it a bit of sandwich. It doesn't take it. It doesn't leave, either.
-mate: So Wisp is Kit. Or Kit is Wisp. Or Wisp is what happens to Kit if you leave him on read for three hundred years.
-you: The Stillness keeps what stops.
-mate: He didn't stop. He got left.
-~ Nobody has anything to say to that.`,
+  ~ The Kraken pulls back, confused. It has never seen Wisp do anything for anybody.
+- Stay behind it
+  ~ You stay behind it. The Kraken lashes out, hits the cold, and recoils, as if it's touched a frozen window.
+~ When the water clears, Wisp is gone, and the Kraken has gone back down to its Throat to sulk.
+mate: So Wisp is Kit. Or Kit is Wisp.
+you: Or Wisp is what happens to Kit if you leave him on read for three hundred years.
+~ That night, nobody wants to be the last in the line. You walk in a clump instead, everyone touching someone's sleeve.`,
 
-// 7 Sand — Kalajoki
-`@beach
-~ Kalajoki has dunes and a long beach and the shallowest sea you've ever walked into.
-~ You go in up to your knees and keep going for half a mile. Still only up to your knees.
+// 6 He Didn't Finish: the Misrendered Realm (The Upside Down Inn)
+`@misrendered
+~ The Upside Down Inn. Breakfast is served on the ceiling. Mind the soup.
+~ It's a copy of an old coaching inn, done badly, and the ledger on the front desk is a copy too. Every page is from 1732.
+~ The landlord is a grey outline with a moustache drawn on.
+Local (A landlord): We keep the old book. Copy of the old book. The real one went somewhere. Copies always outlive things.
+~ You turn the pages. Most are blank. One has writing on it, in very neat handwriting, with very neat capitals.
+Holloway (A. Holloway, 1732): Lost the boy Kit on the ice. I did not turn back.
+Holloway (A. Holloway, 1732): The Count would not abide a stop. I told myself that. I tell myself that still.
+Holloway (A. Holloway, 1732): Henceforth it shall count no one walker alone. Only those who go together.
+you: That's why. That's why it counts how many of us walk together. He made it that way afterwards. Because of Kit.
+? What do you think of Holloway?
+- "He should have gone back." {s3.should}
+  you: He should have gone back.
+  mate: Yes. He should.
+- "Kit didn't stop because of him." {s3.blame}
+  you: Kit didn't stop. Holloway didn't wait. That's different.
+- "Everyone leaves somebody."
+  you: Everyone leaves somebody, sometime.
+  mate: Not us. Not any more.
+!dark
+~ At the door, as you leave, something big and blue is waiting, very still, blocking out the wrong green light.
+~ Grimm doesn't swing. He looks at the Count, and then at you, and then he speaks. Not STOP. The first words you've ever heard from him.
+boss:algorithm (Grimm): He didn't finish.
+~ Then he walks off down the flickering road, in no hurry at all.`,
+
+// 7 The Star That Won't Set: the Gilded Void (The Burnt Constellation)
+`@gildedvoid
+~ The Burnt Constellation: six stars in the shape of a claw. One of them is still smoking.
+~ This season it won't stop burning. It hangs over the Void like a sun that's forgotten how to go down, and it never gets dark.
+~ Nobody can sleep. Everyone is quick and jumpy and slightly too awake.
 !shake
-~ Gale comes in off the sea in the afternoon and picks the dunes up. Sand in your eyes, sand in your teeth.
-boss:scroll: Next! Next! Next! Next!
-~ Sand in the Count, which grinds for an hour afterwards and makes everyone very nervous.
-~ Gale is quicker in summer, like everything. Harder to keep up with. But so are you.
-? Someone needs to keep the rhythm.
-- You call it {s3.rhythm}
-  you: In! Two! Three! Hit!
-  ~ You call it like the cox in a rowing boat. You all hit on the count. It works.
-- Let {mate} call it
-  mate: In! Two! Three! Hit!
-  ~ {mate} calls it like the cox in a rowing boat. You all hit on the count. It works.
-~ Then something odd. A thin, cold shape is standing between Gale and the back of the squad.
-~ Wisp. Just standing there in the sandstorm, taking the sand that was meant for you.
-~ When Gale blows itself out, Wisp is gone again.
-~ Afterwards you lie in the sand until midnight, which looks exactly like six o'clock.
-~ {mate} gets sunburnt at eleven at night. A new achievement.
-if s3.named
-  ~ Written in the wet sand, already being smoothed away by the sea: THANK YOU FOR SAYING IT.
-else
-  ~ Written in the wet sand, already being smoothed away by the sea: MY NAME IS KIT.`,
-
-// 8 Midsummer — Kvarken
-`@midnight-sun
-~ Kvarken: thousands of low rocky islands. The land here is rising out of the sea, nearly a centimetre a year.
-~ The ice age pressed it down and it's still springing back. It's the only place you've been that's growing.
-~ It's Midsummer. Juhannus. All of Finland goes to its summer cottages: bonfire, sauna, jump in the sea, repeat.
-Local (Island grandmother): You, with the brass thing. Stay. There's sausage.
-~ You stay.
-~ Old custom: put seven flowers under your pillow on Midsummer night and you'll dream of who you'll marry.
-~ {mate} puts seven flowers under the Count instead, as a joke.
+~ Vex comes out of the glare, fast, breathing fire across the gold road.
+boss:dragon: One more hour. You won't miss it. You never do.
+~ You hold together. The fire is real enough. The road gets hot enough to fry an egg, which somebody tries, afterwards.
+~ When Vex has gone back to her Hoard, you lie down on the warm gold and shut your eyes, just for a minute. Not stopping. Resting.
+~ And you all dream the same dream.
 !fade
-@snowfield
-!dark
-~ That night you all dream the same dream.
-~ Winter. Night. 1732. The Kvarken frozen solid. A line of walkers with lanterns, crossing the ice.
-Holloway: Keep up! Don't stop! Whatever happens, the Count will not abide a stop!
-~ At the back, a boy with a bag. The ice cracks. He goes in to the knees.
+@hushfrost
+~ Night. Ice. A long black lake frozen solid, and a line of lanterns crossing it.
+~ A man in a three-cornered hat at the front, walking fast. A woman with a shawl. Others. And at the back, a boy with a bag, running to keep up.
+~ The ice cracks. The boy goes through to his knees.
 Kit (Kit, 1732): Mr Holloway! Wait! Wait for me!
-~ Holloway's lantern pauses. Just for a moment. The Count in his hand goes cold.
-~ He doesn't turn round. He walks on. The lantern gets smaller.
+~ The lanterns don't stop. Nobody turns round.
 ? In the dream, you're standing on the ice next to Kit.
-- Turn back for him {s3.turned}
-  ~ You turn back. You reach for his hand.
-  ~ Your fingers close on frost. It's 1732. You can't change it. But you tried, and somehow the dream knows.
-- Shout after Holloway
-  you: HOLLOWAY! TURN ROUND!
-  ~ The lantern doesn't stop. But for a second, a long way off, it shakes.
+- Take his hand {s3.hand}
+  ~ You take his hand. In the dream it's warm. He looks up at you, astonished.
+- Shout after the lanterns
+  you: Stop! He's here! Wait!
+  ~ The lanterns don't hear you. They're three hundred years away.
 !fade
-@midnight-sun
-!light
-~ You all wake at the same moment. The bonfire's out. Someone is crying and pretending not to be.
-~ The Kraken was meant to be here. You see the tip of a tentacle out in the strait.
-~ But the water's too shallow, and getting shallower every year, and in the end it gives up and goes back to Norway.
-Local (Island grandmother): Something like that happens every Midsummer. More sausage?`,
+@gildedvoid
+~ You wake up all at once, all of you, with frost on your hands.
+~ The star is still burning. Somewhere in the Void a small voice says, "You came back."`,
 
-// 9 The Lace Town — Old Rauma
-`@town-day
-~ Old Rauma: six hundred wooden houses, painted in colours with names like butter and sky.
-~ People here speak a dialect so thick that other Finns can't follow it.
-~ The Taxman has come to Finland to do some paperwork. This is a mistake. Finland is very good at paperwork.
-Clerk (Town hall clerk): Complaint received. Processed. You are fined. Twice. Here is your receipt.
-Taxman: This receipt is in... what is this?
-Clerk (Town hall clerk): Rauma dialect.
-Taxman: What does it say?
-~ Nobody, including the clerk, will tell him.
-? The Taxman looks genuinely lost.
-- Help him read it {s3.helped}
-  ~ You try. You can't. But he looks at you like nobody has tried to help him with anything since 1911.
-  Taxman: ...Thank you. Don't tell anyone.
-- Enjoy the moment
-  ~ You enjoy the moment. You enjoy it a lot. {mate} takes a photo for the group chat.
-~ In a shop window, a lacemaker is working a pattern with dozens of bobbins at once. All moving. None of them tangling.
-~ You watch for ten minutes.
-mate: That's us. Except we tangle.
-Lacemaker: This pattern is three hundred years old. It has a gap in it. My grandmother said a thread was lost.
-Lacemaker: Every lacemaker since has left the gap. You don't fill in somebody else's missing thread. You wait for it.
-~ The Count ticks, once, very softly.`,
+// 8 Fined Twice: the Blotmarsh, deeper (The Sinking Fair)
+`@blotmarsh
+~ Deep in the Blotmarsh there's a fair. Stalls, bunting, a carousel, a coconut shy. It's all sinking, very slowly, into the bog.
+~ Nobody at the fair has noticed. They're too busy. The carousel goes round with its horses up to their knees in mud.
+~ The Taxman has come to do some paperwork. This is a mistake.
+~ The fair has a clerk. A bog-clerk, in a hat made of reeds, with a stamp in each hand.
+Local (A bog-clerk): Complaint against walkers? Lovely. Form, form, stamp, stamp.
+~ She processes his complaint so quickly and so correctly that he ends up fined. Twice.
+~ She gives him a receipt. It's written in bog. He reads it for a long time.
+mate: What does it say?
+Local (A bog-clerk): It says he owes himself an apology.
+~ Kit is walking with you today. Not close. A few steps behind the last of you, frosted, quiet. But walking.
+~ He watches the carousel go round with an expression you can't read.
+Kit: We had a fair in our village. Once a year. Mr Holloway let me go on the horses.
+Kit: Before.
+? Kit is looking at the carousel.
+- Ride it with him {s3.rode}
+  ~ You ride the sinking carousel with Kit, round and round, with mud up to the horses' knees. He laughs. It sounds like ice cracking, the good kind, in spring.
+- Win him a coconut
+  ~ It takes {mate} nine goes. The coconut sinks before Kit can touch it. He laughs anyway.
+~ When you leave, Kit is a few steps closer than he was this morning.`,
 
-// 10 He Didn't Finish — Turku
-`@river-dusk
-~ Turku is Finland's oldest city. It was the capital until 1812, when the job went to Helsinki. Turku has never quite got over this.
-~ In the cathedral archive there's a letter in English, dated 1732.
-~ A visitor asks to sleep in the porch rather than take a room, because he must be off early.
-~ It's signed A. Holloway. There's a second page.
-Holloway (A. Holloway, 1732): Lost the boy Kit on the ice at Kvarken. I did not turn back.
-Holloway (A. Holloway, 1732): The Count went cold in my hand when I paused. I told myself it would not let me.
-Holloway (A. Holloway, 1732): That was a lie. It was my own legs that would not let me. They were afraid.
-Holloway (A. Holloway, 1732): If anyone carries this after me: count your people, not your steps.
-mate: Count your people.
-you: That's why it counts how many of us walk together. He made it that way afterwards. Because of Kit.
-!dark
-~ Grimm is waiting by the river at the castle end, very still in the white night.
-~ He doesn't attack. He looks at the Count. Then at you.
-boss:algorithm: He didn't finish.
-~ The first words you've ever heard from him that aren't STOP.
-? Grimm is right there.
-- "Who didn't?" {s3.who}
-  you: Who didn't finish?
-  boss:algorithm: ...
-  ~ He looks at his own hand, round the club. Like it belongs to someone else.
-- "Kit didn't. Because of Holloway."
-  boss:algorithm: YES.
-  ~ It comes out like a door slamming. Then, quieter: yes.
-- Stay quiet
-  ~ You stay quiet. The river moves. Grimm doesn't.
-~ Then he walks off along the river, in no hurry at all.
-~ His footprints in the dew are very neat. Evenly spaced. Like someone who learned to walk properly a long time ago, and then stopped.`,
-
-// 11 The Southern Tip — Hanko
-`@beach
-~ Hanko: the southern tip of mainland Finland. Sandy beaches, wooden villas, smooth pink granite warm enough to lie on.
-~ You lie on it.
-mate: "He didn't finish." I can't stop thinking about it.
-you: Holloway made the Count and walked it the length of Britain. What else was there to finish?
-mate: Or he meant Kit. Or he meant himself.
-? What do you think Grimm meant?
-- He meant Holloway {s3.theory}
-  you: He meant Holloway. It sounded... personal.
-- He meant Kit
-  you: He meant Kit. Somebody left behind.
-- He meant us
-  you: He meant us. That we won't finish either.
-  mate: Thanks. Lovely. Very motivating.
-!flash
-~ Vex comes in over the sea at dusk. Except there's no dusk, so it comes in over the sea in broad daylight, looking slightly embarrassed.
-boss:dragon: I don't usually do daytime.
-~ The fire is real enough. The rocks get hot enough to fry an egg. {mate} tries it afterwards. It works.
-~ In the fight you learn the thing about haste: it works both ways.
-~ Vex is quicker. So is everything you win off it.
-~ As it flies off, it drops something from its hoard. It clatters on the granite and lies there, smoking.
-~ A little horn lantern, the old sort, scorched black. Burnt into the base: A.H.
-mate: Holloway's lantern. The one from the dream. Vex has had it all this time.
-~ In your pocket, the Count gets warm and stays warm all night.`,
-
-// 12 Everyman's Right — Helsinki
-`@harbour
-~ Finland has a law called everyman's right. Anyone can walk almost anywhere, camp in the forest, pick berries, as long as they do no damage.
-mate: The Kinder Scout lot would have loved Finland.
-~ Helsinki has a sea fortress on six islands, a public sauna on the harbour, and a lot of quiet people who are delighted to see you.
-~ You'd have to know them quite well to tell.
-~ In Finland, everyone's taxable income is published once a year. Anyone can look anyone up.
-~ {mate} looks up the Taxman.
-mate: He has declared nothing. Not a penny. Ever.
-mate: He's never earned anything. It's all been collected.
-~ Nobody says anything. But in the sauna he goes very pink and leaves in a hurry.
-~ That evening you sit on the harbour rocks watching the ferries head out to Tallinn.
-~ The air goes cold. Wisp settles on the rock beside you, like someone who's walked a very long way.
-if s3.named
-  boss:leftonread (Kit): You said my name. In Oulu. Nobody's said it since 1732.
-else
-  boss:leftonread: ...wait... wait for me...
-? Wisp is right beside you.
-- "We're not leaving you behind." {s3.promise}
-  you: We're going over the water tomorrow. We won't leave you behind. Not this time.
-  boss:leftonread (Kit): Everybody leaves. It's what walking is.
-  you: Then we'll come back. Every time. That's what walking is, too.
-- Answer every message you've ever left
-  ~ You get your phone out. You answer every unanswered message you've ever left. Your mum. Your dentist. That one from 2019.
-  ~ Wisp gets visibly less cold.
-- Just sit with it
-  ~ You just sit with it. It's what nobody did for Kit. Sometimes that's all it takes.
-~ Somebody asks what happens after Tallinn. Nobody knows.
-~ The Count is pointing across the water, steady as anything.`,
-
-// 13 Across the Water — Tallinn
-`@harbour
-~ The ferry to Tallinn takes two hours. You spend all of it on deck.
-~ The Gulf of Finland is flat and blue. Helsinki gets smaller behind you.
-~ At the rail, a little apart, is a thin boy in a brown coat. You can see the sea through him.
-~ Nobody else on the ferry notices. The squad does. The squad counts heads now. Always.
-Kit: Is this what it's like? Going somewhere with people who wait?
-? Kit is watching the spires come up out of the sea.
-- "Yes. This is what it's like." {s3.yes}
-  you: Yes. This is what it's like.
-  ~ Kit smiles. It's the first time. It makes him look about nine.
-- "It's usually more arguing about snacks."
-  mate: It's usually more arguing about snacks.
-  ~ Kit laughs. It sounds like ice cracking, the good kind, in spring.
-@city-night
-~ Tallinn: church spires and a medieval wall with towers like chess pieces.
-~ On top of the town hall is a weathervane shaped like an old soldier: Old Thomas, keeping watch since 1530.
-~ You climb to the lookout on Toompea Hill, above the red roofs, and the Count chimes.
-~ Thirteen chimes. People in the square look up.
-~ On the thirteenth, Kit puts his hand on the Count. This time it doesn't go through.
-Kit: He's not lost, you know. Mr Holloway. He's just stopped. I can feel him. South.
-Kit: He's sitting somewhere warm. He's been sitting there a very long time. And he's so cold.
-~ Then the shape thins, and goes, and the boy goes with it. Back into Wisp. Back into the Stillness. Still kept.
-~ But not forgotten. That's different. That counts for something.
-~ When the chimes stop, the needle swings round. South this time, and a little west. The glass goes the colour of honey.
-Kadri (Woman from the amber shop): Ah. It wants to go the old way.
-Kadri (Woman from the amber shop): The Amber Road. South to the Danube. People have walked it for two thousand years.
-~ The nights are getting dark again. It's time to go.`,
-];
-
-// ---------- SEASON 4: The Amber Road (Tallinn to Vienna) ----------
-const S4 = [
-// 1 Honey Glass — Tallinn
-`@amber-shop
-~ The woman from the amber shop is called Kadri. Her family has sold amber in Tallinn for six generations.
-~ She takes the Count into the back room, puts it under a lamp, and opens the case with a tool like a dentist's.
-Kadri: Under the dial. A tiny empty socket. Something was in here.
-Kadri: A bead. Amber, from the stain on the brass.
-~ Next to the socket, scratched very small, as if with a pin: FOR K.
-mate: K. Kit.
-Kadri: Whoever made this walked the Amber Road. You don't put amber in a clock unless you went and got it.
-Kadri: And you don't scratch a name next to it unless you're sorry.
-~ She draws the road on a napkin: down the coast through Latvia and Lithuania, round to Gdańsk, across Poland, through a gap in the mountains, to the Danube.
-Kadri: The Romans came north along it for amber. Everybody after them did too.
-Kadri: Everything along the Baltic has a thick skin. The walls. The winters. The people.
-Kadri: Your monsters will too. Don't wait for the lucky hit. Just hit them a lot.
-? Kadri offers you something for the road.
-- Accept graciously {s4.liquorice}
-  ~ It's salty liquorice. It is the worst thing any of you has ever eaten.
-  ~ You thank her with a straight face. That's a thick skin, right there.
-- Ask what she charges
-  Kadri: For the road? Nothing. For the liquorice? Also nothing. Nobody would pay for it.
-  ~ She's right. It's the worst thing any of you has ever eaten.
-~ As you leave, Kadri calls after you.
-Kadri: The bead! If you find one, find it yourselves. Amber you buy doesn't count. Same as steps.
-~ Behind the shop, very faintly, something heavy is walking along the old town wall. Slowly. Keeping pace.`,
-
-// 2 Mud — Pärnu
-`@beach
-~ Pärnu, Estonia's summer capital: a long white beach, wooden villas, and a spa that has been covering people in hot mud since 1838.
-~ Mostly for medical reasons.
-~ You go in. The mud is warm and black and smells of the sea.
-mate: It's like being hugged by Brett.
-~ Everyone goes quiet. Because the mud in the next bath is moving.
-boss:notification: bzzt. Ahh. bzzzt. Lovely.
-~ Brett has had a spa day. He's thicker than ever. Glossy. Tough.
-~ The hits that used to splatter him just bounce off.
-? Brett is basically armour-plated now.
-- One big hit, all at once
-  ~ You all wind up for one enormous hit. It bounces off. {mate} bounces off too, into a mud bath.
-  ~ Fine. Not like that, then.
-- Lots of little hits {s4.steady}
-  ~ You hit him again and again, steadily. No big moments. Just work.
-~ It takes ages. It's the most boring fight of your lives. It works.
-~ Brett slides off into the Baltic, sulking, buzzing quietly to himself.
-~ The spa gives you a voucher for a free return visit. It gives Brett a bill.
-~ It's the first time you've ever seen him look worried.
-~ In the empty mud bath where he was, his outline is left in the mud. It isn't a blob.
-~ It's people. Lots of people, sitting down, squashed together, each one looking at something in their hand.
-mate: ...Was Brett somebody, once? Was he lots of somebodies?
-~ The mud settles. The outline goes. Nobody wants to answer that.`,
-
-// 3 The Sixth Hangar — Riga
-`@city-night
-~ Riga has more art nouveau buildings than anywhere: whole streets of stone faces, peacocks, and women with very serious hair.
-~ The central market is in five old Zeppelin hangars and sells everything from smoked eel to wellies.
-@office
-~ In the sixth hangar, which doesn't exist, the Taxman has opened an office. It's very convincing. The queue is very long.
-~ He's taxing anyone with a step counter. Hikers. Dog walkers. A woman pushing a pram.
-Taxman: Ah. You. Skip the queue. I have a proposal.
-Taxman: Sit down. One season. Just one. I'll hold your steps in trust, at a very reasonable rate.
-Taxman: No Sunday fights. No evening fights. No blisters. You'd be amazed how restful it is.
-mate: Like 1911 was restful?
-Taxman: 1911 was a cash-flow problem. This is a savings plan.
-? The Taxman slides a form across the desk. There's already a pen on it.
-- Tear it up {s4.tore}
-  ~ You tear it up. He sighs, takes out an identical form, and puts it in a drawer for later.
-  Taxman: They always tear up the first one.
-- Read the small print
-  ~ The small print says the undersigned agrees to remain seated in perpetuity, or until further notice, whichever is longer.
-  you: In perpetuity?
-  Taxman: It's a figure of speech.
-  you: It's in bold.
-- Give him a present instead {s4.balsam}
-  ~ You give him a bottle of Riga Black Balsam, a herbal liqueur that tastes like a hedge on fire.
-  ~ He tries it while you watch. It's a long time before he says anything at all.
-  Taxman: ...That's disgusting. Thank you.
-@city-night
-~ Outside, Riga's church spires have golden cockerels on top instead of crosses.
-~ They're all pointing south in the wind. So is the Count.
-~ Behind you, in the sixth hangar, the queue gets a little shorter and the waiting room gets a little fuller. Nobody in it is standing up.`,
-
-// 4 The Hill of Crosses
-`@hill-crosses
-~ North of Šiauliai there's a small hill covered in crosses. More than a hundred thousand, wooden and iron, rosaries hung on rosaries.
-~ There are so many that the wind makes them clink.
-~ In Soviet times the authorities bulldozed it, more than once. Every time, people came back in the night and put the crosses up again.
-~ Nobody organised it. People just kept coming back.
-~ Wisp is here, quiet among the crosses. For once, it isn't trying anything.
-~ It's a place full of people who were remembered. Even Wisp seems to know it's no place to make anyone feel forgotten.
-if s3.promise
-  boss:leftonread (Kit): You came back. You said you would. People don't, usually.
-else
-  boss:leftonread: ...they keep coming back here... why do people come back...
-? What do you leave on the hill?
-- A bootlace, tied in a bow {s4.lace}
-  ~ You tie a bootlace round a little wooden cross at the edge. It isn't much. The point of the hill is that it doesn't have to be.
-- Kit's name, scratched on a stone {s4.kitname}
-  ~ You scratch KIT PENHALLOW, 1732 on a flat stone and wedge it among the crosses.
-  ~ Wisp drifts over and stays beside it a long time.
-- Nothing. Just stand there.
-  ~ You stand there. Sometimes that's what you leave.
-~ Wisp drifts off over the fields without a fight.
-~ As it goes it says something, so quietly that only the Count hears it. The Count ticks twice.
-mate: What did it say?
-you: I think it said: he's close.`,
-
-// 5 The Sun Stone — Palanga
-`@amber-shop
-~ Palanga's amber museum is in a palace by the sea, built by a count. No relation.
-~ Thousands of pieces of amber. Some have insects in them: a spider caught mid-step forty million years ago, still halfway across.
-mate: That's it. That's what the Stillness wants. Everyone caught mid-step, for ever.
-~ The biggest piece is the Sun Stone. The curator won't let you near it, which is fair.
-Curator: A bead for that socket? You won't find it in a shop. A bead like that, you find yourself.
-Curator: Go to the beach after a storm.
-@sea-storm
-~ There's a storm that night.
-@beach
-~ At first light you're all on the beach with the old women and the fishermen, raking through the seaweed.
-? It's been three hours. Fingers are numb.
-- Keep looking {s4.kept}
-  ~ You keep looking. Everyone keeps looking. That's the whole trick, it turns out.
-- Take a break
-  ~ You sit down on a rock for a minute. The Count goes cold in your pocket.
-  ~ You stand up again quickly. Message received.
-~ Then {mate} finds it. A bead of amber the size of a pea, with a tiny bubble trapped inside.
-~ It fits. The Count ticks once, very loudly, then settles into a deeper sound, like a clock in a hallway.
-~ The glass over the dial goes from honey to gold.
-~ Hold the bead to the light and the bubble isn't a bubble. It's a tiny frost-flower. Six points. Perfect.
-mate: Frost. In amber. In September.
-you: For K.
-~ Far away, in a field you can't see, something cold sits down in the grass and, for the first time in three hundred years, feels warm.`,
-
-// 6 Witches' Hill — Curonian Spit
-`@beach
-~ The Curonian Spit: a strip of sand nearly a hundred kilometres long. The Baltic on one side, a lagoon on the other.
-~ Its dunes have buried whole villages. They move a few metres a year and they don't stop for anything.
-Local (Fisherman): The old villages are still under there. Church bells and all. On a windy night you can hear them.
-Local (Fisherman): People who wouldn't move. So the sand moved instead.
-@forest-mist
-~ In the woods at Juodkrantė is Witches' Hill, full of wooden carvings: devils, witches, a dragon, a giant.
-~ Gale is hiding among them. It's hard to spot a whirlwind in a wood full of carved monsters.
-~ Right up until it starts throwing pine cones.
-boss:scroll: Refresh! Refresh! Refresh!
-~ Gale is tougher this season. Big hits that used to knock it sideways just make it wobble.
-? How do you take it down?
-- Keep at it, one after another {s4.steady}
-  ~ You stop going for the big hit. One after another, all of you, until it's spun itself out on top of a dune.
-- Hide behind the carved giant
-  ~ The carved giant takes a pine cone to the face. You take the chance and all pile in together.
-@beach
-~ That evening in Nida you climb the great dune and look south.
-~ The road can't go straight on from here, so it turns inland, the long way round. The Count doesn't mind a detour.
-~ Halfway down the dune, the wind uncovers something. A wooden signpost, buried for two hundred years.
-~ One arm points the way you're going. Carved into it, in neat capitals: STOP.
-~ Exactly like the capitals on Hadrian's Wall.
-mate: Grimm's been this way before. Centuries ago.
-you: Grimm. Or whoever Grimm used to be.`,
-
-// 7 The Lakes — Masurian Lakes
-`@lake-mist
-~ Masuria has two thousand lakes, joined by rivers and canals. In September it's quiet: mist on the water, swans, not much else.
-~ You borrow kayaks for a day. That isn't walking. The Count refuses to tick the whole time. It is very clear about this.
-mate: It's sulking.
-you: It's principled.
-~ Rory is living in the reeds. In the mist it looks like a very large orange heron. Until it stands up.
-boss:autoplay: Because you watched "Sitting Down", you might like "Sitting Down 2".
-~ Its hide is as thick as a boot now. The spore cloud rolls out across the lake.
-? You're in kayaks and Rory's on the bank.
-- Paddle for shore and fight on foot {s4.shore}
-  ~ You fight it from the bank with your feet in the water. The Count starts ticking again, pleased.
-- Splash it
-  ~ You splash it. Orange things hate cold water. Rory backs into the reeds, dripping and furious.
-~ That night, at a guesthouse by the lake, there's a letter waiting. The postmark is Penzance.
+// 9 Cap and Bells: Puffcap Hollow, deeper
+`@puffcap
+~ Cap and Bells is a glade of tall thin mushrooms that ring like little bells when the spores blow through them. It's lovely. It makes you want to lie down.
+~ Kit doesn't like it. He walks right in the middle of the squad now, between you all, where it's warmest.
+~ There's a letter for you, pinned to a mushroom with a hatpin. The handwriting is old-fashioned and neat.
 @lighthouse-night
 Morwenna (Morwenna, by letter): I hear you found the boy. Kit. I remember him. He carried the bag and whistled.
 Morwenna (Morwenna, by letter): I hear you know what I did. I won't defend it. I was cold, and the fire was warm, and I was nineteen.
-Morwenna (Morwenna, by letter): Abiah is ahead of you, near the end of the amber. Please don't hate him more than you hate me.
-Morwenna (Morwenna, by letter): And when you see him, ask him why he never came back for either of us.
-@lake-mist
+Morwenna (Morwenna, by letter): And when you see Abiah, ask him why he never came back for either of us.
+@puffcap
 if s1.betrayed
   ~ You read it twice. You still don't know if you believe her. That's allowed.
 else
   ~ You read it twice. Then you fold it up very small and keep it next to the Count.
-~ Every village round here has a tree that's the oldest in Poland, and a man who'll tell you the others are lying.
-~ You meet three of these men. All three trees are very old.`,
-
-// 8 The Shipyard Gate — Gdańsk
-`@harbour
-~ Gdańsk: the amber capital of the world. Mariacka Street is lined with amber shops, under gargoyles that spit rainwater on the customers.
-~ In 1980 the workers at the shipyard here put down their tools. All together. It changed the country, then a lot more than the country.
-Guide (Museum guide): One person stopping doesn't do much. A lot of people doing the same thing at the same time can do almost anything.
-mate: Same with walking.
-Guide (Museum guide): Same with anything.
 !shake
-~ Grimm is waiting at the gate. Something about him is harder now. Rougher. Like old bark.
+~ The bells ring all at once. Rory comes through the glade at speed, spores streaming.
+boss:autoplay: Are you still watching? You are. You're still watching.
+~ Kit steps out in front of it before anyone can stop him, and blows on it.
+~ Frost goes all over Rory like icing sugar. It sneezes. It sneezes again. It goes off into the glade sneezing, outraged.
+Kit: I've wanted to do that for ages.
+~ Then he looks frightened, as if he's done something wrong, and steps back into the middle of you.`,
+
+// 10 Where Kit Stopped: the Hushfrost Reach, deeper
+`@hushfrost
+~ The Count brings you to a long black lake, frozen solid, far down in the Hushfrost Reach. You've seen it before. In a dream.
+~ Out in the middle there's a hole in the ice, small, the size of a boy. It has never frozen over. Not in three hundred years.
+~ Wisp is there. Not Kit. Wisp. The left-behind part. Pale and thin and very cold, hanging over the hole like breath.
+boss:leftonread (Kit): You said my name. Nobody's said it since 1732.
+boss:leftonread (Kit): Everybody leaves. It's what walking is.
+? Wisp is waiting for you to go. Everyone always goes.
+- Sit down on the ice with it {s3.sat}
+  ~ You sit down on the ice. All of you, in a ring round the hole. Not stopping. Waiting.
+  ~ You don't say anything. You just stay. It's what nobody did for Kit. Sometimes that's all it takes.
+- Promise to come back {s3.promise}
+  you: We'll come back. Every season. We'll come back for you.
+  boss:leftonread (Kit): That's what they all say.
+  you: We came back this time.
+~ The cold gets less. Not gone. Less.
+~ When you get up to go, the small frosted boy is standing with you, outside the hole, on the ice.
+Kit: Is this what it's like? Going somewhere with people who wait?
+mate: Mostly. We're not very fast.
+Kit: Good.
+~ Behind you, for the first time in three hundred years, the hole in the ice starts, very slowly, to freeze.`,
+
+// 11 Clockwork: the Spindrift Isles, deeper (The Clockwork Isle)
+`@spindrift
+~ The Clockwork Isle is all cogs. Somebody built it, long ago, to keep time for the other islands. This season it's running fast, and every island is spinning to keep up.
+~ And at the centre of the cogs, spinning fastest of all, is Gale.
+boss:scroll: There's always more further down. There's always more.
+!shake
+~ Gale is quicker than ever, like everything, and harder to keep up with.
+~ But Kit is counting. Out loud. One, two, three, four. The way you'd count in a rowing boat.
+? Kit is counting time.
+- Hit back on Kit's count {s3.count}
+  ~ You hit back on the count, all together. Gale can't keep up with a rhythm. It wobbles, and spins off sideways into the sky.
+- Get Kit out of the wind
+  ~ You get Kit behind you. He keeps counting anyway, louder, and you find yourselves stepping in time with him, and it works.
+~ Afterwards, the Clockwork Isle starts to slow down. Tick. Tock. Like a heart after stairs, settling.
+~ Kit is less frosted today. You can see his freckles properly.
+Kit: Mr Holloway made the clock on the Count. He used to let me wind it.
+Kit: He'd say, every step a stitch, Kit. And I'd say, what if you drop a stitch? And he'd go quiet.`,
+
+// 12 The Sunken Lamp: the Lowmost Deep, deeper
+`@lowmost
+~ One more week. Down at the bottom of the Lowmost Deep, half buried in silt, there's a lamp. A lighthouse lamp, huge, the glass as tall as a house.
+~ It's lit. Blue. It has been lit for a very long time.
+~ Kit stops dead. He won't go any nearer.
+Kit: That's where it looks out from.
+you: Where what looks out?
+Kit: The thing that sits. When people sit in the glow back home, it looks out at them through that. Through the lamps. Through the windows.
+Kit: I could feel it, on the ice. Watching. Pleased.
+!shake
+~ The Kraken is curled round the lamp like a cat round a fire.
+boss:kraken: Down here it's always three in the morning.
+? The Kraken won't leave the lamp.
+- Fight it away from the lamp {s3.lamp}
+  ~ You fight it away from the lamp, all together, and the lamp goes dimmer the further it gets. The Kraken doesn't like that at all.
+- Go round the long way
+  ~ You go round the long way, keeping Kit in the middle. The lamp turns, slowly, to watch you go.
+~ When you're past, Kit's hand is in someone's. It isn't cold. Well, it's cold. But it's a hand.
+~ The lamp behind you goes round once, slowly, like a beam.`,
+
+// 13 The Render Shore: the Misrendered Realm, deeper
+`@misrendered
+~ The Render Shore is where the Misrendered Realm runs out. The ground just stops loading, and past it is grey, and then nothing.
+~ You stand on the edge together, all of you, and Kit too.
+~ The Count chimes. Thirteen times. Out over the nothing, the sound goes on for a very long way.
+~ On the thirteenth, Kit puts his hand on the Count. This time it doesn't go through.
+Kit: I can feel him. Mr Holloway.
+Kit: He's not lost. He's just stopped. He's sitting somewhere warm. He's been sitting there a very long time.
+Kit: And he's so cold.
+? Kit is holding the Count.
+- "We'll find him." {s3.find}
+  you: We'll find him. Next season.
+  Kit: Will you shout at him?
+  you: Probably.
+  Kit: Good. Someone should.
+- "Do you want to find him?"
+  Kit: Yes. No. I want him to have waited. He didn't. I want to see him anyway.
+@town-glow
+~ Back home the windows go out, street by street. Here and there a door opens and someone goes for a walk.
+@misrendered
+~ When the chimes stop, the needle swings round. It points back into the Misrendered Realm. Back towards the Upside Down Inn.
+~ Towards a table by the window, and somebody sitting at it.
+Ishbel (Ishbel, by text): Deeper.
+Ishbel (Ishbel, by text): Bring the boy. He's owed a word with somebody.`,
+];
+
+// ---------- SEASON 4: The Error Throne (thick skins everywhere; who Grimm really is) ----------
+const S4 = [
+// 1 Thick Skins: the Blotmarsh (Bogbody Crossing)
+`@blotmarsh
+~ Bogbody Crossing. The planks are old. The man under them is older.
+~ A woman sits on the end of the crossing with her feet in the bog, smoking a clay pipe. She has a jeweller's eyeglass screwed into one eye.
+Local (Old Peat): Holloway's Count. Give it here. I'll not drop it. I've not dropped anything since 1840.
+~ She opens the case with a tool like a dentist's and holds it up to the fog.
+~ Under the dial is a tiny empty socket.
+Local (Old Peat): Something was in here. A bead of gold, from the stain on the brass. You don't put a thing like that in a clock unless you went and got it.
+Local (Old Peat): There's only one place you get gold like that. The Void. Her hoard.
+mate: We are not stealing from a dragon.
+Local (Old Peat): Course not. You'll be borrowing.
+~ She snaps the Count shut and hands it back.
+Local (Old Peat): Everything round here has grown a thick skin this year. The planks. The leeches. Me. Your monsters will too.
+Local (Old Peat): Don't wait for the lucky hit. Just hit them a lot.
+!shake
+~ Brett comes up through the crossing like a seal through ice. He's glossy and tough this season, like a bouncy castle that's been to the gym.
+boss:notification: You have 99+ unread. You have 100+ unread. You have...
+? Brett's hide is thick as a boot.
+- Keep at it, steady, no big moments {s4.steady}
+  ~ You keep at it. Steadily. No big moments. Just work. Eventually he gets bored and wobbles off to his Wallow.
+- Go for one big hit
+  ~ You wind up one enormous hit. It bounces off. Brett looks almost touched by the effort.
+~ Under the planks, the bogbody opens one eye.
+Local (The man under the planks): Holloway came this way. Paid his toll in steps. Said he was going all the way down.
+Local (The man under the planks): Never came back up. Mind how you go.
+~ He shuts his eye again. The planks settle.`,
+
+// 2 In Step: Puffcap Hollow (Rotroot Stair)
+`@puffcap
+~ Rotroot Stair: carved by something with very big feet and no sense of rhythm. Some steps are knee-high. Some are an inch.
+~ Kit walks with you in plain sight now, most days. In the orange light of Puffcap Hollow he's hardly frosted at all.
+~ At the bottom of the stair there's a snail the size of a car, with a saddle on it.
+Local (A snail-keeper): Lift down the stair? Very reasonable rates.
+~ {mate} gets on. The Count stops ticking at once. It is very clear about this.
+mate: It's sulking.
+you: It's principled. It only counts walking.
+~ {mate} gets off.
+!shake
+~ Halfway down, Rory stands up out of the roots. Its hide is as thick as a boot now, and spores pour off it in slow orange sheets.
+boss:autoplay: Because you watched "Sitting Down", you might like "Sitting Down Again".
+? The steps are all different sizes and Rory is right below you.
+- Walk in step, all together {s4.instep}
+  ~ You walk in step, on the count, whatever size the stair. It's the only thing Rory can't stand: a rhythm. It backs off into the roots, grumbling.
+- Splash it from the puddle
+  ~ You splash it. Orange things hate cold water. Rory backs into the roots, dripping and furious.
+~ At the bottom Kit is laughing so hard he has to sit on a step. Then he remembers, and stands up very quickly.
+Kit: Sorry. Sorry. Habit.
+you: Sitting's fine. Stopping's the problem.
+Kit: How do you tell the difference?
+mate: Someone waits for you.`,
+
+// 3 Who Keeps the Lantern: the Hushfrost Reach (The Last Lantern)
+`@hushfrost
+~ The Last Lantern stands on a post in the snow at the edge of the Hushfrost Reach. Someone keeps it lit. Nobody has ever seen who.
+~ Kit goes straight up to it and opens the little glass door and trims the wick, quick and practised.
+you: It's you. You keep it lit.
+Kit: Since 1732. So people could find their way to me.
+Kit: Nobody came. But it seemed rude to let it go out.
+~ Wisp is there, a little way off in the snow. It isn't attacking. It's just watching Kit trim the lantern, like someone watching themself in a window.
+~ Wisp has a thick skin this season too. Frost on frost. It looks very old.
+? Wisp is watching.
+- Scratch Kit's name on the lantern post {s4.kitname}
+  ~ You scratch it in with a key: KIT PENHALLOW. And the date. Both dates. 1732, and this year.
+  ~ Kit reads it three times.
+  Kit: Nobody ever wrote my name down before. Except him. In the register.
+- Leave something for Wisp
+  ~ You tie a bootlace in a bow round the lantern post. Wisp drifts closer, looks at it, and for once doesn't make anyone feel forgotten.
+~ Wisp drifts away over the snow towards its Hollow without a fight. Sunday will be different. Today it just wanted to look.
+~ When you go, the Last Lantern is burning brighter than you've ever seen it. Kit keeps looking back at it.`,
+
+// 4 Thunder Tonic: the Spindrift Isles (The Broken Mill)
+`@spindrift
+~ The Broken Mill: its sails spun so fast they took the roof with them. The Taxman has opened an office in what's left.
+~ It's very convincing. The queue is very long. He's taxing anyone with a step counter: rope-makers, kite-flyers, a goat.
+~ He's going to need a bigger mill.
+? Do you queue?
+- Leave him a present instead {s4.tonic}
+  ~ You buy a bottle of Spindrift Thunder Tonic from a stall on the bridge. It's brewed from lightning and tastes like a hedge on fire.
+  ~ You leave it on his desk as a gift. He tries it while you watch. It's a long time before he says anything at all.
+  Taxman: ...Is this declared?
+- Queue with everybody else
+  ~ You queue. It takes two hours. When you reach the front he looks at you, looks at the Count, and waves you through without a word.
+  ~ The goat behind you is furious.
+~ Out on the islands Gale has grown a hide like a barn door. The big gusts that used to knock it sideways just make it wobble.
+boss:scroll: Just one more. Just one more. Just one more.
+~ So you stop going for big hits. You keep at it, one after another, steady, until it spins itself out against the mill and goes off to its Spindle to sulk.
+~ On the Taxman's desk, under the tonic bottle, there's an itinerary. It's very long. It goes all the way down the page and off the bottom.
+mate: Where's he planning to go?
+~ At the top, in his tidy hand: Depths, tour of. For after.`,
+
+// 5 The Inkfall: the Lowmost Deep
+`@lowmost
+~ The Inkfall: where the light gives up. Bring a torch and a strong opinion.
+~ You have one torch between you, and plenty of opinions. You walk down into the black in single file, holding on to the person in front.
+!dark
+~ Something brushes past you in the dark. Slowly. Then something else. Then a great many somethings, all at once.
+boss:kraken: The bottom of the feed is very comfortable. Nobody ever leaves.
+~ The Kraken's skin is like a wet car tyre this season. Nothing goes in quickly. You just have to keep hitting it in the dark, all of you, together, until it gives.
+? It's dark and the Kraken is everywhere.
+- Hold hands and keep hitting {s4.dark}
+  ~ You hold hands in a ring and hit outwards. It takes a long time. Then the tentacles slide away into the black, sulking.
+- Shine the torch in its eye
+  ~ You shine the torch in its eye. It hates that. It knows exactly what a light in the eye at three in the morning feels like.
+!light
+~ When the Kraken has gone, the torch picks out something on the floor of the Inkfall. An old brass lantern, crusted with silt.
+~ On the base, engraved: A.H.
+~ When you bring it near the Count, it flickers, very faintly, and lights.
+~ Kit stares at it.
+Kit: He carried that across the ice. I watched it go. I watched it all the way to the other side.
+Kit: He must have come down here after. Down all this way. On his own.
+~ You take the lantern with you. Nobody suggests otherwise.`,
+
+// 6 The Register: the Misrendered Realm (The Loop Road)
+`@misrendered
+~ The Loop Road. You've walked this bit before. You'll walk it again.
+~ The third time past the same signpost, somebody ties a sock to it. The fourth time, the sock is there. The fifth time, there are two socks.
+~ Grimm is waiting where the loop joins up, very still. Something about him is harder now. Rougher. Like old bark.
 boss:algorithm: STOP.
+!shake
 ~ He swings. You hit back. Nothing seems to go in.
 ? Grimm's hide is like iron.
 - Stop looking for the perfect hit {s4.together}
   ~ You stop looking for the perfect hit. You just keep going, all of you, together, until he steps back.
 - Ask him a question mid-fight
-  you: Why do you always write in capitals?!
+  you: Why do you always write in capitals?
   ~ Grimm stops mid-swing. For one second he looks embarrassed.
   boss:algorithm: ...Penmanship.
   ~ Then he swings again, harder. But you all keep going until he steps back.
@@ -1466,126 +1310,155 @@ boss:algorithm: STOP.
 ~ At the bottom: "All accounted for. All left."
 mate: That's a register. Like a teacher's.
 you: Holloway's register. Why would Grimm have Holloway's register?
-~ Down by the river, the Taxman had been planning an Amber Duty.
-~ A woman from the amber guild holds up a Latin document with a wax seal. He reads it twice. Then he goes away.`,
+~ Kit takes the paper and looks at his own name for a long time.
+Kit: He ticked me. I was still on the ice, and he ticked me.
+~ When you walk on, the loop lets you go. Behind you, the sock signpost flickers and disappears.`,
 
-// 9 Three Hundred and Sixty — Toruń
-`@town-day
-~ Toruń: a red-brick medieval town with a leaning tower and a gingerbread museum where you're allowed to make your own.
-~ {mate} makes a gingerbread Count. Someone else eats it. There's a short trial.
-~ Copernicus was born here: the man who worked out that the Earth goes round the sun.
-@desert-night
-~ The guide at the planetarium, a young man called Paweł, looks at the Count for a long time. Then he asks to borrow it.
-Pawel: Round the rim of the dial. Too fine to see unless you know. A ring of tiny marks.
-Pawel: Three hundred and sixty of them. That's not a clock face. That's the world. Degrees of longitude.
-Pawel: You've lit up about twenty of them since Cornwall.
-~ Nobody says the obvious thing out loud. Three hundred and sixty is a lot of degrees.
-? {mate} gets out a napkin to do the maths.
-- Let them {s4.maths}
-  ~ {mate} does the maths. Then folds the napkin up very small and puts it away.
-  you: How long?
-  mate: You don't want to know.
-  you: How long?
-  mate: Roughly the rest of our lives. If we're lucky and nobody sits down.
-- Take the napkin away
-  you: No. No maths. Maths is how the Taxman gets you.
-  ~ Everyone agrees this is wise. Everyone is now doing the maths in their heads anyway.
-Pawel: The world is round. If you walk east long enough...
-you: You come home.
-Pawel: You come home from the other side. Which isn't the same as coming back.
-~ He hands the Count back. Then, more quietly:
-Pawel: There's something at the very last mark. Number three hundred and sixty. It isn't a line. It's a tiny lighthouse.`,
+// 7 Forty Rungs: the Gilded Void (The Coin Nebula)
+`@gildedvoid
+~ The Coin Nebula: a cloud of loose gold, drifting. Do not pocket any. She counts.
+~ At its edge there's a stargazer with a brass telescope, sitting on nothing, counting the coins and writing them down.
+Local (A stargazer): Holloway's Count. May I?
+~ She holds it up to the gold light and turns it over. On the back, round the rim, too fine to see unless you know, is a ladder. Tiny rungs, engraved one under another.
+Local (A stargazer): Forty of them. That's not decoration. That's a map.
+Local (A stargazer): Under the seven realms there's a ladder going down. Forty rungs. Something sits at the bottom.
+~ She runs a fingernail down them.
+Local (A stargazer): Three are lit. You'll light the fourth when this season's done.
+~ Nobody says the obvious thing out loud. Forty is a lot of rungs. Someone does the sum anyway, and goes quiet.
+~ Then she taps the empty socket under the dial.
+Local (A stargazer): It wants feeding. One coin from the hoard. Holloway took one. Somebody must have taken it back.
+? A single gold coin drifts past your nose.
+- Take it {s4.coin}
+  ~ You take it. Every coin in the nebula stops drifting at once.
+- Don't touch it
+  ~ You don't touch it. The coin drifts round you twice, as if deciding, and then settles into the socket by itself.
+!shake
+~ Something huge wakes up on the far side of the gold.
+boss:dragon: You have something of mine.
+~ Vex is tougher than ever, scales like roof tiles. She doesn't attack properly. She just looks at you, and at the Count, and at the coin in it.
+boss:dragon: One hour. You owe me one hour. I'll collect.
+~ Then she goes back to her Hoard. The coin fits. The Count ticks once, very loudly, then settles into a deeper sound, like a clock in a cellar.
+~ The glass over the dial has gone gold.`,
 
-// 10 Calisia — Kalisz
-`@fields-dusk
-~ Kalisz says it's the oldest town in Poland. A Greek geographer called Ptolemy put "Calisia" on his map in the second century, right on the Amber Road.
-~ People were walking amber past here when Rome was the centre of the world.
-~ It's harvest time. In the villages they're weaving wreaths from the last of the wheat, and there's a brass band and a great deal of cake.
-Local (Old man with a moustache): Poppy seed cake. Eat. No, eat. You're walking to Vienna? Eat two.
-!flash
-~ Vex comes over the stubble fields at dusk. The brass band, to its enormous credit, keeps playing.
-boss:dragon: I've been hoarding this town's hours since Ptolemy. A lovely vintage.
-~ Vex is tougher than ever. Scales like roof tiles. You hit it for an hour and it just keeps coming.
-? The band strikes up something faster.
-- Fight to the beat {s4.band}
-  ~ You fight to the beat. The tuba player is a genius. Vex can't follow a polka.
-- Get the band to safety
-  ~ You hustle the band behind a hay wagon. They keep playing from behind it, a bit muffled.
-~ And then it doesn't keep coming. Vex lifts off, slowly, heavily, and turns south.
-~ Before it goes, it says one more thing. Not to you. To the Count.
-boss:dragon: Tell him his table's ready.
-mate: Whose table?
-~ Afterwards the old man tells you the Romans used to drop a coin in the river here for luck.
-~ You haven't a coin between you. You drop in a plaster, the only thing anybody has in their pocket.
-Local (Old man with a moustache): That will probably do.`,
+// 8 Mothermud: the Blotmarsh, deeper
+`@blotmarsh
+~ Mothermud is the bottom of the Blotmarsh, where all the mud comes from. It's warm. It's soft. It bubbles invitingly, like a bath somebody has run for you.
+~ Lie down in it, the mud seems to say. Just for a bit. You've walked such a long way.
+~ {mate} starts to kneel.
+? {mate} is sinking into the mud!
+- Pull them out {s4.pulled}
+  ~ You grab {mate} under the arms and haul. The mud lets go with a noise like a disappointed sigh.
+- Shout their name
+  you: {mate}! Up!
+  ~ {mate} blinks, and stands up, and looks at their knees in horror.
+~ Kit was quicker than both of you. He's already got hold of {mate}'s sleeve, frosting it white.
+Kit: Not today.
+~ The Taxman has set up a stall at the edge of the mud: MUD DUTY, PAYABLE ON ALL MUD CARRIED OUT ON BOOTS.
+~ A bog-wife from the guild walks up to him and holds up a parchment with a wax seal and nine signatures in mud. He reads it twice. Then he goes away.
+~ On a post at the edge of Mothermud someone has written STOP in neat blue capitals.
+~ Underneath, in a child's careful letters, scratched with something sharp: NO. K.P.
+~ Kit goes red and pretends he hasn't seen it.`,
 
-// 11 The Gate in the Mountains — Moravian Gate
-`@forest-mist
-~ Between the Sudeten mountains and the Carpathians there's a gap: the Moravian Gate.
-~ Everyone going between the Baltic and the Danube has come through it. Romans, merchants, armies, birds, trains. Now you.
+// 9 Head Office: Puffcap Hollow, deeper (The Rot Cathedral)
+`@puffcap
+~ The Rot Cathedral: a church grown entirely out of fungus, arches and pews and a spire that drips. The organ plays itself, very slowly, one note an hour.
 !dark
-~ Halfway through, the fog comes in. In the fog are two shapes you know.
+~ Halfway down the nave the spores come in thick. In them are two shapes you know.
 ~ The Taxman has a clipboard. Grimm has his club.
 ~ And behind them, further back, a third shape. Tall. Horned. With the sound of chains.
 boss:krampus (???): ...
-~ It doesn't come forward. It just watches while Grimm swings and the Taxman takes notes.
+~ It doesn't come forward. It just watches, while Grimm swings and the Taxman takes notes.
 Taxman: Don't mind him. He's from Head Office. Seasonal. He does December.
 ? The horned shape is watching you in particular.
 - Stare back {s4.stared}
-  ~ You stare back. It tilts its horned head, slowly, like it's reading a list. Then it makes a small tick in the air.
+  ~ You stare back. It tilts its horned head, slowly, as if it's reading a list. Then it makes a small tick in the air.
 - Keep fighting Grimm
   ~ You ignore it and keep fighting Grimm. Thick skin. Steady hits. Hold together.
 !shake
 ~ The fight is long and heavy and nothing goes in easily, and you hold together.
 !light
-~ When the fog lifts, all three are gone. There are hoofprints in the mud.
-Farmer: The devil. He comes with St Nicholas in December. Over the border in Austria they call him Krampus.
-Farmer: He's for the ones who've been idle.
-~ He looks at your boots.
-Farmer: You'll be fine.
+~ When the spores clear, all three are gone. There are hoofprints in the moss of the aisle.
+~ And Rory, very small and very quiet, is hiding under a pew. Even Rory is scared of the horned thing.
 mate: The Taxman said Head Office.
-you: So the Taxman has a boss. And Krampus works for it. So does Grimm.
+you: So the Taxman has a boss. And the horned thing works for it. So does Grimm.
 mate: And wherever it is, I bet it's got a lot of windows.`,
 
-// 12 The Emperor's Diary — Carnuntum
-`@wall-dusk
-~ Carnuntum was a Roman city on the Danube, where the Amber Road met the Empire.
-~ Amber came south from the Baltic to here, then on to Italy, to be carved into charms and rings and tiny pots for perfume.
-~ The emperor Marcus Aurelius lived here for a few years and wrote some of his private notes here.
-Guide (Site guide): A lot of what he wrote is him telling himself to get out of bed in the morning and get on with it.
-mate: Relatable.
-Guide (Site guide): He'd remind himself he was getting up to do a person's proper work. Then, presumably, he lay there a bit longer.
-~ In a rebuilt Roman house, on a kitchen shelf, there's an amber bead in a little glass case. Found in a dig.
-~ Same colour as the one in the Count. Same size. In your hand, the Count goes quiet, as if it's listening.
-? The Count is listening to something.
-- Listen too {s4.listened}
-  ~ You hold it to your ear. Under the ticking, very faint: a second tick. Slower. Older.
-  ~ Like another heart, somewhere close, that stopped a very long time ago and is trying to start.
-- Try to wind it
-  ~ You try to wind it. It won't wind. It hasn't run down. It's waiting.
-~ From the riverbank you can see the glow of Vienna. Forty kilometres. One more week.
-~ The Count starts ticking again, slow and steady.
-~ But the needle doesn't point at Vienna. It points the other way. Down the Danube. East.
-mate: It doesn't want to go to Vienna?
-you: It does. It just already knows it isn't stopping there.
-~ That night the Taxman leaves a note under the tent flap. It isn't an invoice. That's what makes it frightening.
-Taxman (The Taxman, by note): Vienna. The coffee house on the Ring. Table by the window. He's been waiting. Do be gentle. He bruises like a pear.`,
+// 10 The Hush Below: the Hushfrost Reach, deeper
+`@hushfrost
+~ The Hush Below is under the Hushfrost Reach: a cave of ice so deep the silence has weight. Kit leads you down. He knows the way.
+Kit: He's close now. Mr Holloway. I can feel it. Warm and cold at the same time.
+~ At the bottom, in the blue dark, Wisp is waiting.
+~ For the first time you see them side by side. Kit, freckled and nearly solid. Wisp, pale and thin and very old. The same height. The same shape, if you squint.
+boss:leftonread (Kit): ...wait for me...
+Kit: That's the bit of me that's still waiting. On the ice. It never stopped waiting.
+? Kit is looking at Wisp.
+- "Tell it it can stop soon." {s4.soon}
+  Kit: Not yet. Not till he's said sorry. Then it can stop.
+  ~ Wisp hears. It drifts back a little, into the ice. Not gone. Waiting, but a different kind.
+- Let Kit decide
+  ~ You say nothing and let Kit decide. He walks up to Wisp and puts his hand out, and Wisp puts its hand out, and they don't quite touch.
+  Kit: Soon.
+!shake
+~ The ice groans. Wisp still has its job to do. It comes at you, all cold and grief, and you hold together in the dark and see it back to its Hollow.
+~ Kit doesn't fight it. He just stands at the back, holding the lantern with A.H. on it, keeping the light on for everyone.`,
 
-// 13 Holloway's Letter — Vienna
-`@cafe
-~ Vienna: palaces and trams, and coffee houses where the waiters wear bow ties and nobody rushes you.
-~ It's the end of October. The leaves on the Ring are gold. You've walked from Cornwall to the Danube in a year.
-~ Ishbel told you which coffee house. The head waiter has a letter for you.
+// 11 Get Up, Abiah: the Spindrift Isles, deeper (Windward Last)
+`@spindrift
+~ Windward Last is the last island before the Spindrift Isles give out. A rock, a stone hut and a view of the Misrendered Realm flickering green on the horizon.
+~ Inside the hut, on the windowsill, there's a diary. It's in the neat handwriting. The capitals are very neat.
+~ Every page says more or less the same thing.
+Holloway (Abiah Holloway, diary): Get up, Abiah. Get up and walk.
+Holloway (Abiah Holloway, diary): Get up. The boy is behind you. Go back for him.
+Holloway (Abiah Holloway, diary): Get up. Tomorrow. Tomorrow, then.
+~ The last page just says: Tomorrow.
+~ Kit reads it over your shoulder. He doesn't say anything for a long time.
+Kit: He knew. He knew he should go back.
+!shake
+~ Gale comes screaming round the hut, thick-skinned and spinning, trying to blow the diary out of your hands.
+boss:scroll: Refresh. Refresh. Refresh.
+? Gale wants the diary.
+- Hold on to it, all together {s4.diary}
+  ~ You hold on to it together, everyone with a corner. Gale tears at it for an hour and gets one page, the one that says Tomorrow, and nothing else.
+- Let Kit keep it
+  ~ Kit puts the diary inside his coat and holds on. Gale can't get in there. Nothing can.
+~ When the wind drops, the needle on the Count is pointing straight at the green flicker on the horizon.
+~ At the Misrendered Realm. At something in it that has been sitting very still for a very long time.`,
+
+// 12 The Black Shelf: the Lowmost Deep, deeper
+`@lowmost
+~ One more week. The Black Shelf is the edge of the Lowmost Deep, where the sea floor just stops and there's a drop into the dark that the Count's needle can't measure.
+~ The Kraken is coiled round the edge, thick-skinned and furious, the oldest you've ever seen it.
+boss:kraken: Down here it's always three in the morning. And you have kept me up all year.
+!shake
+? The Kraken is guarding the edge.
+- Keep at it, all together {s4.shelf}
+  ~ You keep at it, steadily, the way you've learned. No big moments. It takes a long time. In the end the Kraken lets go of the edge and sinks away down its Throat, grumbling.
+- Let Kit hold the lantern up
+  ~ Kit holds up Holloway's lantern. The Kraken looks at it as if it has seen it before, a very long time ago, and backs away.
+~ You stand on the Black Shelf afterwards and look over. Nothing. Black all the way down.
+~ The Taxman is there too, a little way along, with his itinerary.
+Taxman: Next week, a coffee house. I've booked a table. Not his table. Nobody books his table.
+~ Kit is very quiet.
+Kit: What if he doesn't want to see me?
+mate: Then we'll stand there until he does.
+Kit: That might take a while.
+you: We're good at standing. We're good at walking. We're very good at waiting.`,
+
+// 13 Holloway's Letter: the Misrendered Realm, deeper (The Table by the Window)
+`@misrendered
+~ At the back of the Upside Down Inn there's a door. Behind the door is a coffee house, and it's the only perfect thing in the whole Misrendered Realm.
+@cafe
+~ Marble tables. Bentwood chairs. Waiters in bow ties. Nobody rushes you. Every detail is right. Somebody copied this very lovingly.
+~ The head waiter has a letter for you.
 Waiter: This has been in the safe since 1734. To be given to "whoever brings in the brass counter".
 Waiter: I had stopped expecting to give it to anyone. So had my father. So had his.
 ~ It's from Abiah Holloway.
-Holloway (Abiah Holloway, 1734): I meant to take it all the way round. East and east, until east brings it home to Cornwall.
-Holloway (Abiah Holloway, 1734): Every step a stitch, and the world is a bigger coat than England.
+Holloway (Abiah Holloway, 1734): I meant to take it all the way down. Seven doors, and under them a ladder, forty rungs, to the thing that sits at the bottom.
+Holloway (Abiah Holloway, 1734): Every step a stitch, and there is far more coat below than above.
 Holloway (Abiah Holloway, 1734): My knees have filed a complaint and I must stop here. Just for a coffee. Just to rest.
-Holloway (Abiah Holloway, 1734): Whoever reads this: it isn't finished. It will want six feast days a year. Let it have them.
-~ Underneath is a map of the whole world, very wrong, with a dotted line going all the way round.
+Holloway (Abiah Holloway, 1734): Whoever reads this: it isn't finished.
 ~ The handwriting is neat. The capitals are very neat.
-~ You've seen those capitals before. On Hadrian's Wall. On the Troll Road. On a signpost buried in a dune.
+~ You've seen those capitals before. In the museum. On Duplicate Hill. On a post at the edge of Mothermud.
 ~ STOP.
 !dark
 ~ At the table by the window, a very large man is reading a menu upside down. He's blue at the edges, in this light.
@@ -1605,31 +1478,41 @@ boss:algorithm (Grimm): I decided for everyone, after that. What they saw. Where
   ~ But his hand, on the table, twitches towards an old three-cornered hat.
 - "Why did you write STOP?"
   boss:algorithm (Grimm): Because if anybody finishes it, it means I could have.
+~ Then Kit steps out from behind you, holding the lantern with A.H. on the base.
+Kit: Mr Holloway.
+~ Grimm goes very still. The whole coffee house goes very still. Even the steam from the cups stops.
+boss:algorithm (Grimm): Kit.
+Kit: You didn't turn round.
+boss:algorithm (Grimm): No.
+Kit: You could now.
 !light
-~ The Count chimes. Thirteen times. Twenty-two of the three hundred and sixty marks are glowing.
-~ Grimm flinches at every chime, exactly like the Taxman did at Nordkapp.
-~ The Taxman is at the next table, drawing up an itinerary. He raises his cup.
-Taxman: A world tour. Think of the paperwork.
+~ The Count chimes. Thirteen times. On the back, the fourth of the forty rungs lights up gold.
+~ Grimm flinches at every chime, exactly like the Taxman does.
+~ The Taxman is at the next table, drawing up his itinerary. He raises his cup.
+Taxman: A tour of the depths. Think of the paperwork.
 boss:algorithm (Grimm): Finish it, then. Show me.
 @the-glow
-~ And far away to the east, so far that east starts to become west, something with a hundred small lights for eyes opens them.
+~ And far below, under the seven realms, under all forty rungs, something with a hundred small lights for eyes opens them.
 ~ One by one.
-~ Each one the exact cold blue of a phone at 3am. Or of a lighthouse beam, seen from very far out to sea.`,
+~ Each one the exact cold blue of a phone at three in the morning. Or of a lighthouse beam, seen from very far out.`,
 ];
 
 const WRITTEN = { s1: S1, s2: S2, s3: S3, s4: S4 };
 
-// ---------- seasons 5+: the long way round ----------
+// ---------- seasons 5+: the long way down ----------
+// Ladder order, the same as game.js BOSSES: chapter k meets BOSSES[(k - 1) % 7] in its own realm.
 const BOSSES = [["notification", "Brett"], ["autoplay", "Rory"], ["leftonread", "Wisp"], ["scroll", "Gale"], ["kraken", "the Kraken"], ["algorithm", "Grimm"], ["dragon", "Vex"]];
+const LAIRS = { notification: "Wallow", autoplay: "Burrow", leftonread: "Hollow", scroll: "Spindle", kraken: "Throat", algorithm: "Error Throne", dragon: "Hoard" };
+const REALM_OF = { notification: "blotmarsh", autoplay: "puffcap", leftonread: "hushfrost", scroll: "spindrift", kraken: "lowmost", algorithm: "misrendered", dragon: "gildedvoid" };
 const AFFIX_NAMES = { fog: "Fog", frost: "Frost", haste: "Haste", thickhide: "Thick Hide", volatile: "Volatile", leech: "Leech", bloodmoon: "Blood Moon", silence: "Silence", brittle: "Brittle", echo: "Echo" };
 const AFFIX_LORE = {
-  fog: ["This season the Stillness breathes out fog.", "You'll see its attacks coming late. Keep your eyes up."],
-  frost: ["Everything's stiff with cold this season.", "Swapping places takes twice as long. Decide where you stand before you set off."],
-  haste: ["Everything's in a hurry this season, monsters included.", "They swing faster. What you win off them comes faster too."],
+  fog: ["This season the Stillness breathes out fog, and it comes through the seam into every realm.", "You'll see their attacks coming late. Keep your eyes up."],
+  frost: ["Everything's stiff with cold this season, every realm of it.", "Swapping places takes twice as long. Decide where you stand before you set off."],
+  haste: ["Everything's in a hurry this season, creatures included.", "They swing faster. What you win off them comes faster too."],
   thickhide: ["The creatures have grown thick skins this season.", "Lucky big hits won't do much. Hit them a lot instead."],
   volatile: ["The creatures are jumpy this season.", "They'll use their own nasty trick far more often. Learn it and watch for it."],
   leech: ["This season, every hit that lands, the creature drinks a little back.", "Like a feed that refreshes itself. Don't let up."],
-  bloodmoon: ["There's a red moon this season.", "Under it the creatures hit forty per cent harder. The loot's better too. Of course it is."],
+  bloodmoon: ["There's a red moon over every realm this season.", "Under it the creatures hit forty per cent harder. The loot's better too. Of course it is."],
   silence: ["Something is sitting on your specials this season.", "They charge slower. Phones go a bit quieter too, which honestly is fine."],
   brittle: ["Everything's brittle this season.", "The creatures stagger easily, but they hit harder while they're standing."],
   echo: ["This season, everything echoes.", "Every third attack comes again a second later, softer, like a notification you've already dismissed."],
@@ -1644,7 +1527,7 @@ function affixFor(n) {
   return pairs[((n - 13) * 7) % pairs.length];
 }
 const BOSS_QUOTES = {
-  notification: ["BZZT. Did you see this? Did you SEE this?", "You have 99+ unread. You have 100+ unread. You have—", "Just checking in! Just checking in! Just checking in!", "BZZT. Someone you've never met liked something you never posted."],
+  notification: ["BZZT. Did you see this? Did you SEE this?", "You have 99+ unread. You have 100+ unread. You have...", "Just checking in! Just checking in! Just checking in!", "BZZT. Someone you've never met liked something you never posted."],
   autoplay: ["Next episode in five... four...", "Are you still watching? You are. You're still watching.", "Skip intro? Skip intro? Skip intro?", "Because you watched \"Sitting Down\", you might like \"Sitting Down Again\"."],
   leftonread: ["...seen.", "...typing...", "...seen at 11:42...", "...you never wrote back..."],
   scroll: ["Just one more. Just one more. Just one more.", "Refresh. Refresh. Refresh.", "Next! Next! Next! Next!", "There's always more further down. There's always more."],
@@ -1652,475 +1535,364 @@ const BOSS_QUOTES = {
   algorithm: ["STOP.", "You might also like: sitting down.", "Recommended for you: STOP.", "I know where you're going. I've decided it's the sofa."],
   dragon: ["Every hour you gave me, I kept.", "My hoard is made of evenings. Yours are in here somewhere.", "One more hour. You won't miss it. You never do."],
 };
-// Per leg: the keeper who meets you (who = portrait key), and backgrounds that suit the route.
-const LEGX = [
-  { keeper: "Zsófia", bgs: ["river-dusk", "fields-dusk", "city-night"] },
-  { keeper: "Mirsad", bgs: ["river-dusk", "forest-mist", "harbour"] },
-  { keeper: "Drita", bgs: ["peak-cloud", "road-night", "forest-mist"] },
-  { keeper: "Eleni", bgs: ["beach", "peak-cloud", "domes-dusk"] },
-  { keeper: "Aylin", bgs: ["domes-dusk", "desert-night", "rock-arch"] },
-  { keeper: "Anahit", bgs: ["snowfield", "peak-cloud", "desert-night"] },
-  { keeper: "Nino", bgs: ["forest-mist", "tor-sunset", "city-night"] },
-  { keeper: "Farrukh", bgs: ["desert-night", "domes-dusk", "road-night"] },
-  { keeper: "Gulnara", bgs: ["peak-cloud", "snowfield", "glen-snow"] },
-  { keeper: "Karim", bgs: ["peak-cloud", "glen-snow", "road-night"] },
-  { keeper: "Harpreet", bgs: ["road-night", "domes-dusk", "river-dusk"] },
-  { keeper: "Sunita", bgs: ["temples-dusk", "forest-mist", "peak-cloud"] },
-  { keeper: "Pemba", bgs: ["peak-cloud", "forest-mist", "temples-dusk"] },
-  { keeper: "Thida", bgs: ["temples-dusk", "river-dusk", "jungle"] },
-  { keeper: "Sophea", bgs: ["jungle", "temples-dusk", "river-dusk"] },
-  { keeper: "Linh", bgs: ["beach", "temples-dusk", "city-night"] },
-  { keeper: "Mei", bgs: ["lake-mist", "temples-dusk", "forest-mist"] },
-  { keeper: "Mr Zhao", bgs: ["wall-dusk", "temples-dusk", "peak-cloud"] },
-  { keeper: "Ji-woo", bgs: ["harbour", "temples-dusk", "city-night"] },
-  { keeper: "Haruki", bgs: ["temples-dusk", "city-night", "peak-cloud"] },
-  { keeper: "Rosa", bgs: ["islands", "forest-mist", "temples-dusk"] },
-  { keeper: "Ayu", bgs: ["islands", "jungle", "beach"] },
-  { keeper: "Jen", bgs: ["red-desert", "desert-night", "road-night"] },
-  { keeper: "Pete", bgs: ["red-desert", "desert-night", "city-night"] },
-  { keeper: "Aroha", bgs: ["fjord-ice", "peak-cloud", "lake-mist"] },
-  { keeper: "Sione", bgs: ["islands", "beach", "sea-storm"] },
-  { keeper: "Marama", bgs: ["islands", "sea-storm", "harbour"] },
-  { keeper: "Camila", bgs: ["desert-night", "snowfield", "lake-mist"] },
-  { keeper: "Mateo", bgs: ["peak-cloud", "forest-mist", "glen-snow"] },
-  { keeper: "Valentina", bgs: ["jungle", "forest-mist", "islands"] },
-  { keeper: "Itzel", bgs: ["jungle", "beach", "town-day"] },
-  { keeper: "Lupe", bgs: ["desert-night", "town-day", "red-desert"] },
-  { keeper: "Earl", bgs: ["road-night", "city-night", "forest-mist"] },
-  { keeper: "Maggie", bgs: ["lighthouse-night", "harbour", "city-night"] },
-  { keeper: "Sigrún", bgs: ["fjord-ice", "aurora", "snowfield"] },
-  { keeper: "Margaret", who: "Margaret", bgs: ["aurora", "glen-snow", "islands"] },
-];
-// The long arc, one entry per leg: `mid` plays in chapter 7, `end` in chapter 13 before the chimes.
+
+// The long arc, one entry per cycle (season 5 = 0): `mid` plays in chapter 7 (the Gilded Void), `end` in chapter 13
+// (deep in the Misrendered Realm) before the chimes. "HOL:" at the start of a line is Holloway: still in Grimm's
+// shape for the first few seasons, then himself.
 const SAGA = [
-  // 0 The Blue Danube
-  { mid: `~ On the riverbank behind you, half a mile back, something big and blue is walking. Slowly. Limping.
+  // 0 The First Rung
+  { mid: `~ On the gold road behind you, half a mile back, something big and blue is walking. Slowly. Limping.
 mate: Grimm. He's following us.
 ~ He stops when you stop. He starts when you start. He doesn't come any closer.
-Keeper ({keeper}): The big one? He sat on a café chair for three hundred years. His legs have forgotten how. Give them time.`,
-    end: `~ {end}, where two rivers meet and go on as one.
-~ Grimm is on the far bank. He takes something out of a crack in his bark: an old three-cornered hat.
+Kit: He sat in a coffee house chair for three hundred years. His legs have forgotten how. Give them time.`,
+    end: `~ At {place}, Grimm is waiting on the far side of a flickering stream. He takes something out of a crack in his bark: an old three-cornered hat.
 ~ He holds it for a long time. Then he puts it on.
-Taxman: He's going to follow you round the world, you know. Badly. At a distance. Writing STOP on things.
+Taxman: He's going to follow you all the way down, you know. Badly. At a distance. Writing STOP on things.
 you: Why?
-Taxman: Because the only way he gets to finish is if you do. And he'll never admit it. Neither would I.` },
-  // 1 The Dinaric Way
-  { mid: `~ At Mostar, young men dive off the Old Bridge into the river for tips. Twenty metres down.
-~ The bridge was destroyed in the war and rebuilt, stone by stone, with stones lifted out of the riverbed.
-Keeper ({keeper}): Things that fall can be put back. Slowly. By hand. That's all mending is.
-~ That's what a Sunday is, really. You're not winning anything. You're putting stones back.`,
-    end: `~ {end}: a walled town at the end of a long inlet, and a fortress path of over a thousand steps.
-~ You climb them at dawn. Halfway up there's a bench, and Grimm is sitting on it, breathing hard.
-? Grimm is blocking the path, out of breath.
-- Sit with him a minute {g.sat}
-  ~ You sit with him. Just a minute. The Count doesn't go cold. Sitting with someone, it turns out, is allowed.
-- Step round him
-  ~ You step round him. Behind you, after a while, you hear him get up. And keep climbing.
-boss:algorithm (Grimm): ...Thank you.
-~ Then he writes STOP on the fortress wall, out of habit, and looks embarrassed about it.` },
-  // 2 Gods and Goat Paths
-  { mid: `~ At Meteora, monasteries sit on top of stone pillars. For centuries the only way up was a net on a rope.
-Monk: People think we came up here to stop. We came up here to be still. It's not the same thing.
-Monk: Stillness you choose has a door in it. The other kind doesn't.
-mate: What's the other kind?
-Monk: You've seen it. It glows.`,
-    end: `~ At Delphi, where the oracle used to sit, a guide does the voice for the tourists. Very badly.
-Guide (Guide at Delphi): "The eye you seek has watched you leave. It will watch you come home."
-Guide (Guide at Delphi): That's not one of the real ones. I don't know why I said it. Sorry. It just came out.
-~ Then {end}, and the Acropolis glowing gold above a city of a million blue windows.
-~ The Count chimes from the hill, and for a second every phone screen in the city flickers.` },
-  // 3 Where Europe Stops
-  { mid: `~ The Taxman has caught a cold. He sneezes on his forms and apologises to them.
-~ {mate} lends him a scarf. He looks at it as if it might be a trick.
-Taxman: Mabel knitted. She knitted the whole way from Lindesnes. Scarves for everyone. Mine was green.
-Taxman: I left it in the shelter. With them.
-~ After an hour he gives the scarf back, very carefully, folded.`,
-    end: `~ {end} sits on two continents. You walk across the bridge over the Bosphorus from Europe into Asia, and the Count chimes two notes instead of one.
-~ On the far side, at the end of the bridge, a thin boy in a brown coat is waiting. Waving you across.
-Kit: You came! You said you would!
-~ Then a ferry horn goes, and he's gone, and the frost on the railing where he stood is shaped like a hand.` },
-  // 4 Fairy Chimneys
-  { mid: `~ Derinkuyu is a city dug eight floors underground. Thousands of people once hid down here, with their animals, for months.
-~ On the lowest level, in a room the guide doesn't show the tourists, there's a blue light. No bulb. No source.
-~ Chairs. Rows of them, all facing one blank wall. All empty. All warm.
-Keeper ({keeper}): People hid down here from armies. Afterwards, some didn't want to come back up. It was safe and quiet, and something kept them company.
-? The chairs are still warm.
-- Leave. Now. {g.leftchairs}
-  ~ You leave. Up eight floors, fast, nobody saying a word.
-- Turn one chair to face the door
-  ~ You turn one chair round, to face the way out. It feels important. The blue light flickers, annoyed.`,
-    end: `~ At dawn a hundred hot-air balloons rise over the valley of stone chimneys.
-Taxman: Head Office? It isn't a monster, if that's what you're picturing. It's a habit with a postcode.
-Taxman: Everyone who ever sat down and didn't get up. All in one place. Very comfortable. Very warm. Very blue.
-you: Where?
-Taxman: East. Keep going east. It's always east. Until it isn't.` },
-  // 5 In Ararat's Shadow
-  { mid: `~ Mount Ararat, where the Ark is said to have come to rest after the flood.
-Keeper ({keeper}): Noah sat in a boat for forty days and it saved everyone. Stopping isn't always the enemy.
-Keeper ({keeper}): Rest is a stop with a morning after it. That's the difference. The Count knows it.
-~ That night you sleep properly for the first time in weeks. In the morning the Count is still ticking, softly, as if it kept watch.`,
-    end: `~ {end}: sulphur baths, wooden balconies and a fortress on the hill.
-~ Grimm is waiting at the edge of the old town. He doesn't swing. He falls into step, ten paces behind the last of you.
-~ And for ten steps, the Count ticks for him too. Ten small ticks, separate from yours.
-mate: Did you hear that?
-~ Grimm stops dead. He looks down at his feet as if they belong to someone else.
-boss:algorithm (Grimm): Ten.
-~ On Sundays, something wearing his shape still comes through the seam. He says it isn't him. It's what's left of him in there.` },
-  // 6 The Land of Fire
-  { mid: `~ At Yanar Dag a hillside has been on fire for longer than anyone remembers. Gas seeps out of the rock and burns.
-~ Vex lands on the hill and doesn't attack. It just sits in the flames like a cat in a sunbeam.
-boss:dragon: I was the first one. Did you know? Before phones. Before tellies. I was the fire in the cave.
-boss:dragon: They sat round me and told stories, and it was good. Then one day they stopped telling stories and just watched me.
-boss:dragon: That's when I got hungry.`,
-    end: `~ {end}: glass towers shaped like flames, and an old walled city underneath them.
-? Far behind you, Vex is still sitting in the fire, watching you go.
-- Shout it a story {g.story}
-  ~ You shout a story back up the hill. A terrible one, about {mate} and a goose.
-  ~ For a minute the fire flickers like it's laughing. It's the first story anyone has told it in ten thousand years.
-- Keep walking
-  ~ You keep walking. Behind you, the hill burns on, the way it always has.
-~ The needle points across the water: the Caspian, then the desert, then the Silk Road.` },
-  // 7 The Silk Road
-  { mid: `~ In the desert you sleep in an old caravanserai, a walled inn where traders stopped for the night with their camels.
-~ The walls are covered in six centuries of graffiti. Traders. Pilgrims. And here and there, the same small mark: a clipboard.
-Taxman: My predecessors. There's always been a Taxman, you see. On every road. Somebody has to hold the clipboard.
-mate: What happened to them?
-Taxman: They were released when the next one signed. That's how it works. Someone always has to hold it.`,
-    end: `~ {end}: blue domes, blue tiles, blue everywhere. But the good blue. Sky blue, not screen blue.
-~ The Taxman stands in the Registan for a long time, looking up.
-Taxman: I'd forgotten blue came in other colours.
-? He looks smaller than usual.
-- "Who takes the clipboard after you?" {g.whonext}
-  Taxman: Nobody, if you finish. If the Count goes all the way round, the terms end. For everyone. For me. For them.
-  Taxman: Don't tell anyone I told you. I'd be in terrible trouble with myself.
-- Leave him to it
-  ~ You leave him to it. When you look back, he's taken his hat off.` },
-  // 8 The Roof of the World
-  { mid: `~ The Pamir Highway is one of the highest roads on Earth. The air is thin. Every step costs double.
-~ Grimm is behind you, further behind every day. Then one morning he isn't moving at all. He's sitting on a rock at the side of the road.
-? Grimm has sat down.
-- Go back for him {g.wentback}
-  ~ You go back. All of you. It costs a whole afternoon.
-  ~ You can't carry him; he's enormous. You just stand there until he's embarrassed enough to get up.
-- Wait where you are
-  ~ You wait. It takes hours. At last a big blue shape gets up, very slowly, and starts walking.
-~ The Count ticks for him again. Eleven this time. Twelve.`,
-    end: `~ {end}: the Sunday market, which has run every week for two thousand years without missing one.
-~ Livestock, carpets, knives, melons, and absolutely everybody.
-boss:algorithm (Grimm): Kit.
-you: What about him?
-boss:algorithm (Grimm): Nobody went back for Kit. You went back for me. I am trying to work out why.
-mate: Because that's what you do.
-boss:algorithm (Grimm): ...It was not what I did.` },
-  // 9 The Karakoram
-  { mid: `~ The Karakoram Highway runs under the biggest mountains in the world, and the mountains are always trying to fall on it.
-!shake
-~ A rockfall blocks the road above Passu. Boulders the size of vans.
-~ In the morning, the road is clear. Every boulder has been rolled to the side. Very neatly. In rows.
-~ On the last one, in neat capitals, someone has written: NO.
-mate: Grimm. He's started writing NO.`,
-    end: `~ At the Golden Temple in {end}, a free kitchen feeds a hundred thousand people a day. Everyone sits on the floor together in long rows and eats.
-~ You sit. You eat. The Count doesn't go cold. Not even slightly.
-Keeper ({keeper}): Sitting together isn't stopping. Sitting alone, staring at a glow, waiting for the next thing: that's stopping.
-~ Grimm sits at the end of your row. Someone hands him a plate of dal. He eats very slowly, as if he'd forgotten food had a taste.` },
-  // 10 The Grand Trunk Road
-  { mid: `~ The Taj Mahal: the most beautiful building in the world, built by a man who couldn't stop grieving.
-~ A letter catches up with you in Agra. Penzance postmark.
-Morwenna (Morwenna, by letter): You'll have guessed there's something wrong with my light.
-Morwenna (Morwenna, by letter): It burns blue. It has since 1724. I tell myself it keeps the dark off the sea.
-Morwenna (Morwenna, by letter): I'm not sure, any more, which way it shines.`,
-    end: `~ {end} at dusk: the ghats, the river, and a thousand little lamps set floating on the water.
-~ They drift away downstream, a hundred small lights on dark water.
-~ The Count goes very still in your hand, the way it did at Carnuntum. Listening.
-mate: It doesn't like them.
-you: No. It recognises them.` },
-  // 11 Where the Buddha Walked
-  { mid: `~ At Bodh Gaya, under a descendant of the tree where the Buddha sat until he understood, monks sit in silence.
-mate: So they're sitting. Isn't that what we're fighting?
-Monk: We sit with our eyes open. The thing you fight sits with its eyes in a screen.
-Monk: One kind of sitting wakes you up. The other puts you to sleep and calls it rest.
-? The monk offers you a place to sit.
-- Sit for ten minutes {g.meditated}
-  ~ You sit. Ten minutes. Eyes open. Nothing glows.
-  ~ When you stand, the Count is ticking quietly, as if it approves.
-- Politely keep moving
-  Monk: Also good. Walking is just sitting with your feet.`,
-    end: `~ {end}: prayer flags, temple bells and traffic that sounds like an argument that's been going for centuries.
-~ Kit walks with you the whole last day. You can see him in daylight now, faintly, like a reflection in a shop window.
-Kit: When you finish, I get to stop properly. The good kind. With a door in it.
-Kit: I'd like that. I'm very tired. Three hundred years is a lot of walking for someone with short legs.` },
-  // 12 Tea and Thunder
-  { mid: `~ A monsoon storm hits on the way to Cherrapunji, one of the wettest places on Earth. Which is fair enough.
-~ When it clears, somebody is missing. Not one of you. The Taxman.
-? The Taxman is lost somewhere in the storm.
-- Go back for him {g.savedtax}
-  ~ You go back. You find him under a tea bush, soaked through, clutching his clipboard to his chest like a baby.
-  Taxman: Nobody has ever come back for me. I'm a tax collector. It isn't in the job description.
-- Shout for him
-  ~ You shout until you're hoarse. At last a very damp bowler hat rises out of the tea bushes.`,
-    end: `~ In {end} they play polo, and claim they invented it, and they're probably right.
-~ The Taxman hands you an envelope. Inside is a single form.
-Taxman: A write-off. One day's tax. A gesture of goodwill. Don't get used to it.
-~ It's the first form he has ever filled in that gives something back.
-~ At six that evening he still turns up for the fight. The terms are the terms. But he fights fair now. Almost politely.` },
-  // 13 The Golden Land
-  { mid: `~ Bagan: a plain with more than two thousand temples on it, all the way to the horizon.
-~ At dusk, people light lamps in the temple doorways. Thousands of small flames. Warm ones. Yellow.
-Keeper ({keeper}): Not every light is the bad kind. A lamp you light for someone isn't the same as a light that lights you.`,
-    end: `~ {end}: a river city of temples, tuk-tuks, and more glowing screens than anywhere you've been.
-~ The Taxman takes you up a tower and points west. Back the way you came. A very long way.
-Taxman: Head Office has an eye, you know. Just the one, really. Made of hundreds of little ones.
-Taxman: It's been looking out over the sea for three hundred years.
-you: Which sea?
-Taxman: I'm not allowed to say. I'm also not allowed to stop you working it out.` },
-  // 14 The Temple Road
-  { mid: `~ At Ta Prohm, near Angkor Wat, the jungle has grown straight through the temple. Tree roots pour over the doorways like melted candles.
-Keeper ({keeper}): This is what happens to anything that stops for long enough. Something grows over it.
-mate: That's a bit bleak.
-Keeper ({keeper}): It's also beautiful. Both. Like most things.`,
-    end: `~ {end} has millions of motorbikes, and all of them are moving at once.
-~ Nobody stops. Nobody. The whole city flows round you like a river.
-~ The Count goes wild. It ticks so fast it nearly purrs.
-mate: It's like it's never been anywhere this awake.
-~ That week, Brett can't find a single place to sit. He turns up on Sunday anyway, very cross about it.` },
-  // 15 The Long Coast
-  { mid: `~ Hội An: a lantern town. Silk lanterns in every colour, strung across every street.
-~ Your phone rings. It's Ishbel. Nobody has ever heard Ishbel's phone voice.
-Ishbel: You're past a hundred marks. I've been counting.
-Ishbel: I wanted to say. Morwenna asked after you. First time she's said my name in three hundred years.
-Ishbel: Don't make anything of it. Keep walking.`,
-    end: `~ {end}: lakes, scooters, and old men playing chess on the pavement.
-~ Outside the station, somebody has painted STOP on a wall in big blue capitals.
-~ Underneath it, newer, in the same neat hand: NO. NOT YET.
-mate: He's arguing with himself now.
-you: Good. That's how it starts.` },
-  // 16 The Karst Country
-  { mid: `~ Hạ Long Bay: thousands of limestone islands standing in green water. The name means "where the dragon comes down".
-!shake
-~ Something rises between the islands. Not a dragon. Tentacles.
-boss:kraken: You've come a long way to see me again.
-? The Kraken surfaces right beside the boat.
-- Ask it where the bottom of the feed is {g.krakenasked}
-  boss:kraken: Everywhere. Wherever someone lies awake at three in the morning with a screen on their face, the water is very deep.
-- Fend it off with an oar
-  ~ You fend it off with an oar. It's surprisingly effective. The Kraken looks offended and sinks.`,
-    end: `~ {end}: the Terracotta Army. Eight thousand clay soldiers in rows, all facing the same way, for two thousand years.
-~ Nobody speaks. You walk along the rows.
-Keeper ({keeper}): The emperor wanted an army that would never leave him. So he made one that couldn't.
-mate: That's it, isn't it? That's what the Stillness wants. Everyone in rows, facing the same way. For ever.
-~ At the far end of the pit, for one second, every clay face is lit blue. Then it's gone.` },
-  // 17 The Long Wall
-  { mid: `~ The Great Wall climbs mountains no sensible wall should climb. You walk on top of it for days.
-Keeper ({keeper}): People think walls keep things out. Walls don't keep anything out. People do. Walls are just where they stand.
-? {mate} asks what you'd keep out, if you could.
-- The glow
-  you: The glow. All of it.
-  mate: Even the telly on a Sunday night?
-  you: ...Most of it.
-- Nothing. Just keep walking. {g.nowall}
-  you: Nothing. Walls are for stopping. We're not stopping.`,
-    end: `~ {end}: where the Great Wall runs down into the sea and just stops.
-~ The needle swings out over the water. East, across the Yellow Sea.
-Taxman: Halfway to the halfway point. I've done the sums. You don't want the sums.
-mate: We never want the sums.` },
-  // 18 The Yellow Sea
-  { mid: `~ At Hahoe, a village of thatched houses, there's a mask dance that has been performed for eight hundred years.
-~ One of the masks is a greedy official. Everyone laughs at him. The Taxman watches very seriously, then laughs too, a bit late.
-Taxman: I'd like to ask you something. It isn't a form. It's a favour.
-Taxman: When we get to {end}, would you say their names? Out loud? Someone should, now and then.`,
-    end: `~ {end}: fish markets, mountains, and a temple on the rocks by the sea.
-~ The Taxman takes his hat off.
-Taxman: Mabel Ashworth. Arthur Penrose. Ruth Okafor. Sidney Clegg.
-? Say their names?
-- Say them together {g.namedfour}
-  you: Mabel. Arthur. Ruth. Sidney.
-  ~ The Count ticks four times. Four separate ticks, like four people answering a register.
-  ~ The Taxman puts his hat back on very quickly and walks off to look at a fish.
-- Let him say them
-  ~ He says them again, quietly, to the sea. The Count ticks four times.` },
-  // 19 The Tōkaidō
-  { mid: `~ In Kyoto there's a potter who mends broken bowls with gold. Kintsugi. The cracks become the most beautiful part.
-Keeper ({keeper}): You do this, don't you? On Sundays. You mend.
-you: We hit monsters until they go away.
-Keeper ({keeper}): That's also a kind of mending. Less gold. More shouting.`,
-    end: `~ {end}: the busiest city on Earth, and the most glowing. Millions of people, every one of them going somewhere.
-~ At the Shibuya crossing, thousands cross at once from every direction and nobody bumps into anybody.
-~ Grimm stands at the edge and watches. He isn't holding his club.
-mate: Where's his club?
-~ He left it at Mount Fuji, leaning on a signpost. Somebody has hung a label on it: LOST PROPERTY.
-~ On Sundays the thing that comes through the seam still carries one. It isn't his any more.` },
-  // 20 The Island Chain
-  { mid: `~ The Kumano Kodo: pilgrim paths through cedar forests, walked for a thousand years. Moss on every step.
-~ At a teahouse, an old woman stamps your pilgrim book and looks at the Count.
-Keeper ({keeper}): My grandmother saw one of those. 1924. A man with a brass thing and a very sad face.
-Keeper ({keeper}): He didn't get far. People who carry it alone never do.`,
-    end: `~ {end}: jeepneys painted like fairground rides, and the sea glowing at night.
-~ Out past the bay, the sea floor drops away into some of the deepest trenches on Earth.
-boss:kraken: This is home. The bottom of the sea is the bottom of the feed. They go down and down and never touch anything.
-boss:kraken: You keep coming up. Nobody keeps coming up.
-~ It sounds almost jealous.` },
-  // 21 Ten Thousand Islands
-  { mid: `~ On Komodo the dragons are real: three metres long, very slow, then very fast.
-~ Vex lands on the island one evening, takes one look at the Komodo dragons, and leaves again. Outclassed.
-mate: I've never seen Vex embarrassed before.
-you: Twice now. The first time was Finland.`,
-    end: `~ {end}: the top of Australia. Hot, wet, and full of crocodile warnings.
-~ The Count has lit up more than a hundred and thirty of its marks.
-Ishbel (Ishbel, by text): Halfway soon. Auckland. When you get there, ring me. Not text. Ring.
-Ishbel (Ishbel, by text): There's something I should have told you at John o' Groats.` },
-  // 22 The Red Centre
-  { mid: `~ Out here there's no signal for days. No glow. Just the biggest sky you've ever seen.
-~ For three nights running, nothing comes through the seams at all. It can't. There's nowhere for it to look out from.
-Keeper ({keeper}): The Stillness needs windows. Out here there aren't any. Just stars. Stars don't count. They look back.`,
-    end: `~ {end}. The rock is red, and sacred to the people whose country this is. They ask visitors not to climb it.
-~ So you walk round the base instead. Ten kilometres. All of you, together, slowly.
-~ It's the best walk of the season. The Count seems to think so too.
-Keeper ({keeper}): People have walked round here for tens of thousands of years. You're not the first. You won't be the last.` },
-  // 23 Back of Beyond
-  { mid: `~ At Lake Mungo there are human footprints in the clay, twenty thousand years old. A family walking. A child running ahead.
-mate: People have always walked.
-you: And somebody always went back for the kid.
-~ The Count ticks, warm, like it agrees.`,
-    end: `~ {end}: the bridge, the opera house, ferries criss-crossing the harbour.
-~ A letter is waiting at the post office. Penzance.
-Morwenna (Morwenna, by letter): You're nearly halfway. I'm frightened, if you want the truth.
-Morwenna (Morwenna, by letter): When the Count goes all the way round, the bargains end. All of them. Mine too.
-Morwenna (Morwenna, by letter): I don't know what I'll be when my light goes out. I've not been anything else for three hundred years.` },
-  // 24 The Long White Cloud
-  { mid: `~ The Tongariro Crossing: volcanoes, emerald lakes and a red crater that smells of eggs.
-~ Grimm walks in the middle of the squad now. Nobody remembers when that started.
-~ Halfway up, he speaks without being asked. That's new too.
-boss:algorithm (Grimm): Morwenna was nineteen. Ishbel was seventeen. I was fifty and should have known better.
-boss:algorithm (Grimm): I told them the Count would not abide a stop. That was my fear talking. I built it to keep us walking, then I made everyone afraid of it.`,
-    end: `~ {end}. The Count's needle passes the hundred and eightieth mark. Halfway round the world.
-~ You ring Ishbel, like she asked.
-Ishbel: Right. Listen. That thing with a hundred lights for eyes. Head Office.
-Ishbel: I've seen it. Every night for three hundred years. From John o' Groats, on a clear night, you can see a long way down the coast.
-Ishbel: I never told you because I wasn't sure. I'm still not sure. Keep walking.
-~ She hangs up. The needle points east. Which, from here, is starting to mean home.` },
-  // 25 The Date Line
-  { mid: `~ Out here, between the islands, the date changes. You can lose a whole day by crossing a line on a map.
-~ You lose one. Somewhere between Vanuatu and Fiji, a Tuesday doesn't happen.
-~ In the missing day everything stops, like the lost hour at Tornio. And Kit is there, sitting on the deck, waiting.
-Kit: I like it in here. Nothing goes on without you. Nobody gets left.`,
-    end: `~ {end} sits right on the 180th meridian. You can stand with one foot in today and one in yesterday.
-!glitch
-~ Standing there, you can hear it. Head Office. A voice like a room with the telly on.
-Morwenna (???): Stay in yesterday. It's so much quieter. Nobody has to walk anywhere in yesterday.
-? Something is offering you yesterday.
-- Step into tomorrow {g.tomorrow}
-  ~ You step into tomorrow. All of you, together. The voice sighs like a sofa.
-- "What are you?"
-  you: What are you?
-  Morwenna (???): Tired. Just very, very tired. Aren't you?
-  ~ You step into tomorrow anyway.` },
-  // 26 The Long Ferry
-  { mid: `~ On Rapa Nui, the great stone heads stand with their backs to the sea, watching over the island.
-Keeper ({keeper}): They face inland, to look after the people. Not out at the water.
-Keeper ({keeper}): A watcher that faces the wrong way stops being a guardian. It becomes the other thing.
-mate: Like a lighthouse that shines inland.
-~ Nobody says anything for a long while after that.`,
-    end: `~ {end}: a city of steep hills, painted houses and ancient funiculars clanking up and down.
-~ The Taxman takes the stairs. All of them. Without being asked.
-Taxman: I keep a separate ledger, you know. In my head. What I'd owe them, if I could pay.
-Taxman: I've started walking to work. It's very far. I'm very late. It's wonderful.` },
-  // 27 Salt and Stars
-  { mid: `~ The Salar de Uyuni: a salt flat so big and so flat that after rain it turns into a mirror. Sky above, sky below.
-~ At night there are stars everywhere. Up. Down. All round.
-~ And in the mirror, far off at the western edge of the world, a hundred small blue lights, reflected in the salt.
-~ When you look up at the real sky where they should be, there's nothing.
-mate: It's not out there. It's somewhere the mirror can see and we can't.`,
-    end: `~ {end}, on Lake Titicaca: the highest navigable lake in the world. Floating islands made of reeds, rebuilt by hand every few months.
-Keeper ({keeper}): The reeds rot from underneath, so you add new ones on top. Always. If you stop, you sink.
-you: That's the most Long Count thing anyone's ever said to us.` },
-  // 28 The Inca Road
-  { mid: `~ The Inca had relay runners called chasquis. Messages went thousands of miles along this road, runner to runner, and never stopped.
-Keeper ({keeper}): One runner can't go far. A line of them can cross an empire.
-~ At Machu Picchu, in the cloud, you pass the Count down the line, hand to hand. Everybody carries it for a bit.`,
-    end: `~ {end}: the Middle of the World. There's a line on the ground for the equator. You stand on it with one foot in each half of the planet.
-~ The Count is nearly three hundred marks round.
-boss:algorithm (Grimm): I never got this far. Not even in my plans.
-~ His bark is softer now. Patches of it look almost like a coat. Almost like skin.` },
-  // 29 Coffee and Canals
-  { mid: `~ There's no road through the Darién Gap. Just jungle and swamp. You go round by boat through the San Blas islands.
-~ The Count sulks the whole way. Then you land, and it ticks like it's never been happier.
-mate: It's like a dog after a car journey.`,
-    end: `~ {end}: a perfect cone of a volcano, smoking quietly over the rainforest.
-!flash
-~ Vex is coiled round the summit, on its hoard. Bigger than ever. It has been eating well.
-boss:dragon: You're nearly round. When you're round, I lose all of it. Every hour goes back to whoever it belonged to.
-boss:dragon: I don't want to go back to being a fire in a cave.
-? Vex sounds afraid.
-- "The cave was the good bit." {g.vexcave}
-  you: Being a fire in a cave was the good bit. People told stories round you.
-  boss:dragon: ...They did. They did, didn't they.
-- "Then we'll take them back the hard way."
-  boss:dragon: Then come up the hill on Sunday, walker.` },
-  // 30 Pyramids in the Trees
-  { mid: `~ At Tikal, temples rise out of the jungle like the tops of drowned ships.
-Keeper ({keeper}): The Maya had a calendar for very long spans of time. Thousands of years. They called it the Long Count.
-mate: ...Seriously?
-Keeper ({keeper}): Seriously. Your Mr Holloway read a lot of books, I expect.
-boss:algorithm (Grimm): I did. I borrowed the name. A long walk needed a long name. I was very pleased with myself.`,
-    end: `~ {end}: a walled port painted every colour of ice cream.
-~ The Count has more than three hundred marks lit. You can see the end of the dial now. The very last mark.
-~ Under a magnifying glass it isn't a line. It's a tiny lighthouse. Paweł in Toruń was right.` },
-  // 31 The Silver Road
-  { mid: `~ You reach the mountain towns at the start of November. Día de Muertos: marigolds, candles, sugar skulls, families picnicking on graves.
-Keeper ({keeper}): For one night the dead come home. You set a place for them. You say their names.
-? The keeper sets out extra plates.
-- Set places for the ones you've met {g.dead}
-  ~ You set places. The navvy. Margaret's Gerald. Mabel, Arthur, Ruth and Sidney. Kit.
-  ~ In the morning the plates are empty and the candles have burned down. Somebody has left a pipe. Somebody has left a green scarf.
-- Watch the candles
-  ~ You watch the candles until they gutter. Every flame is yellow. Not one of them is blue.`,
-    end: `~ {end}: the border, the desert, and the long road east across America.
-~ The Taxman is waiting at the bridge with his folding table. He doesn't tax anyone. He's just sitting in the sun.
-Taxman: I'm practising. For when there's nothing left to collect. I'm told this is called a holiday.` },
-  // 32 The Long Road East
-  { mid: `~ Memphis, then Nashville. Music out of every door.
-~ {mate} learns three chords on a borrowed guitar and plays them for six hundred miles.
-~ It drives everyone mad. The Count ticks along in time. It's the only one who likes it.`,
-    end: `~ {end}: monuments, marble, and very long queues.
-~ The Taxman spends the whole day writing a letter. Very carefully. Several drafts.
-Taxman: My resignation. To Head Office. Effective the moment the Count completes.
-Taxman: They won't accept it, of course. But when you finish, it won't be up to them.
-? He asks you to witness it.
-- Sign as witness {g.witness}
-  ~ You sign. {mate} signs. Everyone signs. It's the first form you've ever been glad to fill in.
-- "Are you sure?"
-  Taxman: I've been sure since a blizzard in 1911. I've just been very slow about it.` },
-  // 33 Lighthouse to Lighthouse
-  { mid: `~ Peggy's Cove: a lighthouse on bare granite, above the most photographed rocks in Canada.
-~ The keeper lets you up into the lamp room. The lens is huge: rings of glass and prisms, hundreds of them, round a single lamp.
-Keeper ({keeper}): A Fresnel lens. Lighthouses have them. Hundreds of little prisms, all bending the light the same way.
-Keeper ({keeper}): From far out at sea, at night, it doesn't look like one light. It looks like a hundred small ones. Like eyes.
-!glitch
-~ Nobody says anything. Then everybody says it at once.
+Taxman: Because the only way he gets to finish is if you do. He'll never admit it. Neither would I.` },
+  // 1 Rising Damp
+  { mid: `~ The damp has got into the Void. The gold road is slippery, and Vex's hoard steams.
+~ In a puddle on the road you can hear something: a whole evening from 1951, trapped in the water. Laughter, a telly, someone saying "just one more".
+Margaret: That'll be the Fairy Ring lot. Their last good evening. She keeps everything.
+? The evening is still playing in the puddle.
+- Stamp in it {g.stamp}
+  ~ You stamp in it. The evening splashes up into the dark and floats away free, like a bubble. Somewhere, very faint, someone says thank you.
+- Leave it be
+  ~ You leave it be. Some things aren't yours to let go.`,
+    end: `~ At {place}, Grimm is sitting on a bench, breathing hard. He has walked the whole week behind you, every step.
+HOL: I had forgotten knees. I had forgotten a great deal.
+Kit: You'll remember. It comes back. Like pins and needles, but all of you.
+~ Grimm looks at Kit for a long time. Then he gets up off the bench, on his own.` },
+  // 2 Spore Season
+  { mid: `~ Spores have drifted up into the Void. They hang in the gold light like dust in a church.
+~ At Moonwharf the Summit Committee are wearing masks made of old tea towels.
+Margaret: Gerald's a bit more solid this year. Every squad that keeps walking, he comes back a little. Look, you can see his tie.
+~ You can. It's a very bad tie. Gerald waves, faintly.`,
+    end: `~ At {place}, on a post, there's the word STOP in neat blue capitals, fresh.
+~ Grimm is standing beside it with a stick of chalk. He looks at it for a long time. Then, slowly, underneath, he writes: NO.
+~ He looks at it as if somebody else did it.
+Kit: That's the first time.
+HOL: It is not. It is the second. The first was 1724. I had forgotten.` },
+  // 3 The Long Hush
+  { mid: `~ In the Void, with the sound turned down, you can hear the Count ticking. And under it, very faint, a second tick, slightly out of time.
+~ It's coming from Kit. A heartbeat. Slow, and cold, but there.
+Kit: Is that me?
+mate: That's you.
+Kit: I didn't know I still had one.`,
+    end: `~ At {place}, Kit and Holloway walk side by side for a bit. Not talking. Kit's short legs, Holloway's long ones, somehow in step.
+~ Then Kit stops and turns round and looks back up the path, and waits for the last of the squad to catch up.
+~ Holloway watches him do it. He doesn't say anything. But the next time someone falls behind, he's the one who waits.` },
+  // 4 Loose Moorings
+  { mid: `~ One of the Spindrift Isles has drifted all the way into the Void. On it is a little stone cottage with smoke coming out of the chimney.
+~ Six men in flat caps are sitting outside it, playing cards. You know one of them.
+Navvy: Evening. Don't mind us. We're off the wreck. Somebody kept walking long enough that we could stand up for a bit.
+Navvy: It's grand. Everything aches. I love it.`,
+    end: `~ At {place}, a bridge has only loaded half its planks. Holloway walks out over the gap and holds the missing planks in place with his own hands while you cross.
+HOL: Nobody went back for Kit. You went back for me. I am trying to work out why.
+you: Because you were behind.
+HOL: That's all?
+Kit: That's all it ever is.` },
+  // 5 Low Water
+  { mid: `~ The hoard is spilling. Loose hours tumble down the gold road like coins out of a burst bag.
+~ The Taxman picks one up and holds it to his ear. Then he goes very pale.
+~ It's an evening from 1911. A snow shelter. Somebody singing, badly.
+Taxman: That's Mabel.
+~ He listens to the whole song with his hat off, in the middle of the road. Nobody hurries him.`,
+    end: `~ At {place}, the Taxman finds you. He's been walking all week. You can tell by his shoes.
+Taxman: The four in the shelter. They're getting colder. The terms change as the ladder goes down. I don't like the new terms.
+you: Then change them.
+Taxman: You don't change terms with the Stillness. You read the small print. I'm reading it.
+~ He has a very small magnifying glass. He looks as if he hasn't slept since 1911.` },
+  // 6 Copy Errors
+  { mid: `~ The Void is loading wrong. Half the stars are squares. There's a copy of Vex's hoard next to the real one, made of yellow cardboard.
+~ Vex is furious about this. You can hear her from the dock.
+boss:dragon: COPIES. Copies of my GOLD.
+~ For once she isn't interested in you at all. You walk the whole Void unbothered while she sets fire to cardboard.`,
+    end: `~ At {place}, in a copy of your town, Holloway shows you round. He's proud of it and ashamed of it in exactly equal amounts.
+HOL: I copied everything I stopped seeing. Your street. Your bus stop. A thousand towns. I couldn't bear to look at them, so I kept them in here.
+? Holloway is standing in the copied high street.
+- "Put them back." {g.putback}
+  you: Put them back. Let people see them again.
+  ~ He lifts a hand. One copied shop flickers and is gone. Back home, a real one, shut for years, has its lights on in the morning.
+- "Why copy them at all?"
+  HOL: Because I missed them.` },
+  // 7 The Gold Rush
+  { mid: `~ Loose hours are raining down out of the Void into every realm below. People back home pick them up in their sleep and wake feeling as if they've had an evening off.
+~ Vex is beside herself, flying up and down the gold road with a sack.
+boss:dragon: Mine. Mine. Mine. That one's mine.
+~ One hour lands right in your hand. It's warm. It's one of your own evenings, the one you spent scrolling in March.
+? You're holding one of your own lost evenings.
+- Keep it {g.kept}
+  ~ You keep it. That night you sleep like someone who went for a walk after tea.
+- Give it back to the Void
+  ~ You let it go. Vex snatches it out of the air, looks at you, and for a second seems almost confused.`,
+    end: `~ At {place}, Holloway takes one of his copies apart. The whole of a copied street goes, house by house, like a sandcastle in the tide.
+~ Back home, in a real street, somebody opens their curtains for the first time in a year.
+HOL: That's one. There are rather a lot.
+Kit: You'd better keep going, then.` },
+  // 8 Two by Two
+  { mid: `~ The realms are thin this season. Through a gap in the Void's floor you can see down into the next realm, and through a gap in that, the next.
+~ And at the very bottom, through all of them, a long way down: a hundred small blue lights.
+~ They aren't stars. Stars don't blink all at once.`,
+    end: `~ At {place}, a letter is waiting, pinned to a post with a hatpin.
+@lighthouse-night
+Morwenna (Morwenna, by letter): I can see you from here. You're further down than anyone has ever been.
+Morwenna (Morwenna, by letter): Be careful. The lights are not stars.
+Morwenna (Morwenna, by letter): And tell Abiah I said nothing at all. He'll know what it means.
+@misrendered` },
+  // 9 The Undertow
+  { mid: `~ Everything is sliding downhill. In the Void that means the gold road tilts, and you walk it leaning back, like going down a sand dune.
+~ Margaret's stall has slid a mile down the road. The Committee are chasing it with their flasks.
+Margaret: Everything's going down this year, dear. Even the tea. Mind you don't go with it.`,
+    end: `~ At {place}, Holloway stops in the middle of the flickering road and says something you didn't expect.
+HOL: I'm sorry, Kit.
+~ Kit doesn't answer straight away.
+Kit: Say it again in a year. If you still mean it, I'll believe it.
+HOL: That's fair.
+Kit: I know it's fair. I've had three hundred years to work out what's fair.` },
+  // 10 Lanterns Out
+  { mid: `~ Someone has put out the lanterns on the gold road. The Void is very dark without them.
+~ You find the culprit at the end of the dock. It isn't the Taxman. It's a little brass snuffer on a long pole, moving on its own, blue at the tip.
+~ Kit relights every lantern behind it, one by one, without being asked.`,
+    end: `~ At {place}, the Taxman is waiting with a lantern of his own. He holds it up.
+Taxman: I want it on record that the lanterns were not me.
+mate: We know. We saw the snuffer.
+Taxman: Head Office does that. Puts the lights out, so people stay where they are. It's in the small print.
+Taxman: I've been reading the small print. There's a great deal of it.` },
+  // 11 The Halfway Rung
+  { mid: `~ Halfway down the ladder the Void is old. The gold has gone dull, like a brass doorknob nobody polishes.
+~ Vex is old down here too. She doesn't fight you. She just watches from her hoard, with one eye.
+boss:dragon: You keep giving the hours back. Nobody gives the hours back.
+boss:dragon: It's very annoying. I'm counting it.`,
+    end: `~ At {place}, twenty rungs down, the Count's ticking has gone so deep you feel it in your feet.
+~ Holloway stops and takes his hat off.
+HOL: This is as far as I got. I came down this far on my own, and then I went back up and sat down in a coffee house.
+HOL: Everything below this I have never seen.
+Kit: Nor have we. Come on, then.` },
+  // 12 The Hundred Lights
+  { mid: `~ From the edge of the Void you can see them clearly now. A hundred small blue lights, far below everything, in a ring.
+~ As you watch, they all turn the same way. Towards you.
+mate: They're watching us.
+Kit: They've always been watching. Now they're looking.`,
+    end: `~ At {place}, Holloway draws you a map in the dust. Seven realms. A ladder. And at the bottom, a ring of lights.
+HOL: The Taxman calls it Head Office. Morwenna's bargain was made with it. So was mine. So was his.
+you: What is it?
+HOL: I don't know. I only know it sits. It has always been sitting. And it is very, very tired.` },
+  // 13 Head Office
+  { mid: `~ The Taxman is walking with you this season, all the way, every day. He complains about everything. He doesn't fall behind once.
+~ At Moonwharf, Margaret sells him a jar of air. He pays. He actually pays.
+Margaret: Is he all right?
+mate: He's got a review at Head Office.
+Margaret: Oh, the poor man.`,
+    end: `~ At {place}, the Taxman gets his review. It's a letter in blue ink that arrives out of nowhere and unfolds itself.
+~ He reads it. He goes white. He reads it again.
+Taxman: Collections are down. Steps are up. Walkers keep walking. Head Office is "concerned".
+Taxman: They want me to try harder.
+? The Taxman is holding the letter.
+- "Will you?" {g.taxask}
+  Taxman: I have always tried exactly as hard as the terms require. Not a step more.
+  ~ He folds the letter into a paper boat and puts it in a flickering puddle.
+- Say nothing
+  ~ You say nothing. He folds the letter very small and puts it in his pocket, next to the pilgrim passport.` },
+  // 14 Old Debts
+  { mid: `~ In the Void, on the gold road, you find Mabel's knitting. A long scarf, a hundred years long, unravelling behind someone who walked this way in 1911.
+~ The Taxman picks up the end of the wool and follows it, winding it into a ball as he goes.
+~ It leads all the way across the Void. He winds all of it.`,
+    end: `~ At {place}, the Taxman sits down on a step. Then he remembers, and stands up again, very fast.
+Taxman: I've found it. In the small print. Clause nine hundred and four.
+Taxman: The four in the shelter go free if the ladder is finished. All forty rungs. By walkers who never once stop.
+Taxman: It's a clause written so that nobody could ever meet it. That's how you write clauses.
+mate: So we meet it.
+Taxman: Yes. I was afraid you'd say that.` },
+  // 15 Krampus Weather
+  { mid: `~ The horned thing is following. Every week, a realm behind, with its sack and its chains and its list.
+~ In the Void you see it clearly for the first time: standing on the gold road, ticking names off in the air with a long black claw.
+? Krampus is watching you from the gold road.
+- Wave {g.wavedk}
+  ~ You wave. It doesn't wave back. But it doesn't tick anything either.
+- Walk faster
+  ~ You walk faster. All of you. The chains get quieter behind you.`,
+    end: `~ At {place}, there are hoofprints in the flickering dust, and a list, dropped. It's very long.
+~ It's everyone back home who sat down in the glow this year and didn't get up. Your street is on it. Half of it.
+~ At the bottom, in blue: TO BE COLLECTED.
+Kit: Not if they get up first.
+you: Then we'd better make some noise up there.` },
+  // 16 The Boot Fair
+  { mid: `~ Boots are coming up out of the Void. Pairs of them, drifting up from the hoard, laces still tied. Every pair is someone who stopped.
+~ The 1951 lot's boots. The navvies' boots. Hundreds you don't know.
+~ You collect them as you go. By the end of the gold road you're carrying forty pairs between you, and the Count is ticking like mad.`,
+    end: `~ At {place}, you line the boots up in a long row along the flickering road. Holloway helps. He's very good at straight lines.
+~ In the morning half of them have gone. Walked off in the night, by themselves.
+HOL: When somebody at home gets up off the sofa, their boots go back to them. I didn't know that. I had stopped noticing.` },
+  // 17 The Sleepers
+  { mid: `~ The Void is full of sleepers this season, floating gently along the gold road, each in their own bubble of blue light, each dreaming.
+~ One of them is dreaming of you. You can see it in the bubble: your squad, walking, all together, in the rain.
+~ The sleeper is smiling.`,
+    end: `~ At {place}, Holloway stands over a sleeper on the flickering road: a man in a dressing gown with a remote in his hand.
+HOL: I decided what he saw for eleven years. Every evening. He never once chose.
+? Holloway is looking at the sleeper.
+- "Wake him." {g.woke}
+  ~ Holloway bends down and, very gently, takes the remote out of the man's hand. The man stirs, and smiles, and fades upwards, home.
+- "Leave him, he's happy."
+  HOL: He isn't. That's what I told myself for three hundred years.
+  ~ He takes the remote anyway. The man fades upwards, home.` },
+  // 18 Wrong Way Up
+  { mid: `~ The Void is upside down this season. The gold road runs across the top of the sky and you walk it with your hair hanging down.
+~ The hoard is overhead. Every so often a coin falls up.
+Margaret: Don't look down, dear. Or up. Whichever one the floor is.`,
+    end: `~ At {place}, the whole realm flips the right way up all at once, with a noise like a duvet being shaken out.
+~ Holloway is lying flat on his back in the flickering grass, laughing. Actually laughing. Nobody has heard that sound before.
+Kit: He used to laugh like that. Before.
+Kit: I'd forgotten.` },
+  // 19 The Chorus
+  { mid: `~ The Void hums a low, slow note, like a finger round the rim of a glass. Every coin in the hoard is singing.
+~ Vex is asleep and singing in her sleep, and she sounds like an old woman humming in a kitchen.
+~ Nobody wants to wake her. You go past on tiptoe, all the way.`,
+    end: `~ At {place}, the Misrendered Realm hums too, but out of tune, like a recorder in a school assembly.
+~ Kit hums with it, and slowly it comes into tune.
+~ When you put the seven notes together, one from each realm, they almost make a song. Kit knows it.
+Kit: Mabel used to sing that. On the ice. Mr Holloway taught it her.` },
+  // 20 Weather Swap
+  { mid: `~ It's snowing in the Gilded Void. Snow falling on the gold and melting with a hiss.
+~ Vex hates it. She keeps breathing fire at the snow, and it keeps coming, and the steam rises in great clouds.
+~ You walk through the fog of it with your hoods up, and for once nothing bothers you at all.`,
+    end: `~ At {place}, it's sunny, which has never once happened in the Misrendered Realm. Everything is lit up properly. Every copy looks, for a day, like the real thing.
+~ Holloway stands in the sun with his eyes shut.
+HOL: I had forgotten the sun.
+Kit: You keep saying that. What haven't you forgotten?
+HOL: You. I never forgot you. That was the whole trouble.` },
+  // 21 The Missing Hour
+  { mid: `~ The missing hours are here. Every realm's stolen hour, hanging in the Void like lanterns.
+~ In one of them everything has stopped, and a boy is sitting on the ice inside it, waiting. Very small. Very frosted.
+Kit: That's me. That's the hour I fell in.
+? The old hour is hanging in front of you.
+- Let it go {g.letgo}
+  ~ You let it go. It floats away up the ladder, and the small frosted Kit inside it waves, and is gone.
+  Kit: Thank you. I didn't want to keep it.
+- Give it to Kit
+  ~ Kit takes it and holds it for a long time. Then he lets it go himself.`,
+    end: `~ At {place}, Vex is waiting. She has come out of her own realm for the first time anyone knows of, holding the hours she stole in a sack.
+boss:dragon: You keep giving them back. I don't understand it. I am trying to understand it.
+boss:dragon: Tell me why.
+you: Because they're not for keeping.
+~ She thinks about this for a long time. Then she empties the sack, and flies home.` },
+  // 22 Deep Water
+  { mid: `~ There's water in the Void. A trickle, running down the gold road from somewhere above. It tastes of salt.
+~ It's coming from the Lowmost Deep, through the hole the Kraken dug. Everything is draining downwards, towards the lights.
+~ You follow it all the way across the Void. It runs off the edge and falls for a very long way, and you never hear it land.`,
+    end: `~ At {place}, Holloway puts his ear to the flickering ground.
+HOL: It's filling up. Down there. Everything that drains goes to it. All the hours. All the water. All the people who sat.
+HOL: It isn't eating them. It's keeping them. Like Edwin's four. Nice and warm.
+mate: Why?
+HOL: Because it's lonely, I think. Things that sit are always lonely.` },
+  // 23 The Second Lamp
+  { mid: `~ From the edge of the Void you watch the hundred lights far below. One of them has started to go round. Once a minute. Like a beam.
+~ It sweeps across the bottom of the world and, for one second, lights you all up blue.
 mate: The hundred lights. Head Office. It's a lighthouse.
 you: It's her lighthouse.`,
-    end: `~ {end}, Newfoundland: the most easterly point in North America. Ahead, nothing but the Atlantic. And then Cornwall.
-~ That night, very far out on the dark water, right at the edge of the world, you see it.
-~ A beam, going round. Pale blue.
-? You're looking at Morwenna's light from the other side of the ocean.
-- Wave {g.waved}
-  ~ You wave. It's daft. It's two thousand miles. The beam stutters, just once, like someone catching their breath.
-- Turn away
-  ~ You turn away. Behind you the beam keeps going round. It always has.
-Ishbel: Aye. That's what I see from my end. Every night. I'm sorry I never said.
-Ishbel: She's not evil. She's just been sat down for three hundred years with the light on. Come home.` },
-  // 34 The Norse Way Back
-  { mid: `~ Greenland: icebergs the size of cathedrals, breaking off into the fjord at Ilulissat with a noise like the world clearing its throat.
-~ Kit walks beside you in plain daylight now. Anyone can see him. A little girl in Nuuk waves at him, and he waves back, astonished.
-Kit: She saw me. Someone who isn't you saw me.`,
-    end: `~ Þingvellir: where Iceland's parliament met in the open air for a thousand years, between two continents slowly pulling apart.
-~ The squad holds its own vote. In the open air, like the Vikings did.
-Taxman: Point of order. What happens to her light when you finish?
-boss:algorithm (Grimm): It goes out. The bargain ends. The light goes out, and whatever it's been holding goes free.
+    end: `~ At {place}, Ishbel is waiting. She has walked all the way down, in her waxed jacket, to tell you herself.
+Ishbel: Aye. That's what I see from my end. Every night. Her light, going round at the bottom of everything. I'm sorry I never said.
+Ishbel: She's not evil. She's been sat down for three hundred years with the light on. Something got in through it, and she's been holding the door.
+Ishbel: Get her up. Please.` },
+  // 24 Kit's Way
+  { mid: `~ Kit leads you across the Void by a way nobody else knows: a path of old footprints in the gold, small ones. His.
+Kit: I came this way looking for him. Lots of times. I never found him. But I found all the short cuts.
+~ You get across the Void in half the time. Vex doesn't even wake up.`,
+    end: `~ At {place}, Kit stops at a small copied house at the end of a copied street.
+Kit: That's my house. In the village. He copied it.
+~ Holloway stands behind him, hat in his hands.
+HOL: I couldn't look at it. So I kept it.
+Kit: It's a good copy. You got the door right.
+~ Kit opens the door and looks inside for a long time. Then he shuts it gently and comes back.
+Kit: It's empty. I'd rather be out here. With people.` },
+  // 25 The Register
+  { mid: `~ The register turns up in the Void, lying open on the gold road. Holloway's register. Names are going from it one by one, the ink lifting off the page like smoke.
+~ The navvies. Gone. Gerald. Gone. The 1951 lot. Gone.
+mate: Someone's crossing them off.
+Kit: No. Look. They're not crossed off. They're just not on the list any more. Nobody's keeping them.`,
+    end: `~ At {place}, Holloway reads the register with you. There are only a few names left on it now.
+~ Kit Penhallow. Morwenna Pascoe. Ishbel Pascoe. Edwin Tally. Mabel, Arthur, Ruth, Sidney. Abiah Holloway.
+HOL: Everyone still held. Everyone still kept, by something, somewhere.
+HOL: When the ladder's done, I think the page goes blank.
+Kit: Good.` },
+  // 26 Nobody Left
+  { mid: `~ The creatures are trying to split you up this season. In the Void the gold road forks every few minutes, and every fork whispers your name from a different side.
+~ You hold hands across the Void, all of you, in a line. It's slow, and daft, and nobody goes down the wrong fork once.`,
+    end: `~ At {place}, Holloway counts heads at the end of every day, out loud, like a teacher on a school trip.
+~ It takes him a while. He keeps counting Kit twice to be sure.
+HOL: All accounted for.
+~ He stops. He has said that before. On a register.
+HOL: All accounted for. Nobody left.` },
+  // 27 The Long Sofa
+  { mid: `~ There's a sofa in the Gilded Void. A long one, gold velvet, floating by the road with a blanket on it and the telly on.
+~ It's exactly right. The cushions are exactly right. Everyone wants to sit on it so badly it hurts.
+? The sofa is right there.
+- Walk past it, holding hands {g.sofa}
+  ~ You walk past it, holding hands, not looking. It follows you for a mile, then drifts off sadly into the dark.
+- Push it off the road
+  ~ You push it off the road together. It falls into the Void, slowly, the telly still on, getting smaller.`,
+    end: `~ At {place}, Holloway stands in front of a copy of a coffee house chair. His chair. The one from 1734.
+HOL: Three hundred years in that chair.
+~ He picks it up, carries it to the edge of the flickering realm and drops it into the grey. He doesn't look to see it go.` },
+  // 28 Glass Floors
+  { mid: `~ The floor of the Void has gone as thin as glass. Under the gold road, a very long way down, you can see the lights, and among them a shape.
+~ It's sitting. It's enormous. It's very, very still.
+~ Kit won't look. He walks the whole Void with his eyes on the back of {mate}'s coat.`,
+    end: `~ At {place}, through the thin flickering floor, the shape at the bottom shifts slightly, like someone getting comfortable.
+~ The hundred lights all blink at once.
+HOL: It knows we're coming.
+Taxman: It's always known. Head Office knows everything. It just doesn't do anything about it. That's what makes it Head Office.` },
+  // 29 Every Step a Stitch
+  { mid: `~ This season you can see your stitches. Behind you on the gold road every step leaves a small gold thread, tying the Void together.
+~ By the end of the week there's a long gold seam all the way across the dark, neat as anything.
+Margaret: Look at that hemming. Holloway would be proud.
+~ Holloway, at the back, coughs, and goes a bit pink.`,
+    end: `~ At {place}, the seams of the Misrendered Realm are mending themselves behind you. Copies are coming apart. Real things are coming back.
+HOL: I always thought every step a stitch meant keeping the world together.
+HOL: It means keeping each other together. The world is just the cloth.` },
+  // 30 Under the Lamp
+  { mid: `~ The Void is darker this deep. The gold road runs out over the edge and becomes a ladder going down. The last few rungs.
+~ At the bottom, upside down, there's a lighthouse. Its lamp points down into the dark, going round, blue.
+Kit: That's hers.
+~ Nobody says anything else. Nobody needs to.`,
+    end: `~ At {place}, Ishbel walks with you for the day. She hasn't walked with anybody since 1724.
+Ishbel: She sat down by the fire at the edge of the world, and the fire was the first window. The first glow. Something looked out of it at her.
+Ishbel: She let it in, and then she sat in front of the door for three hundred years so it couldn't get any further. That's what the light is. Her, holding the door.
+Ishbel: I hated her for sitting. I never once asked why she stayed sat.` },
+  // 31 All Hands
+  { mid: `~ The Void is crowded. Everyone who ever walked is walking: men in flat caps, Gerald in his bad tie, the 1951 lot in anoraks, the druid with his wristband.
+~ The Summit Committee have set up a tea stall halfway across and are doing a roaring trade.
+Druid: Blessed be! Mind the queue!`,
+    end: `~ At {place}, everyone stops to count heads. It takes all afternoon. There are hundreds of you now.
+~ Nobody is left behind. Nobody went on ahead.
+~ At the back of the crowd the Taxman is counting too, very carefully, in a notebook. He gets the same number twice. He looks almost happy.` },
+  // 32 The Stillness
+  { mid: `~ From the bottom of the Void you can see it. Under the upside-down lighthouse, under the lamp, something is sitting in the dark.
+~ It isn't a monster. It isn't anything. It's just very tired, and very big, and very comfortable, and it has been sitting there since before there were chairs.
+Kit: It's not angry. It's just sat.
+mate: That's worse.`,
+    end: `~ At {place}, the Taxman reads you the small print one last time.
+Taxman: Every bargain it ever made goes back to one door. Her light. Close the door and every bargain ends.
+Taxman: Mabel and the others go free. The 1951 lot. Everyone it ever kept nice and warm.
 mate: And Morwenna?
-boss:algorithm (Grimm): I don't know. Nobody has ever finished.
+Taxman: The small print doesn't say. The small print never says the important thing.` },
+  // 33 The Last Rungs
+  { mid: `~ The last rungs of the ladder are cold iron, and every one has names scratched into it. Squads, going all the way back.
+~ 1724. 1802. 1874. 1911. 1951. 1971. And on the last rung but one, freshly scratched: {squad}.
+~ Somebody did that before you got here. The handwriting is a child's.`,
+    end: `~ At {place}, Holloway gives you his hat.
+HOL: Hold it for me. When we get to the bottom I shall want both hands.
+~ It's a very old hat. It smells of coffee and snow.` },
+  // 34 The Vote
+  { mid: `~ The Void is quiet this season. Even Vex doesn't come out. Everyone is waiting to see what you'll decide.
+~ The hundred lights are very close now, just under the floor of the realm. Going round. Once a minute.`,
+    end: `~ At {place}, the squad holds a vote, standing up, in a circle.
+Taxman: Point of order. What happens to her light when you finish?
+HOL: It goes out. The bargain ends. The light goes out, and whatever it has been holding goes free.
+mate: And Morwenna?
+HOL: I don't know. Nobody has ever finished.
 ? The squad votes. What do you want for Morwenna?
-- She walks the last miles with us {g.votewalk}
+- She walks the last bit with us {g.votewalk}
   you: She walks the last bit. With us. She hasn't taken a step since 1724. It's time she did.
 - Let the light go out, whatever happens {g.votedark}
   you: The light goes out. Whatever that means for her. She chose it, three hundred years ago.
@@ -2128,50 +1900,50 @@ boss:algorithm (Grimm): I don't know. Nobody has ever finished.
   Ishbel: Don't ask me. I've been angry at her for three centuries. I'm the wrong person to ask.
   Ishbel: ...Bring her with you. Please.
   set g.votewalk
-~ At {end} the river thunders into its canyon. The needle points south-east. Home.` },
-  // 35 The Long Way Home (chapter 13 is written in full below)
-  { mid: `~ St Kilda: islands so remote that in 1930 everyone living there asked to be taken away. The village is still there. Empty.
-~ A row of stone houses with no roofs, facing the sea. Waiting for people who aren't coming back.
-Kit: That's what I was. An empty house, waiting.
-Kit: I'm not, any more. I'm a boy going home with his friends.`,
+~ The needle points down, and then, for the first time ever, up. Home.` },
+  // 35 The Last Lamp (chapters 12 and 13 are written in full below)
+  { mid: `~ The last time through the Gilded Void. Vex is waiting on the gold road, and she has brought the hoard with her. All of it.
+boss:dragon: I counted it. Every hour. Every evening anyone ever lost.
+boss:dragon: It's yours. All of yours. I'm tired of counting.
+~ She opens her wings and the hoard goes up like sparks: millions of lost evenings, floating home up the ladder.
+~ Vex, very much lighter, curls up on nothing and goes to sleep. Properly. For the first time.`,
     end: "" },
 ];
-// Season 40 (the last leg): chapter 12 and the grand finale, written in full.
-const FINAL_12 = `@islands
-~ Lundy: an island in the Bristol Channel, a few hours from Cornwall. One last ferry.
-~ From the top of the island you can see it. Land's End. And the lighthouse, going round.
-~ It isn't pale blue tonight. It's the colour of a phone at 3am. It has never been so bright.
+// Season 40 (the last cycle): chapter 12 and the grand finale, written in full.
+const FINAL_12 = `@lowmost
+~ The bottom of the Lowmost Deep, the very last time. The Kraken's Throat is wide open, and everything is draining into it: water, light, hours.
+~ From the edge you can see straight down. The upside-down lighthouse at the bottom of everything, blazing blue. It has never been so bright.
 Taxman: Head Office knows you're coming. It's turned everything up.
-boss:algorithm (Grimm): Sunday will be bad. Every one of them will come through at once.
-~ Brett. Rory. Wisp. Gale. The Kraken. Something with a club. Vex. Everything the Stillness ever kept, piling up behind the seam.
+Holloway: Sunday will be bad. Every one of them will come through at once.
+~ Brett. Rory. Wisp. Gale. The Kraken. Something with a club, wearing his old shape. Everything the Stillness ever kept, piling up behind the seam.
 ~ Holloway sits on a rock, turning his old hat round and round in his hands.
 Holloway: She'll be in the lamp room. She always sat as close to the light as she could. Even at nineteen.
 you: Will she be glad to see you?
 Holloway: No. But she'll be glad to see you. Start there.
 mate: So we mend it. Like always.
 Kit: Like always.
-? One night left before the last walk.
+? One night left before the last rung.
 - Get some sleep {g.slept}
-  ~ You sleep. Properly. All of you in a row in the island hostel. Rest is a stop with a morning after it.
+  ~ You sleep. Properly. All of you in a row on the rock. Rest is a stop with a morning after it.
 - Sit up and talk
-  ~ You sit up and talk until three. About Dartmoor. About Glastonbury. About the druid. Everyone laughs about the druid.
+  ~ You sit up and talk until three. About the Blotmarsh. About the Fairy Ring. About the druid. Everyone laughs about the druid.
 - Write home {g.wrotehome}
-  ~ You write back to everyone you've ever left on read. Every single one. "Nearly home. Long story."
-~ In the morning: the ferry. And then the last miles.`;
-const FINAL_13 = `@lighthouse-night
-~ Land's End. The last bit of England, and the wind wants it back.
-~ You've walked round the world. You're back where Morwenna put a brass thing in your hand and said, "There you are."
-~ The lighthouse is blazing blue. Every window in the town behind it glows the same.
+  ~ You write back to everyone you ever left on read. Every single one. "Nearly home. Long story."
+~ In the morning: the last rung. And then the lamp.`;
+const FINAL_13 = `@misrendered
+~ The last place in the Misrendered Realm, and under it, the last rung. You climb down together, one after another, Holloway at the back with both hands free.
+@lighthouse-night
+~ At the bottom there's a lighthouse standing on its head. You go in at the top, which is the bottom, and climb down the stairs, which go up.
 !glitch
 @the-glow
 ~ Then you're inside it. The lens. A hundred lights for eyes, all looking at you at once.
-~ And at the centre, by the lamp, in a shawl, with a lantern in her lap: Morwenna. Exactly as she was. Sitting down.
+~ And in the middle, by the lamp, in a shawl, with a lantern in her lap: Morwenna. Exactly as she was. Sitting down.
 Morwenna: There you are. I've had the kettle on since 1994. And before that, since 1724.
 Morwenna: Do you know what it is now? The thing in my light?
 you: Everyone who ever sat down and didn't get up.
 Morwenna: It's tired. That's all it ever was. Tired and frightened and ever so comfortable.
-Morwenna: I was the first door it found. I've been holding it open ever since.
-~ Behind you: the squad. Kit. Grimm, in an old coat, with a three-cornered hat in his hands. The Taxman, his clipboard under one arm, unopened.
+Morwenna: I was the first door it found. I've been sitting in it ever since, so it couldn't come any further.
+~ Behind you: the squad. Kit. Holloway, in an old coat, with his three-cornered hat in his hands. The Taxman, clipboard under one arm, unopened.
 Holloway: Morwenna. I'm sorry. I should have turned round. For you, and for the boy.
 Morwenna: Abiah. You took your time.
 if g.votewalk
@@ -2182,7 +1954,7 @@ else
   if g.votedark
     you: We voted. The light goes out. Whatever happens to you.
     Morwenna: That's fair. That's more than fair.
-    Morwenna: But I'd like to walk out of here on my own feet, if you'll have me. Just as far as the cliff.
+    Morwenna: But I'd like to walk out of here on my own feet, if you'll have me. Just as far as the gate.
   else
     you: It's over, Morwenna. Come and walk with us.
     Morwenna: I've not taken a step since 1724. I don't know if I remember how.
@@ -2193,73 +1965,63 @@ else
   ~ You give her the Long Count. She holds it like something she lost when she was nineteen.
 ~ She stands up.
 !flash
-~ The Count chimes. Not thirteen times. Three hundred and sixty times: one for every mark, one for every stitch round the coat of the world.
+~ The Count chimes. Not thirteen times. Forty times: once for every rung, all the way down and all the way back up.
 @lighthouse-night
 ~ The beam goes out.
 !dark
-~ For one long breath there's no light at Land's End at all.
-~ Then, in the town behind you, the windows change one by one. Blue to yellow. Screen to lamp. Someone opens a door. Someone goes for a walk.
+~ For one long breath there's no light at the end of the last street at all.
+@town-glow
+~ Then, in the town, the windows change one by one. Blue to yellow. Screen to lamp. Someone opens a door. Someone goes for a walk.
 !light
-~ And on the cliff path, people. Lots of people, coming up out of the glow like swimmers surfacing.
-~ A navvy in a flat cap. A man called Gerald, perfectly solid. Someone in an anorak from 1951. Four walkers in wool, one of them knitting.
+~ And up the street come people. Lots of people, coming up out of the glow like swimmers surfacing.
+~ A navvy in a flat cap. A man called Gerald, perfectly solid, in a terrible tie. Someone in an anorak from 1951. Four walkers in wool, one of them knitting.
 ~ Mabel hugs the Taxman so hard his bowler hat falls off. He doesn't pick it up.
 ~ Kit runs. Not ahead, not behind. Just runs, because he can. Then he turns round and waits for everyone, because he wants to.
+@lighthouse-night
 Ishbel: Took your time.
-~ Ishbel is at the gate. She hasn't left John o' Groats in three hundred years. She walked here.
-~ Morwenna looks at her sister. Her sister looks at her. Nobody says anything. Nobody needs to.
+~ Ishbel is at the lighthouse gate. Morwenna looks at her sister. Her sister looks at her. Nobody says anything. Nobody needs to.
 Holloway: It's finished.
 Morwenna: No. Nothing's finished. It just doesn't need holding any more.
 ~ She gives the Count back to you. It's still ticking. Of course it is.
-Morwenna: It'll want walking, every winter. Not because the world will stop. Because walking is good, and you're good at it.
-Morwenna: Six days walking, the seventh mending. The Stillness will still try its luck. It's very tired, and it loves a sofa.
+Morwenna: It'll want walking, every week. Not because the world will stop. Because walking is good, and you're good at it.
+Morwenna: Six days walking, the seventh mending. The creatures will still try their luck. The Stillness is very tired, and it loves a sofa.
 Morwenna: But it hasn't got a door any more. Only windows. And you know what to do about windows.
-~ The needle swings round. East. Of course it does.`;
-// After the first lap round the world (season 41 on): a gentler loop.
+~ Behind the lighthouse door the seam flaps in the draught. The needle swings round. Down. Of course it does.`;
+// After the first time down the ladder (season 41 on): a gentler loop.
 const LAP2 = {
-  open: `~ Second time round. The marks on the dial are all lit, and this time each one turns gold as you pass it.
+  open: `~ Second time down the ladder. All forty rungs on the back of the Count are lit, and this time each one turns gold as you pass it.
 Keeper ({keeper}): The Stillness hasn't got a door any more. But it still tries the windows. Something always comes through on a Sunday.
 Taxman: And someone has to hold the clipboard. I volunteered. I missed it, if you can believe that.
 ~ Holloway walks with you some weeks now, hat on, knees complaining. Kit sends postcards. They all say: still walking.`,
-  mid: `~ Halfway along the leg, a postcard from Morwenna. She's walked to Penzance and back. Twice. She's very pleased with herself.
-Morwenna (Morwenna, by postcard): The light at Land's End is just a light now. White. Boring. I love it.
+  mid: `~ Halfway through, a postcard from Morwenna. She's walked to the end of the street and back. Twice. She's very pleased with herself.
+Morwenna (Morwenna, by postcard): The light at the end of the street is just a light now. White. Boring. I love it.
 Morwenna (Morwenna, by postcard): Mind the windows. Keep walking.`,
-  end: `~ At {end} the Count chimes, and another stretch of the dial turns gold.
+  end: `~ At {end} the Count chimes, and another rung on its back turns from lit to gold.
 Holloway: Every step a stitch. The coat keeps needing them. That's not a failure. That's what coats are for.`,
 };
 
-// The generator's pools. {place} {next} {prev} {route} {leg} {keeper} {kwho} {twist} {boss} {bossid} {bossline} {end} {start}
-// are filled per chapter; {you} {mate} {mate2} {squad} {steps} are left for the player.
+// The generator's pools. {place} {next} {prev} {route} {leg} {keeper} {twist} {boss} {bossid} {bossline} {end} {start}
+// {realm} {lair} are filled per chapter; {you} {mate} {mate2} {squad} {steps} are left for the player.
 const ARRIVE = [
   "~ {place}. The Count ticks once as you arrive, like a nod.",
   "~ You reach {place} footsore and pleased with yourselves.",
-  "~ {place} at last. Somebody cheers. Somebody else sits down on their rucksack and the Count goes cold until they stand up.",
-  "~ The road into {place} is longer than the map says. They always are.",
+  "~ {place} at last. Somebody cheers. Somebody else sits down on their rucksack, and the Count goes cold until they stand up.",
+  "~ The path to {place} is longer than the map says. They always are.",
   "~ You come into {place} in single file, counting heads, the way you always do now.",
 ];
 const LOCALS = [
-  `Local (A stallholder): Walkers? From where?
-you: Cornwall.
-Local (A stallholder): Is that near {next}?
-mate: Sort of. If you go the long way round.`,
-  `Local (A grandmother): You've got one of those brass things. My grandad said if anyone ever came through with one, give them soup.
-~ You get soup. It's excellent soup.`,
-  `Local (A shopkeeper): Every window round here has been glowing blue at night. My nan says it's the telly.
-Local (A shopkeeper): My nan hasn't got a telly.`,
-  `Local (A café owner): There was a man in here last week asking after you. Bowler hat. Clipboard.
-Local (A café owner): He asked if you'd declared your breakfast.`,
+  `Local (A pedlar): There was a man through here last week asking after you. Bowler hat. Clipboard.
+Local (A pedlar): He asked if you'd declared your breakfast.`,
   `Child: Why are you walking?
 you: Because when enough people stop, things come through the gaps.
 Child: ...Can I come?
 mate: Ask your mum. Then walk to school. That counts too.`,
-  `Local (A ferryman): People here say if you sit down in {place}, you'll never get up again. It's a joke.
-Local (A ferryman): Mostly.`,
-  `Local (A baker): Lovely evening for it. Mind the Taxman, though. He's been sitting at the bus stop since six.`,
   `Keeper ({keeper}): Holloway's map has a note here, you know. In the margin. "Good bread. Bad bed."
 Keeper ({keeper}): Still true. On both counts.`,
-  `Local (A night watchman): I've watched this road forty years. Nobody walks it at night any more. They all just glow at home.
+  `Local (A night watchman): I've watched this path forty years. Nobody walks it any more. They all just glow at home.
 Local (A night watchman): Nice to see some feet.`,
-  `Local (A shepherd): The sheep don't like it when the windows go blue. They all face the other way.
-mate: Sensible sheep.`,
+  `Local (A woman with a lantern): You're the ones with the brass thing. My gran said if anyone ever came through with one, give them soup.
+~ You get soup. It's excellent soup.`,
 ];
 const SQUAD_CHOICES = [
   `? {mate} wants to rename the group chat.
@@ -2272,11 +2034,11 @@ const SQUAD_CHOICES = [
   ~ {mate2} is offended on behalf of their legs. It's adopted anyway.`,
   `? Snack game: name a worse snack than {mate}'s.
 - Fish-paste crisps
-  ~ Gasps all round. {mate} concedes. It's the first win in the game since Cornwall.
+  ~ Gasps all round. {mate} concedes. It's the first win in the game since the lighthouse.
 - Warm grapes
   mate: That's not a snack, that's a threat.
-- Salty liquorice
-  ~ Everyone who was on the Amber Road goes quiet and stares into the middle distance.`,
+- A Puffcap Hollow mushroom
+  ~ Everyone goes quiet and stares into the middle distance.`,
   `? Who leads today?
 - You do
   ~ You lead. You take one wrong turn, own it, and nobody mentions it more than eleven times.
@@ -2296,12 +2058,12 @@ const SQUAD_CHOICES = [
   ~ You hum. {mate} sings louder to make up for it. The Count ticks in time, mostly.`,
 ];
 const CLIFF = [
-  "~ Behind you, on the road you've just walked, something with a club is walking too.",
-  "~ That night every window in {place} glows blue at once, for a single second. Then they're normal again.",
+  "~ Behind you, on the path you've just walked, something with a club is walking too.",
+  "~ That night, through the seam, every window in town glows blue at once, for a single second. Then they're normal again.",
   "~ The Count ticks twice, out of rhythm. It does that when something's following.",
   "~ In the morning there's a word in the frost on the tent: STOP. Somebody has crossed it out.",
-  "~ Far off, beyond the edge of the map, a hundred small lights blink. All together. Like eyes.",
-  "~ The road on to {next} disappears into the dark. You'll walk it tomorrow. Together.",
+  "~ Far below, past the bottom of the realm, a hundred small lights blink. All together. Like eyes.",
+  "~ The path on to {next} disappears into the dark. You'll walk it tomorrow. Together.",
   "~ A cold patch follows you out of {place}, a few steps behind the last of you. It feels like someone who doesn't want to be left.",
   "~ Somewhere, faintly, a clipboard snaps shut.",
 ];
@@ -2330,9 +2092,9 @@ mate: Sundays are for monsters.
 you: Benches after monsters.`,
 ];
 const REMIND = [
-  "~ The Count only counts real steps, taken together. Out here, every one of them is real.",
-  "~ Every window you pass is lit. Some of them are blue. You walk a bit quicker past those.",
-  "~ Somewhere behind you, a seam is fraying where people have sat too long. Your steps are the thread.",
+  "~ The Count only counts real steps, taken together. Back home, every one of them carries you a step further in here.",
+  "~ Through the seam, behind you, every window in town is lit. Some of them are blue. Those are the ones that feed this place.",
+  "~ Somewhere behind you a seam is fraying where people have sat too long. Your steps are the thread.",
   "~ Six days walking, the seventh mending. Today is a walking day. Most days are.",
   "~ The Count ticks steadily in someone's pocket. While it ticks, nothing gets through for free.",
 ];
@@ -2340,46 +2102,47 @@ const ENDCHOICE = [
   `? Before you leave {place}...
 - Send Ishbel a postcard
   ~ It says: still walking. She'll know what it means.
-- Buy snacks for the road
-  ~ You buy far too many snacks. They're gone by lunchtime.
+- Eat the last of the snacks
+  ~ You eat the last of the snacks. All of them. Immediately.
 - Take one last look
   ~ You take one last look. {place} looks back, the way places do when you've walked to them.`,
   `? The squad pauses at the edge of {place}.
 - Count heads
   ~ You count heads. Everybody's here. The Count ticks, satisfied.
 - Retie your laces
-  ~ You retie your laces. Small things, done properly, are how you get round the world.
+  ~ You retie your laces. Small things, done properly, are how you get to the bottom of anything.
 - Keep going
   ~ You keep going. You always do.`,
 ];
 const FAREWELL = `? The season's done. What now?
 - Sleep for a week
-  ~ You sleep for one night. It feels like a week. The Count doesn't mind; rest is a stop with a morning after it.
+  ~ You sleep for one night. It feels like a week. The Count doesn't mind. Rest is a stop with a morning after it.
 - Get chips
-  ~ You get chips. Wherever in the world you are, there's always somewhere doing chips.
+  ~ You get chips. Wherever you come out of the seam, there's always somewhere doing chips.
 - Look at the map
-  ~ You look at the map. The dotted line goes on, round the curve of the world, towards home.`;
-function bossSeg(id, name, st) {
+  ~ You look at Holloway's map. The dotted line goes on, down the ladder, rung by rung.`;
+const its = (name) => (name === "Vex" ? "her" : "its");
+function bossSeg(id, st) {
   const extra = id === "leftonread" && st >= 5 && st < 41 ? "\n~ It isn't Kit, quite. It's the part of him the Stillness still keeps. The left-behind part." :
-    id === "algorithm" && st >= 10 && st < 41 ? "\n~ It isn't Grimm. Not the one who walks with you now. It's what's left of him in there, wearing his shape." : "";
-  const shown = id === "algorithm" && st >= 10 ? " (The shape of Grimm)" : "";
+    id === "algorithm" && st >= 5 && st < 41 ? "\n~ It isn't Holloway. Not the one who walks with you now. It's what's left of him in here, wearing his old shape." : "";
+  const shown = id === "algorithm" && st >= 5 ? " (The shape of Grimm)" : "";
   return `!shake
-~ Somebody at {place} sat down too long. The seam has slipped, and {boss} has come through.
+~ Somebody back home has sat down too long. The seam has slipped, and {boss} knows you're in {bosspos} realm.
 boss:{bossid}${shown}: {bossline}${extra}
 ~ {bossbeat}
-? {boss} is between you and {next}.
+? {Boss} is between you and {next}.
 - Stand together
-  ~ You stand together, shoulder to shoulder. {boss} hits the wall of you and bounces off, for now.
-- Keep walking past it
-  ~ You keep walking, all of you, eyes front. It follows, sulking. It'll still be there on Sunday.
-- Shout its name
+  ~ You stand together, shoulder to shoulder. {Boss} hits the wall of you and bounces off, for now.
+- Keep walking past
+  ~ You keep walking, all of you, eyes front. {Boss} follows, sulking, then slinks off towards {lair}.
+- Shout {bosspos} name
   you: We know you, {boss}!
-  ~ It hates that. Things from the Stillness hate being named. It slinks back to the edge of the seam.
-~ It isn't Sunday yet. You'll settle it then. Six days walking, the seventh mending.`;
+  ~ Things from the Stillness hate being named. {Boss} slinks back towards {lair}.
+~ It isn't Sunday yet. You'll settle it there. Six days walking, the seventh mending.`;
 }
 function taxSeg(st) {
   const why = st >= 41 ? "Taxman: Because somebody has to, and I'm good at it, and I find I quite like you lot." :
-    st >= 31 ? "Taxman: Because the terms say so until the Count comes round. Nearly there. I can almost smell the sea." :
+    st >= 31 ? "Taxman: Because the terms say so until the ladder's done. Nearly there. I can almost smell the lamp." :
       st >= 17 ? "Taxman: Because the terms say so. But I've started walking to work. Don't tell Head Office." :
         "Taxman: Terms are terms. Four people in a snow shelter are kept warm on the strength of my collecting.";
   return `Taxman: Evening. It's nearly six. You know what that means.
@@ -2391,32 +2154,32 @@ function taxSeg(st) {
   ${why}
 - Offer him a biscuit
   Taxman: I'll have to declare that.
-  ~ He eats it anyway. Slowly. Like he's forgotten biscuits.`;
+  ~ He eats it anyway. Slowly. As if he'd forgotten biscuits.`;
 }
 function squadSeg() {
   return `~ {squadbeat}
 {squadchoice}`;
 }
 function clueSeg(kind, st) {
-  if (kind === "grimm") {
-    const line = st >= 41 ? "~ Holloway walks beside you today, hat on, knees complaining. He points out every view, as if he built them." :
-      st >= 21 ? "~ Grimm walks ahead now, most days, rolling rocks off the road and straightening signposts. He writes NO on things." :
-        st >= 10 ? "~ Grimm walks with you some days, at the back, saying nothing. When he falls behind, someone always waits." :
-          "~ Every day you see him, a long way back: Grimm, following. Stopping when you stop. Starting when you start.";
+  if (kind === "holloway") {
+    const line = st >= 41 ? "~ Holloway walks beside you today, hat on, knees complaining. He points out every view as if he built it." :
+      st >= 21 ? "~ Holloway walks ahead most days now, rolling rocks off the path and straightening signposts. He writes NO on things." :
+        st >= 10 ? "~ Holloway walks with you some days, at the back, saying nothing. When he falls behind, someone always waits." :
+          "~ Every day you see him, a long way back: Holloway, in Grimm's big blue shape, following. Stopping when you stop. Starting when you start.";
     return `${line}
-? Grimm is watching.
+? Holloway is watching.
 - Wave
-  ~ You wave. After a long moment, a huge blue hand lifts. Then drops again, quickly, as if it's embarrassed.
+  ~ You wave. After a long moment a big hand lifts. Then drops again, quickly, as if it's embarrassed.
 - Call him over
-  you: Grimm! Walk with us!
-  boss:algorithm (Grimm): ...Not yet.
+  you: Walk with us!
+  Holloway: ...Not yet. Soon.
 - Leave him be
   ~ You leave him be. Some people have to arrive at things on their own.`;
   }
   if (kind === "lights") {
-    const line = st >= 33 ? "~ That night, at the edge of the sea, the hundred blue lights are very close now. They go round. Once a minute. Like a beam." :
-      st >= 20 ? "~ That night, from a high place, you see them again: a hundred small blue lights at the very edge of the world. Closer than before." :
-        "~ That night, from a high place, you see something no map shows: far off at the edge of everything, a cluster of small blue lights. Like eyes.";
+    const line = st >= 33 ? "~ That night the hundred blue lights are very close, just under the floor of the realm. They go round. Once a minute. Like a beam." :
+      st >= 17 ? "~ That night, from a high place, you see them again: a hundred small blue lights, far below the bottom of the realm. Closer than before." :
+        "~ That night, from a high place, you see something no map shows: far below the bottom of the realm, a ring of small blue lights. Like eyes.";
     return `${line}
 ? The lights are watching.
 - Watch them back
@@ -2425,19 +2188,19 @@ function clueSeg(kind, st) {
   ~ You turn away. The back of your neck stays cold for an hour.`;
   }
   if (kind === "kit") {
-    const line = st >= 41 ? "~ A postcard from Kit. On the front, a picture of the sea. On the back: STILL WALKING. NOT WAITING. K." :
-      st >= 30 ? "~ Kit walks with you all afternoon, nearly solid, telling {mate} about 1732 like it was last week." :
-        "~ There's frost on the inside of the tent this morning, though it isn't cold. Small handwriting: KEEP GOING. I'M BEHIND YOU.";
+    const line = st >= 41 ? "~ A postcard from Kit. On the front, a picture of the lighthouse. On the back: STILL WALKING. NOT WAITING. K." :
+      st >= 30 ? "~ Kit walks with you all afternoon, solid as anyone, telling {mate} about 1732 as if it was last week." :
+        "~ There's frost on the inside of the tent this morning, though it isn't cold. Small handwriting: GOING ON AHEAD TO CHECK THE PATH. BACK SOON. K.";
     return `${line}
 ? You think about Kit.
 - Leave a gap in the line for him
   ~ You leave a gap in the line, one person wide. Nobody fills it. Nobody needs to explain why.
 - Say his name
   you: Kit.
-  ~ Somewhere behind you, something cold gets a little warmer.`;
+  ~ Somewhere up ahead, something cold gets a little warmer.`;
   }
   // map note
-  const notes = st >= 20 ? ["I miss the boy.", "Morwenna would have liked this view.", "Turn round, Abiah. Turn round.", "Good bread. Bad bed. Worse conscience."] : ["Mind the dogs.", "Good bread. Bad bed.", "Walked this in the rain. Would not recommend.", "Probably something good here."];
+  const notes = st >= 20 ? ["I miss the boy.", "Morwenna would have liked this view.", "Turn round, Abiah. Turn round.", "Good bread. Bad bed. Worse conscience."] : ["Mind the leeches.", "Good bread. Bad bed.", "Walked this in the rain. Would not recommend.", "Probably something good here."];
   return `~ Holloway's map has a note in the margin here, in his neat hand: "{mapnote}"
 ? The map is old and soft as cloth.
 - Read the rest of the margin
@@ -2452,77 +2215,65 @@ function legAt(n) {
   const li = (n - 5) % legs.length;
   return { W, legs, li, lap: Math.floor((n - 5) / legs.length), leg: legs[li], next: legs[(li + 1) % legs.length] };
 }
-// Degrees of longitude east of Land's End at the end of a leg (the lit marks on the dial).
-function marksAt(legs, li) {
-  let lon = 16.37, prev = 16.37;
-  for (let i = 0; i <= li; i++) for (const l of legs[i].landmarks) { let x = l.at[0]; while (x - prev < -180) x += 360; while (x - prev > 180) x -= 360; lon += x - prev; prev = x; }
-  return Math.min(360, Math.max(0, Math.round(lon + 5.71)));
-}
-function bgFor(name, X, r) {
-  const n = name.toLowerCase();
-  if (/lake|loch|inle|tonl|titicaca/.test(n)) return "lake-mist";
-  if (/volcano|yanar|sakurajima|taal|arenal/.test(n)) return "tor-sunset";
-  if (/salar|uyuni/.test(n)) return "snowfield";
-  if (/canyon|desert|uluru|kings canyon|coober|lake eyre/.test(n)) return "red-desert";
-  if (/mount|pass|peak|shan|aoraki|chimborazo|cotopaxi|huascar|muztagh|kinabalu|rinjani|nemrut|erciyes|ararat|olympus|fuji|gora|cones/.test(n)) return "peak-cloud";
-  if (/wall|fort|castle|badaling|mutianyu|jinshanling|dragon's head|hwaseong/.test(n)) return "wall-dusk";
-  if (/bridge/.test(n)) return "river-dusk";
-  if (/falls|gorge|valley|gullfoss|geysir/.test(n)) return "forest-mist";
-  if (/temple|wat|pagoda|monastery|abbey|sanctuary|tongdosa|yonggungsa|bagan|vihear|kuk|rock$/.test(n)) return "temples-dusk";
-  if (/island|isle|bay|sound|strait|cove|reef|batanes|yasawa|islands/.test(n)) return "islands";
-  if (/lighthouse|cape|spear|reinga/.test(n)) return "lighthouse-night";
-  return X.bgs[Math.floor(r() * X.bgs.length)];
-}
-function sentences(p) { return String(p).split(/(?<=[.!?])\s+(?=[A-Z“"])/).map((s) => s.trim()).filter(Boolean); }
+function sentences(p) { return String(p).split(/(?<=[.!?])\s+(?=[A-Z"])/).map((s) => s.trim()).filter(Boolean); }
+const NPC_KEEPERS = { Kit: "Kit", Margaret: "Margaret", Ishbel: "Ishbel" };
 
 function generated(n, k) {
   const A = legAt(n);
-  if (!A) return parse(`@road-night\n~ The road goes on. The Count ticks. You walk.`);
-  const { W, legs, li, lap, leg, next } = A, B = W.beats || {};
-  const X = LEGX[li] || { keeper: "the keeper", bgs: ["road-night"] }, L = leg.landmarks;
-  const st = lap > 0 ? 41 + li : n; // story stage: how far round the world the story is
-  const sr = rng(hash("season:" + n)), cr = rng(hash(`s${n}:ch${k}`));
+  if (!A) return parse(`@the-seam\n~ The seam opens. The Count ticks. You walk.`);
+  const { W, li, lap, leg, next } = A, B = W.beats || {};
+  const L = leg.landmarks, keeper = leg.keeper || "the keeper";
+  const st = lap > 0 ? 41 + li : n; // story stage: how far down the ladder the story is
+  const cr = rng(hash(`s${n}:ch${k}`));
   const pick = (arr) => (arr && arr.length ? arr[Math.floor(cr() * arr.length)] : "");
   const deal = (arr, key) => { if (!arr || !arr.length) return ""; const sh = shuffle(arr.map((_, i) => i), rng(hash(`s${n}:${key}`))); return arr[sh[(k - 1) % sh.length]]; };
-  void sr;
   const affix = affixFor(n), twist = affix.split("+").map((a) => AFFIX_NAMES[a]).join(" and ");
-  const boss = BOSSES[(n + (k - 1)) % BOSSES.length];
-  const place = L[k - 1].name, nextName = k < 13 ? L[k].name : (next.landmarks[1] || next.landmarks[0]).name;
-  const marks = lap > 0 ? 360 : marksAt(legs, li);
-  const kwho = X.who || "Keeper", keeperSpeaker = X.who ? `${X.who}` : `Keeper (${X.keeper})`;
+  const boss = BOSSES[(k - 1) % BOSSES.length], realm = REALM_OF[boss[0]], deep = k > BOSSES.length;
+  const R = (W.REALMS || []).find((x) => x.id === realm) || { name: "the realm" };
+  const place = L[k - 1].name, nextName = k < 13 ? L[k].name : next.landmarks[0].name;
+  const bossName = boss[1], Boss = bossName[0].toUpperCase() + bossName.slice(1);
+  const lair = `${bossName === "the Kraken" ? "the Kraken's" : bossName + "'s"} ${LAIRS[boss[0]]}`;
+  const rungs = lap > 0 ? 40 : Math.min(40, n);
   const V = {
-    place, next: nextName, prev: L[Math.max(0, k - 2)].name, route: leg.route, leg: leg.name, keeper: X.keeper, twist, n: String(n),
-    boss: boss[1][0].toUpperCase() + boss[1].slice(1), bossid: boss[0], bossline: pick(BOSS_QUOTES[boss[0]]), end: L[L.length - 1].name, start: L[0].name,
-    marks: String(marks), nextleg: next.name, nextroute: next.route,
+    place, next: nextName, prev: L[Math.max(0, k - 2)].name, route: leg.route, leg: leg.name, keeper, twist, n: String(n),
+    boss: bossName, Boss, bossid: boss[0], bosspos: its(bossName), bossline: pick(BOSS_QUOTES[boss[0]]), lair, realm: R.name,
+    end: L[L.length - 1].name, start: L[0].name, rungs: String(rungs), nextleg: next.name, nextroute: next.route, theme: leg.theme || "",
   };
   const wfill = (t) => String(t || "").replace(/\{place\}/g, place).replace(/\{next\}/g, nextName).replace(/\{route\}/g, leg.route)
-    .replace(/\{boss\}/g, V.boss).replace(/\{twist\}/g, twist).replace(/\{count\}/g, "the Long Count");
+    .replace(/\{boss\}/g, Boss).replace(/\{twist\}/g, twist).replace(/\{count\}/g, "the Long Count");
   const beat = (kind, key) => sentences(wfill(deal(B[kind], key)));
   const narr = (lines, max) => lines.slice(0, max).map((s) => `~ ${s}`).join("\n");
-  V.bossbeat = beat("boss", "boss").slice(0, 2).join(" ") || "It's a long, messy fight, and you finish it standing.";
+  V.bossbeat = beat("boss", "boss").slice(0, 2).join(" ") || "It's a long, messy scrap, and you finish it standing.";
   V.taxbeat = beat("taxman", "tax").slice(0, 2).join(" ") || "He has a new form. It's longer than the last one.";
   V.squadbeat = beat("squad", "squad").slice(0, 3).join(" ") || "The squad keeps going, the way it does.";
   V.squadchoice = deal(SQUAD_CHOICES, "sqc");
-  const keeperLine = (t) => (X.who ? `${X.who}: ${t}` : `Keeper (${X.keeper}): ${t}`);
-  void kwho; void keeperSpeaker;
+  const arrive = (B.arrive && B.arrive[realm] && B.arrive[realm][deep ? "deep" : "near"]) || [];
+  const folk = ((B.folk && B.folk[realm]) || []).concat(LOCALS);
+  const lairLine = deep ? `~ The second time through ${R.name} is always worse. The creatures remember you. So does the ground.` :
+    `~ Somewhere ahead is {lair}. That's where the path ends this week, and that's where you'll be on Sunday.`;
   const parts = [];
-  const bg = k === 1 ? X.bgs[0] : bgFor(place, X, cr);
-  parts.push(`@${bg}`);
 
   if (k === 1) {
-    parts.push(`~ {start}. Season {n}: {leg}. The route runs {route}.`);
-    parts.push(narr(beat("opening", "open"), 3));
+    parts.push(`@lighthouse-night`);
+    parts.push(`~ Season {n}: {leg}. {route}.`);
     if (lap > 0) parts.push(LAP2.open);
     else {
-      parts.push(X.who ? `${X.who}: Hello again, dears. I walked here. Took the long way. Ishbel asked me to see you home.` :
-        pick([keeperLine("You'll be Morwenna's lot. Ishbel wrote. She said you'd be late. You're late."),
-          keeperLine("Every road has a keeper. I'm this one's. I've had the kettle on since your needle moved."),
-          keeperLine("Holloway's dotted line comes right past my door. Nobody's walked it in three hundred years. Until you.")]));
-      parts.push(keeperLine("There's a little blue in my lamp, same as all of ours. Don't look at it too long."));
+      parts.push(pick([
+        "Keeper ({keeper}): You'll be Morwenna's lot. Ishbel wrote. She said you'd be late. You're late.",
+        "Keeper ({keeper}): Every season has a keeper at Monday camp. I'm this one's. I've had the kettle on since your needle moved.",
+        "Keeper ({keeper}): Holloway's dotted line comes right past my door. Nobody's walked it this deep in three hundred years. Until you.",
+      ]));
+      if (leg.theme) parts.push("Keeper ({keeper}): This time round, {theme}.");
     }
-    parts.push(keeperLine("The locals call this season {twist}."));
-    for (const a of affix.split("+")) for (const t of AFFIX_LORE[a] || []) parts.push(keeperLine(t));
-    parts.push(keeperLine("Six days walking, the seventh mending. And mind the Taxman between six and nine. But you know all that."));
+    parts.push("Keeper ({keeper}): I call this season {twist}.");
+    for (const a of affix.split("+")) for (const t of AFFIX_LORE[a] || []) parts.push(`Keeper ({keeper}): ${t}`);
+    parts.push("Keeper ({keeper}): Six days walking, the seventh mending. And mind the Taxman between six and nine. But you know all that.");
+    parts.push(`@the-seam`);
+    parts.push(`~ The lighthouse door opens on the seam, the same as ever. The Count ticks once, like a door shutting behind you.`);
+    parts.push(`@${realm}`);
+    parts.push(narr(beat("opening", "open"), 4));
+    parts.push(arrive.length ? `~ ${pick(arrive)}` : "");
+    parts.push(lairLine);
     parts.push(pick([
       `? Who's carrying the Count first?
 - You take it
@@ -2542,28 +2293,33 @@ function generated(n, k) {
     parts.push(deal(BANTER, "ban"));
     parts.push(pick(CLIFF));
   } else if (k === 13) {
+    parts.push(`@${realm}`);
+    parts.push(arrive.length ? `~ ${pick(arrive)}` : "");
     parts.push(narr(beat("landmark", "land"), 2));
     if (lap > 0) parts.push(LAP2.end);
     else if (SAGA[li] && SAGA[li].end) parts.push(SAGA[li].end);
-    parts.push(`@signpost-dawn`);
     parts.push(narr(beat("finale", "fin"), 3));
-    parts.push(lap > 0 ? `~ All three hundred and sixty marks are lit, and more of them glow gold now than last time.` :
-      `~ When the chimes stop, {marks} of the three hundred and sixty marks on the dial are glowing.`);
-    parts.push(`Ishbel (Ishbel, by text): Further. Next: {nextleg}. {nextroute}.`);
+    parts.push(`@town-glow`);
+    parts.push(`~ Back home, through the seam, the blue goes out of the windows, street by street.`);
+    parts.push(lap > 0 ? `~ All forty rungs on the back of the Count are lit, and more of them glow gold now than last time.` :
+      `~ When the chimes stop, {rungs} of the forty rungs on the back of the Count are lit.`);
+    parts.push(`Ishbel (Ishbel, by text): Deeper. Next: {nextleg}. {nextroute}.`);
     parts.push(pick([`Ishbel (Ishbel, by text): Eat something green.`, `Ishbel (Ishbel, by text): Count heads. Always count heads.`, `Ishbel (Ishbel, by text): Proud of you. Don't tell anyone I said that.`]));
     parts.push(FAREWELL);
   } else {
+    parts.push(`@${realm}`);
+    parts.push(arrive.length ? `~ ${pick(arrive)}` : "");
     parts.push(pick(ARRIVE));
     parts.push(narr(beat("landmark", "land"), 3));
     parts.push(deal(REMIND, "rem"));
-    parts.push(deal(LOCALS, "local"));
+    parts.push(deal(folk, "local"));
     if (k === 7) {
       const mid = lap > 0 ? LAP2.mid : SAGA[li].mid;
       parts.push(mid);
       if (!/(^|\n)\? /.test(mid)) parts.push(deal(ENDCHOICE, "endc"));
     } else if (k === 12) {
-      parts.push(`~ One more week. The end of {route} is close enough to smell.`);
-      parts.push(st >= 10 && st < 41 ? `boss:algorithm (Grimm): Last stretch. This is where people sit down. I would know.` : `Taxman: Final week. Do try not to make my paperwork any more difficult than usual.`);
+      parts.push(`~ One more week. The end of the season is close enough to taste.`);
+      parts.push(st >= 10 && st < 41 ? `Holloway: Last stretch. This is where people sit down. I would know.` : `Taxman: Final week. Do try not to make my paperwork any more difficult than usual.`);
       parts.push(`? The light's going. {end} is close.
 - Push on tonight
   ~ You push on in the dark. Head torches. Silly songs. The Count ticks louder with every mile.
@@ -2571,21 +2327,28 @@ function generated(n, k) {
   ~ You rest. Properly. Rest is a stop with a morning after it, and the morning comes, and you go.`);
     } else {
       const kind = { 2: "clue", 3: "boss", 4: "squad", 5: "taxman", 6: "boss", 8: "squad", 9: "boss", 10: "clue", 11: "taxman" }[k];
-      if (kind === "boss") parts.push(bossSeg(boss[0], V.boss, st));
+      if (kind === "boss") parts.push(bossSeg(boss[0], st));
       else if (kind === "taxman") parts.push(taxSeg(st));
       else if (kind === "squad") parts.push(squadSeg());
-      else parts.push(clueSeg(["map", "grimm", "lights", "kit"][(n + k) % 4], st));
+      else parts.push(clueSeg(["map", "holloway", "lights", "kit"][(n + k) % 4], st));
+      if (kind !== "boss") parts.push(lairLine);
     }
     if (k !== 7) parts.push(deal(BANTER, "ban"));
     parts.push(pick(CLIFF));
   }
   let src = parts.filter(Boolean).join("\n");
   // Season 40: the last two chapters are written in full.
-  if (lap === 0 && li === legs.length - 1 && k === 12) src = FINAL_12;
-  if (lap === 0 && li === legs.length - 1 && k === 13) src = FINAL_13;
-  src = src.replace(/\{(place|next|prev|route|leg|keeper|twist|n|boss|bossid|bossline|end|start|marks|nextleg|nextroute|bossbeat|taxbeat|squadbeat|squadchoice)\}/g, (m, key) => V[key] ?? m);
+  if (lap === 0 && li === A.legs.length - 1 && k === 12) src = FINAL_12;
+  if (lap === 0 && li === A.legs.length - 1 && k === 13) src = FINAL_13;
+  src = src.replace(/^HOL:/gm, li < 3 && lap === 0 ? "boss:algorithm (Holloway):" : "Holloway:");
+  // keepers who are story characters speak as themselves
+  src = src.replace(/Keeper \(\{keeper\}\):/g, NPC_KEEPERS[keeper] ? `${NPC_KEEPERS[keeper]}:` : `Keeper (${keeper}):`);
+  const KEYS = /\{(place|next|prev|route|leg|keeper|twist|n|boss|Boss|bossid|bosspos|bossline|lair|realm|end|start|rungs|nextleg|nextroute|theme|bossbeat|taxbeat|squadbeat|squadchoice)\}/g;
+  src = src.replace(KEYS, (m, key) => V[key] ?? m);
   // second pass for placeholders that came in through the beats
-  src = src.replace(/\{(place|next|boss|end)\}/g, (m, key) => V[key] ?? m);
+  src = src.replace(KEYS, (m, key) => V[key] ?? m);
+  // place names start with "The"; mid-sentence it reads "the" (at the Leech Inn, towards the Kraken's Throat)
+  src = src.replace(/([a-z,] )The (?=[A-Z])/g, "$1the ");
   return parse(src);
 }
 
@@ -2605,7 +2368,7 @@ function chapter(seasonId, k, ctx) {
   try {
     body = WRITTEN["s" + n] ? parse(WRITTEN["s" + n][k - 1]) : generated(n, k);
   } catch (e) {
-    body = [{ bg: "road-night" }, { narrate: "The road goes on. The Count ticks. You walk." }];
+    body = [{ bg: "the-seam" }, { narrate: "The seam opens. The Count ticks. You walk." }];
     if (typeof console !== "undefined") console.warn("EffortStories:", e && e.message);
   }
   // the opening scene goes behind the title card
@@ -2613,7 +2376,7 @@ function chapter(seasonId, k, ctx) {
   const out = [...lead, { card: `Season ${n} · Chapter ${k}`, sub: title(n, k) }, ...body];
   if (k === 13) {
     const A = n > 4 ? legAt(n) : null, finalLap = A && A.lap === 0 && A.li === A.legs.length - 1;
-    out.push(finalLap ? { card: "The end of the long way round", sub: "Every step a stitch" } : { card: `End of Season ${n}`, sub: seasonName(n) });
+    out.push(finalLap ? { card: "The end of the long way down", sub: "Every step a stitch" } : { card: `End of Season ${n}`, sub: seasonName(n) });
   }
   return JSON.parse(JSON.stringify(out));
 }

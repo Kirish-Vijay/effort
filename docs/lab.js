@@ -17,7 +17,7 @@ const coin = (sz = 20) => window.Icons?.coin?.(sz) || `<i class="cdot coin" styl
 const gem = (sz = 20) => window.Icons?.gem?.(sz) || `<i class="cdot gem" style="width:${sz}px;height:${sz}px"></i>`;
 const itemArt = (item) => window.Icons?.item?.(item, 64) || `<span>${item.e}</span>`;
 const STAT_LOOK = { power: ["power", "#ff6a3d"], guard: ["guard", "#3a9cf0"], speed: ["speed", "#4fd67f"], brains: ["brains", "#a86bff"], luck: ["luck", "#ffc83d"] };
-const ROW_ICON = { front: "shieldWall", mid: "bigSwing", back: "patchUp" };
+const ROW_ICON = { front: "shieldWall", mid: "bigSwing", back: "target" };
 // Prices are whole Endeavours; rewards are counted in Efforts.
 const gems = (efforts) => Math.floor(efforts / PER_E());
 const priceTag = (efforts) => `<span class="price">${gem(18)}${fmt(efforts / PER_E())}</span>`;
@@ -83,8 +83,8 @@ const PERKS = {
   combo: (v) => `Combos build ${Math.round(v * 100)}% faster`,
   taxStart: (v) => `Start every Taxman fight on a ${v}-hit combo`,
   steal: (v) => `Steal up to ${Math.round(v * 100)}% more from the Taxman`,
-  shield: (v) => `Shield Wall lasts ${v}s longer`,
-  heal: (v) => `Patch Up heals ${Math.round(v * 100)}% more`,
+  shield: (v) => `Shield Bash guards ${v}s longer`,
+  heal: (v) => `Second Wind heals ${Math.round(v * 100)}% more`,
   swing: (v) => `Big Swing lasts ${v} more hits`,
   thorns: (v) => `Hits you take deal ${Math.round(v * 10)}× their damage back to the boss`,
   lifesteal: (v) => `Every hit heals you about ${Math.max(1, Math.round(v * 18))} HP`,
@@ -375,7 +375,7 @@ const KNOBS = [
   ["Raid", [["raidHpBase", "Boss health (Brett)"], ["raidRewardCurve", "Reward growth vs boss level"], ["enragedHp", "Enraged health", "×"], ["enragedDmg", "Enraged damage", "×"],
     ["raidAtkEvery", "Seconds between attacks"], ["raidBossDmg", "Single-hit damage"], ["raidRewardPerMember", "Win reward per member per level", "Efforts"]]],
   ["Rows and specials", [["guardShare", "Front: share of back-row hits taken"], ["interruptShare", "Middle: wind-up damage to stagger", "share of boss health"], ["staggerMult", "Staggered attack lands", "×"],
-    ["supportEvery", "Back: taps per support heal"], ["supportHeal", "Back: support heal", "share of health"], ["spPerTap", "Special charge per tap"], ["spPerAbility", "Special charge per ability"], ["spPerHit", "Special charge per hit taken"]]],
+    ["tapHeal", "Second Wind: heal per tap", "share of health"], ["openingBonus", "Opening bonus"], ["formationBonus", "Formation bonus"], ["counterTaps", "Front: Counter (taps)"], ["backCrit", "Back: extra crit"], ["spPerTap", "Special charge per tap"], ["spPerAbility", "Special charge per ability"], ["spPerHit", "Special charge per hit taken"]]],
   ["Competition", [["strideMin", "Lowest raid power", "×"], ["strideMax", "Highest raid power", "×"], ["stepsShare", "Share of loot split by steps"], ["topLoot", "Top walker loot bonus"], ["lastLoot", "Lowest walker loot change"],
     ["slackerTax", "Lowest walker pays this share of their week"], ["slackerAggro", "How much more the boss targets them", "×"], ["paceTax", "Daily tax swing vs squad average"]]],
   ["Trivia", [["triviaSeconds", "Seconds per question"], ["triviaFailShare", "Share wrong that paralyses"], ["rarityBossDmg", "Boss damage per rarity point", "share of health"], ["paralysedSteps", "Step penalty when paralysed"], ["paralysedStunSec", "Stun when paralysed (s)"]]],
@@ -703,7 +703,7 @@ function raidFx(e) {
       break;
     }
     case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { size: 20, color: "#9af0ff" }); break; }
-    case "shield": FX.play("shield"); A?.shield(e.ids, 8 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
+    case "shield": FX.play("shield"); A?.shield(e.ids, 6 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
     case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
     case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); break; }
     case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }

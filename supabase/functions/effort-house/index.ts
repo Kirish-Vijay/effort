@@ -1,9 +1,11 @@
 // The House: Stripe tells us a skin was paid for, and this hands it over.
 //
-// Each skin has a Stripe Payment Link (Game.SKINS[].pay). The app opens it with
-// client_reference_id = "<player id>__<skin id>", so when Stripe sends checkout.session.completed here we know who
-// bought what. The money goes to whatever bank account the Stripe account pays out to; this only records it and
-// grants the skin (a ledger row of kind "skin", amount 0, so it never touches anyone's Endeavours).
+// There's one Stripe Payment Link per price (Game.HOUSE_LINKS). The app opens it with
+// client_reference_id = "<player id>__<item id>" (a skin, or a Gamba Bucket pack), so when Stripe sends
+// checkout.session.completed here we know who bought what, and we check they paid at least its price. The money
+// goes to whatever bank account the Stripe account pays out to; this only records it and hands the item over:
+// a skin is a ledger row of kind "skin", a pack is "gamba-credit" (ref "<session>:<buckets>"), both amount 0, so
+// neither touches anyone's Endeavours.
 //
 // Needs one secret: STRIPE_WEBHOOK_SECRET (the "whsec_..." signing secret of the webhook endpoint in Stripe).
 // Until it's set every request is refused, so nothing can be faked.
@@ -47,24 +49,24 @@ Deno.serve(async (req) => {
   if (s.payment_status !== "paid") return reply(200, "Not paid yet");
 
   const G = await rules();
-  const [playerId, skinId] = String(s.client_reference_id || "").split("__");
-  const skin = G.skinById(skinId), tier = skin && G.skinTier(skin);
+  const [playerId, itemId] = String(s.client_reference_id || "").split("__");
+  const item = G.houseItem(itemId);
   const pence = Number(s.amount_total) || 0;
   const { data: player } = playerId ? await db.from("players").select("id,name").eq("id", playerId).maybeSingle() : { data: null };
 
   // Record every payment, even one we can't match, so the fund's total is always right.
   const { error } = await db.from("house_payments").upsert({
-    stripe_session: String(s.id), player_id: player?.id ?? null, skin: skin?.id ?? String(skinId || "unknown"), pence,
+    stripe_session: String(s.id), player_id: player?.id ?? null, skin: item?.id ?? String(itemId || "unknown"), pence,
     currency: String(s.currency || "gbp"), email: s.customer_details?.email ?? null,
   }, { onConflict: "stripe_session", ignoreDuplicates: true });
   if (error) return reply(500, error.message);
-  if (!player || !skin) return reply(200, "Paid, but no player or skin to give it to. Sort it by hand");
-  if (pence < tier.pence) return reply(200, "Paid less than the skin costs. Sort it by hand");
+  if (!player || !item) return reply(200, "Paid, but no player or item to give it to. Sort it by hand");
+  if (pence < item.pence) return reply(200, "Paid less than it costs. Sort it by hand");
 
-  const { error: e2 } = await db.from("ledger").upsert(
-    { player_id: player.id, kind: "skin", ref: skin.id, amount: 0, xp: 0, note: `The House: ${skin.name} (${G.pounds(pence)})` },
-    { onConflict: "player_id,kind,ref", ignoreDuplicates: true },
-  );
+  const row = item.kind === "skin"
+    ? { player_id: player.id, kind: "skin", ref: item.id, amount: 0, xp: 0, note: `The House: ${item.name} (${G.pounds(pence)})` }
+    : { player_id: player.id, kind: "gamba-credit", ref: `${s.id}:${item.buckets}`, amount: 0, xp: 0, note: `The House: ${item.name} (${G.pounds(pence)})` };
+  const { error: e2 } = await db.from("ledger").upsert(row, { onConflict: "player_id,kind,ref", ignoreDuplicates: true });
   if (e2) return reply(500, e2.message);
-  return reply(200, `${skin.name} for ${player.name}`);
+  return reply(200, `${item.name} for ${player.name}`);
 });

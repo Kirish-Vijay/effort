@@ -97,7 +97,7 @@ const coin = (sz = 20) => window.Icons?.coin?.(sz) || `<i class="cdot coin" styl
 const gem = (sz = 20) => window.Icons?.gem?.(sz) || `<i class="cdot gem" style="width:${sz}px;height:${sz}px"></i>`;
 const itemArt = (item) => window.Icons?.item?.(item, 64) || `<span>${item.e}</span>`;
 const STAT_LOOK = { power: ["power", "#ff6a3d"], guard: ["guard", "#3a9cf0"], speed: ["speed", "#4fd67f"], brains: ["brains", "#a86bff"], luck: ["luck", "#ffc83d"] };
-const ROW_ICON = { front: "shieldWall", mid: "bigSwing", back: "patchUp" };
+const ROW_ICON = { front: "shieldWall", mid: "bigSwing", back: "target" };
 const priceTag = (efforts) => `<span class="price">${gem(18)}${fmt(efforts / PER_E())}</span>`;
 const effortTag = (n) => `${coin(18)}${fmt(n)}`;
 const signedEfforts = (n) => `${n >= 0 ? "+" : "−"}${coin(16)}${fmt(Math.abs(n))}`;
@@ -107,8 +107,8 @@ const PERKS = {
   combo: (v) => `Combos build ${Math.round(v * 100)}% faster`,
   taxStart: (v) => `Start every Taxman fight on a ${v}-hit combo`,
   steal: (v) => `Steal up to ${Math.round(v * 1000) / 10}% more from the Taxman`,
-  shield: (v) => `Shield Wall lasts ${v}s longer`,
-  heal: (v) => `Patch Up heals ${Math.round(v * 100)}% more`,
+  shield: (v) => `Shield Bash guards ${v}s longer`,
+  heal: (v) => `Second Wind heals ${Math.round(v * 100)}% more`,
   swing: (v) => `Big Swing lasts ${v} more hits`,
   thorns: (v) => `Hits you take deal ${Math.round(v * 10)}× their damage back to the boss`,
   lifesteal: (v) => `Every hit heals you about ${Math.max(1, Math.round(v * 18))} HP`,
@@ -1218,7 +1218,7 @@ function howRaids() {
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit and how big you stand. Half the loot goes by steps, half by the fight. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ${p.ability}`).join(". ")}. Each row pulls about the same weight in a fight. Every class has a home row (yours is the ${G.posOf(G.suggestedPosition(myStats())).label.toLowerCase()}); out of it you hit weaker, take more and heal less; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder. Moving takes a few seconds.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ${p.ability}`).join(". ")}. Every row deals damage: the front hits hardest and hits back, the middle staggers wind-ups, the back crits from safety. Fill all three for +${Math.round(G.RULES.formationBonus * 100)}% (Formation). When the boss winds up on someone else, everyone else gets an opening (+${Math.round(G.RULES.openingBonus * 100)}%); if it's you, move rows to dodge. Every hit heals you a little (Second Wind). Your class's home row (yours is the ${G.posOf(G.suggestedPosition(myStats())).label.toLowerCase()}) gives a small bonus; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder.</span></div></div>
         <div class="hrow"><span class="hic">${ic("guard")}</span><div><b>Each row has a job</b><span>${G.POSITIONS.map((p) => `${p.label}, ${p.passive}: ${p.passiveWhat.charAt(0).toLowerCase() + p.passiveWhat.slice(1)}`).join(". ")}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>It charges as you tap, use your ability and take hits. Fire it when it glows. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
@@ -1271,6 +1271,10 @@ function tabShop() {
   const next = I.TIERS.find((t) => t.lvl > lvl);
   const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
   return `
+    <div class="shopfeature">
+      <button class="sf gamba" data-shoptab="gamba" aria-pressed="${tab === "gamba"}"><span class="sf-art">${bucketArt("legendary")}</span><span><b>Winny's Gamba Bucket</b><small>${Math.max(0, G.GAMBA.perDay - (S.D.gamba?.today || 0))} left today</small></span></button>
+      <button class="sf house" data-shoptab="house" aria-pressed="${tab === "house"}"><span class="sf-art">${ic("crown")}</span><span><b>The House</b><small>Skins from ${G.pounds(G.SKIN_TIERS[0].pence)}</small></span></button>
+    </div>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("guard")}</span><h2 class="ol-sm">Loadout</h2>${next ? `<span class="side chip">${ic("lock")} ${next.label} at Lv ${next.lvl}</span>` : ""}</div>
       <div class="loadout">${G.SLOTS.map((s) => {
@@ -1279,7 +1283,7 @@ function tabShop() {
           : `<div class="slot"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[s])}<span>${slotName[s]}</span></div></div>`;
       }).join("")}</div>
     </section>
-    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length], ["gamba", "Winny's", 0], ["house", "The House", 0]].map(([k, l, n]) =>
+    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
       `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
     ${tab === "season" ? setNote() : ""}
     ${tab === "all" ? `<p class="small muted" style="margin:0">Gear any class can wear. Five styles in every tier, each with its own perk. Your class gear is a slightly better fit for you; these let you build your own way.</p>
@@ -1302,14 +1306,22 @@ const bucketArt = (rar = "dud") => `<svg class="bucket-svg" viewBox="0 0 120 120
   <circle cx="45" cy="37" r="5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/><circle cx="62" cy="35" r="5" fill="#ffe58a" stroke="#0a0f26" stroke-width="2"/><circle cx="76" cy="38" r="4.5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/>
   <text x="60" y="84" text-anchor="middle" font-family="Lilita One, sans-serif" font-size="30" fill="#fff" stroke="#0a0f26" stroke-width="5" paint-order="stroke">W</text></svg>`;
 function gambaPanel() {
-  const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), rtp = Math.round(G.gambaReturn() * 100);
+  const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), rtp = Math.round(G.gambaReturn() * 100), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0;
+  const pack = (pk) => { const it = G.houseItem(pk.id), over = week + pk.pence > Gm.weeklyPence;
+    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}>${pk.buckets} buckets · ${G.pounds(pk.pence)}</button>`; };
   return `<section class="panel gamba">
       <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
       <div class="bucket-stage">${bucketArt("legendary")}</div>
       <p class="small" style="margin:0 0 6px">A bucket of Efforts from Winny, who runs the Taxman's back room. Some buckets are empty, most come up short and a lucky few overflow.</p>
       <p class="small muted" style="margin:0 0 12px">On average a bucket pays back ${rtp}% of what it costs. The House always wins.</p>
-      <button class="btn gold xl block" data-act="gamba-buy" ${left && S.D.wallet >= Gm.price ? "" : "disabled"}>Buy a bucket ${priceTag(Gm.price)}</button>
-      <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "That's your lot today. Back at midnight"} · Endeavours only, never real money. Winnings can't be cashed out.</p>
+      ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Buy a bucket ${priceTag(Gm.price)}</button>`
+        : credits ? `<button class="btn gold xl block" data-act="gamba-buy">Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
+      <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today for Endeavours` : "Back at midnight for Endeavours"}${credits && left ? ` · ${credits} bought bucket${credits === 1 ? "" : "s"} waiting` : ""}. Winnings can't be cashed out.</p>
+      <div class="gamba-more">
+        <span class="field-label">More buckets for real money</span>
+        <div class="btn-row">${Gm.packs.map(pack).join("")}</div>
+        <p class="tiny faint" style="margin:6px 0 0">${G.HOUSE_LINKS[Gm.packs[0].pence] ? `18+ only. Up to ${G.pounds(Gm.weeklyPence)} a week (${G.pounds(Math.max(0, Gm.weeklyPence - week))} left this week). Bought buckets skip the daily limit and cost no Endeavours. The money goes into The House.` : "Opens once The House takes payments."}</p>
+      </div>
     </section>`;
 }
 function gambaOdds() {
@@ -1325,7 +1337,7 @@ async function gambaBuy() {
   try { r = await call("gamba", { token: S.token }); }
   catch (e) { toast(e.message); return; }
   finally { S.busy = false; }
-  S.D.gamba = { today: G.GAMBA.perDay - r.left };
+  S.D.gamba = { ...S.D.gamba, today: G.GAMBA.perDay - r.left, credits: r.credits };
   FX.play("buy");
   gambaReveal(r);
 }
@@ -1399,7 +1411,7 @@ function skinSheet(id) {
     <h2 class="ol-sm">${esc(k.name)}</h2><p class="flavour">${esc(k.text)}</p>
     <ul class="ticks">${G.SKIN_TIERS.slice(0, ti + 1).map((x) => `<li>${ic("check")} ${esc(x.adds)}</li>`).join("")}${G.SKIN_TIERS.slice(ti + 1).map((x) => `<li class="off">${ic("lock")} ${esc(x.adds)} <span class="muted">(${esc(x.label)})</span></li>`).join("")}</ul>
     <div class="btn-row" style="margin-top:12px">${owned ? (on ? `<button class="btn" data-act="wear" data-kind="skin" data-id="">Take off</button>` : `<button class="btn blue block" data-act="wear" data-kind="skin" data-id="${k.id}">Wear it</button>`)
-      : k.pay ? `<button class="btn green xl block" data-act="skin-pay" data-id="${k.id}">Buy for ${G.pounds(t.pence)}</button>` : `<button class="btn block" disabled>Payments open soon</button>`}</div>
+      : G.houseItem(k.id).link ? `<button class="btn green xl block" data-act="house-pay" data-id="${k.id}">Buy for ${G.pounds(t.pence)}</button>` : `<button class="btn block" disabled>Payments open soon</button>`}</div>
     <p class="tiny faint" style="margin:10px 0 0;text-align:center">Paid by card through Stripe. Purely cosmetic: no stats, no advantage. It's yours on this account for good.</p>`, { rc: t.color });
   // The live turntable, if this phone does 3D.
   const host = $("#skin-preview");
@@ -1412,11 +1424,19 @@ function skinSheet(id) {
     } catch { host.innerHTML = flat; }
   }
 }
-// Off to Stripe. client_reference_id tells the webhook who bought which skin.
-function skinPay(id) {
-  const k = G.skinById(id); if (!k?.pay) return;
-  const url = `${k.pay}${k.pay.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(`${me().id}__${k.id}`)}`;
-  toast("Opening Stripe. Your skin appears here once it's paid");
+// Off to Stripe, after a clear look at what's being bought. client_reference_id tells the webhook who bought what.
+function housePay(id, sure = false) {
+  const it = G.houseItem(id); if (!it?.link) return;
+  if (!sure) {
+    openSheet(`${sheetHead("Real money")}
+      <p class="small" style="margin:0 0 8px"><b>${esc(it.name)}</b> for <b>${G.pounds(it.pence)}</b>, paid by card through Stripe. It goes into The House.</p>
+      <p class="small muted" style="margin:0 0 12px">${it.kind === "pack" ? "Each bucket is a gamble with the odds shown in Winny's: most come up short. " : "Purely cosmetic. "}You must be 18 or over, or have a parent's OK. No refunds once it's yours.</p>
+      <div class="btn-row"><button class="btn" data-act="close-sheet">Cancel</button><button class="btn green" data-act="house-pay-go" data-id="${it.id}">Pay ${G.pounds(it.pence)}</button></div>`);
+    return;
+  }
+  closeSheet();
+  const url = `${it.link}${it.link.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(`${me().id}__${it.id}`)}`;
+  toast("Opening Stripe. It shows up here once it's paid");
   window.open(url, "_blank", "noopener");
 }
 
@@ -2548,7 +2568,7 @@ function raidFx(e) {
       break;
     }
     case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { size: 20, color: "#9af0ff" }); break; }
-    case "shield": FX.play("shield"); A?.shield(e.ids, 8 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
+    case "shield": FX.play("shield"); A?.shield(e.ids, 6 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
     case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
     case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); break; }
     case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
@@ -3051,7 +3071,8 @@ document.addEventListener("click", async (e) => {
     case "wear": wardrobe({ [d.kind]: d.id || null }, d.id ? "Looking sharp" : null); if (d.kind === "skin") closeSheet(); break;
     case "gamba-buy": gambaBuy(); break;
     case "gamba-odds": gambaOdds(); break;
-    case "skin-pay": skinPay(d.id); break;
+    case "house-pay": housePay(d.id); break;
+    case "house-pay-go": housePay(d.id, true); break;
     case "chapter": playChapter(Number(d.k)); break;
     case "claim": claim(d.what, Number(d.k), d.ref); break;
     case "claim-track": claimTrack(); break;

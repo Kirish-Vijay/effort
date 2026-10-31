@@ -28,7 +28,7 @@ const TIERS = [
   { id: "s1", label: "Season 1", color: "#5fd0a8", lvl: 6, price: 1800, season: "s1" },
 ];
 const SETS = {
-  s1: { name: "The Long Way Up kit", season: "s1", bonus: ["spCharge", 0.25], what: "Wear all three: your special charges 25% faster" },
+  s1: { name: "The Long Count kit", season: "s1", bonus: ["spCharge", 0.25], what: "Wear all three: your special charges 25% faster" },
 };
 // id: short kebab-case, unique. stats: object of bonuses. perk: [type, value] or null.
 const ITEMS = [
@@ -197,9 +197,9 @@ const ITEMS = [
   { id: "stone-circle-cloak", cls: "hedge", slot: "armour", tier: "relic", name: "Cloak Woven at a Stone Circle", e: "🪨", stats: { guard: 20, luck: 7 }, perk: ["heal", 0.45], text: "Smells of druid. Works like magic." },
   { id: "certain-tea-leaves", cls: "hedge", slot: "trinket", tier: "relic", name: "Tea Leaves of Absolute Certainty", e: "🍵", stats: { luck: 15 }, perk: ["loot", 0.45], text: "Says you'll win. Says it in Earl Grey." },
   // ---- Season 1 set: any class ----
-  { id: "s1-trekking-pole", slot: "weapon", tier: "s1", set: "s1", season: "s1", name: "Trekking Pole, Slightly Bent", e: "🥢", stats: { power: 8, speed: 3 }, perk: null, text: "Bent at Dartmoor. Still pointing north." },
-  { id: "s1-waxed-jacket", slot: "armour", tier: "s1", set: "s1", season: "s1", name: "Waxed Jacket (Leaks a Bit)", e: "🧥", stats: { guard: 8, luck: 3 }, perk: null, text: "Keeps out most of the rain and none of the drizzle." },
-  { id: "s1-os-map", slot: "trinket", tier: "s1", set: "s1", season: "s1", name: "Ordnance Survey Map, Folded Wrong", e: "🗺️", stats: { brains: 6 }, perk: null, text: "Nobody has ever folded one back properly. Nobody ever will." },
+  { id: "s1-trekking-pole", slot: "weapon", tier: "s1", set: "s1", season: "s1", name: "Bogwood Walking Pole, Slightly Bent", e: "🥢", stats: { power: 8, speed: 3 }, perk: null, text: "Bent at Murkwater Ford. Still points the way the Count wants to go." },
+  { id: "s1-waxed-jacket", slot: "armour", tier: "s1", set: "s1", season: "s1", name: "Blotmarsh Waxed Jacket (Leaks a Bit)", e: "🧥", stats: { guard: 8, luck: 3 }, perk: null, text: "Keeps out most of the swamp and none of the smell." },
+  { id: "s1-os-map", slot: "trinket", tier: "s1", set: "s1", season: "s1", name: "Morwenna's Map, Folded Wrong", e: "🗺️", stats: { brains: 6 }, perk: null, text: "Shows every realm, and one door she drew over in pencil." },
   // ---- Ascendant: 2.1× Mythic, from 30 Oct 2028 ----
   { id: "never-blinked-clipboard", cls: "bouncer", slot: "weapon", tier: "ascendant", name: "Clipboard of the Bouncer Who Never Blinked", e: "📋", stats: { power: 29, guard: 10 }, perk: ["taxStart", 56], text: "Locals say he's still on the door. Locals are right." },
   { id: "kebab-siege-bomber", cls: "bouncer", slot: "armour", tier: "ascendant", name: "Bomber Jacket of the Kebab Shop Siege", e: "🧥", stats: { guard: 29, power: 10 }, perk: ["thorns", 3.13], text: "Held the queue in 1997. The queue still talks about it." },
@@ -393,7 +393,7 @@ for (const [tier, slots] of Object.entries(MARKET)) {
   }
 }
 // Names for the written seasons' sets; game.js gives every season's set its stats (and names later ones itself).
-const SEASON_SETS = {"s2": {"weapon": {"name": "Norwegian Cheese Slicer, Sharpened", "e": "🧀", "text": "Invented in Lillehammer for brown cheese. Repurposed for bosses."}, "armour": {"name": "Knitted Jumper Your Host Insists You Borrow", "e": "🧶", "text": "Itchy at minus twenty. Itchier indoors. You may not give it back."}, "trinket": {"name": "Thermos of Coffee, Still Hot After the Fjord", "e": "☕", "text": "Drunk at the top, the bottom, and every bench in between."}}, "s3": {"weapon": {"name": "Midsummer Maypole, Snapped in Half", "e": "🌼", "text": "Danced round it for six hours. Hit a boss with it for six seconds."}, "armour": {"name": "Sauna Towel, Worn With Dignity", "e": "🧖", "text": "The Finns say you don't need one. The Finns are very relaxed people."}, "trinket": {"name": "Midsummer Crown of Seven Flowers", "e": "🌸", "text": "Sleep on it and dream of your future. It's mostly walking."}}, "s4": {"weapon": {"name": "Walking Cane, Amber Handle (Mosquito Included)", "e": "🦯", "text": "Forty million years old. The mosquito still looks annoyed."}, "armour": {"name": "Loden Coat, Slightly Too Grand", "e": "🧥", "text": "Bought in Vienna. Now you have to walk like you're in Vienna."}, "trinket": {"name": "Lump of Baltic Amber, Possibly a Boiled Sweet", "e": "🟠", "text": "Washed up on a beach in Lithuania. Do not lick it to check."}}};
+const SEASON_SETS = {"s2": {"weapon": {"name": "Icicle Ledger Spike", "e": "🧊", "text": "Snapped off the Frozen Ledger's tollgate. Still has a debt written on it."}, "armour": {"name": "Snow Shelter Coat", "e": "🧥", "text": "Four of the Taxman's old squad slept in it for a century. It's still warm."}, "trinket": {"name": "Thermos of Hushfrost Tea", "e": "☕", "text": "Stays hot past Icetooth Arch. Nobody knows what's in it."}}, "s3": {"weapon": {"name": "Wisp's Lantern Pole", "e": "🏮", "text": "Kit carried it across the ice in 1732. The flame waited for him."}, "armour": {"name": "Render Shore Oilskin", "e": "🌧️", "text": "Sheds rain, spores and the odd missing texture."}, "trinket": {"name": "Wait-for-Me Bell", "e": "🔔", "text": "Ring it and someone left behind catches up."}}, "s4": {"weapon": {"name": "Rung of the Forty Ladder", "e": "🪜", "text": "Pulled from under the realms. Holloway counted every one."}, "armour": {"name": "Error Throne Upholstery", "e": "🪑", "text": "Torn from Grimm's chair. It keeps redrawing itself."}, "trinket": {"name": "Coin From the Socket", "e": "🪙", "text": "Fits the slot under the realms. Don't put it back."}}};
 // Class gear makes your class better at what it's good at: the weapon and trinket pour their numbers into your
 // best class stat, the armour into Guard (a Guard class's armour backs up its other stat) so nobody's health
 // falls behind. Same stat budget as the open market. flip: the pair game.js swaps when the wearer's second

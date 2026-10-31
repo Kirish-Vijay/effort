@@ -136,6 +136,15 @@ async function houseTotal(db: Any) {
   return { pence: (data ?? []).reduce((a: number, r: Any) => a + (r.pence || 0), 0), count: (data ?? []).length };
 }
 
+// Paid Gamba Buckets: packs bought (ledger "gamba-credit", ref "<stripe session>:<buckets>") less buckets opened
+// with them ("gamba-paid").
+const gambaCredits = (L: Any) => L.rows.reduce((n: number, r: Any) => n + (r.kind === "gamba-credit" ? Number(String(r.ref).split(":").pop()) || 0 : r.kind === "gamba-paid" ? -1 : 0), 0);
+// Real money spent on bucket packs in the last 7 days (the weekly cap).
+async function packPence(db: Any, id: string, now: number) {
+  const { data } = await db.from("house_payments").select("pence,skin").eq("player_id", id).like("skin", "gamba-%").gte("at", new Date(now - 7 * DAY_MS).toISOString());
+  return (data ?? []).reduce((a: number, r: Any) => a + (r.pence || 0), 0);
+}
+
 // ---------- settling days ----------
 const netOf = (E: number, rate: number, knocked: number, steal: number) => E - Math.round(E * rate * (1 - knocked)) + Math.round(E * steal);
 
@@ -395,7 +404,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now, den), hunt, chat: { latest: await chatLatest(db, squad) },
         features: Object.fromEntries(Object.keys(G.FEATURES).map((f) => [f, G.featureOn(f, gameDay(squad, now))])), gameDay: gameDay(squad, now),
         ledger: L.rows.slice(0, 25).map((r: Any) => ({ kind: r.kind, ref: r.ref, amount: r.amount, note: r.note, at: r.at })),
-        gamba: { today: L.rows.filter((r: Any) => r.kind === "gamba" && String(r.ref).startsWith(today + ":")).length },
+        gamba: { today: L.rows.filter((r: Any) => r.kind === "gamba" && String(r.ref).startsWith(today + ":")).length, credits: gambaCredits(L), weekPence: await packPence(db, player.id, now) },
         house: await houseTotal(db),
       });
     }
@@ -639,19 +648,28 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       await bankToday(db, player, squad, now);
       const day = localDate(now, tz), L = (await ledgerFor(db, [player.id]))[player.id];
       const today = L.rows.filter((r: Any) => r.kind === "gamba" && String(r.ref).startsWith(day + ":")).length;
-      if (today >= G.GAMBA.perDay) return fail(`That's ${G.GAMBA.perDay} buckets today. Winny's closed till midnight`);
-      const ref = `${day}:${today + 1}:${crypto.randomUUID().slice(0, 8)}`;
-      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "gamba", p_ref: ref, p_amount: G.GAMBA.price, p_note: "Winny's Gamba Bucket" });
-      if (error) throw error;
-      if (bal === -1) return fail("Not enough Endeavours");
-      if (bal === -2) return fail("Try again");
+      // The day's 5 cost Endeavours; after that, only buckets bought with real money.
+      const paid = today >= G.GAMBA.perDay;
+      if (paid && gambaCredits(L) <= 0) return fail(`That's ${G.GAMBA.perDay} buckets today. More from The House, or back at midnight`);
+      const ref = `${day}:${paid ? "p" : today + 1}:${crypto.randomUUID().slice(0, 8)}`;
+      let bal = L.wallet;
+      if (paid) {
+        const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "gamba-paid", ref, amount: 0, xp: 0, note: "Winny's Gamba Bucket (paid)" });
+        if (error) return fail("Try again");
+      } else {
+        const r = await db.rpc("spend", { p_player: player.id, p_kind: "gamba", p_ref: ref, p_amount: G.GAMBA.price, p_note: "Winny's Gamba Bucket" });
+        if (r.error) throw r.error;
+        if (r.data === -1) return fail("Not enough Endeavours");
+        if (r.data === -2) return fail("Try again");
+        bal = r.data;
+      }
       const u = crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
       const k = G.gambaRoll(u), [, win, label] = G.GAMBA.prizes[k];
       if (win > 0) {
         const { error: e2 } = await db.from("ledger").insert({ player_id: player.id, kind: "gamba-win", ref, amount: win, xp: 0, note: `Gamba Bucket: ${label}` });
         if (e2) throw e2;
       }
-      return json({ ok: true, prize: k, win, wallet: bal + win, left: G.GAMBA.perDay - today - 1 });
+      return json({ ok: true, prize: k, win, wallet: bal + win, left: Math.max(0, G.GAMBA.perDay - today - 1), credits: gambaCredits(L) - (paid ? 1 : 0), paid });
     }
 
     case "hunt_finish": {

@@ -50,12 +50,13 @@ const DEFAULT_RULES = {
   edgeCombo: 1.0,           // Speed: extra damage at a full combo
   edgeCd: 1.0,              // Speed: shorter cooldowns
   edgeCharge: 2.5,          // Brains: special charges faster
-  edgeHeal: 1.0,            // Brains: heals land harder
+  edgeHeal: 1.0,            // Brains: Second Wind heals more
+  edgeCounter: 6,           // Guard: Counter hits harder
   edgeAudit: 6,             // Brains: damage through the Taxman's Audit
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 2240000,       // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for four)
+  raidHpBase: 2560000,       // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for four)
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
   noFrontDmg: 1.3,          // with nobody at the front, every hit lands this much harder
   lapHp: 2,                 // after the last boss the ladder loops: each lap has this much more health…
@@ -65,7 +66,7 @@ const DEFAULT_RULES = {
   stepHp: 1.05, stepDmg: 1.02, stepReward: 1.015, // (1: compounds instead; 0: the old ×2 laps)
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
-  raidBossDmg: 15,          // a swipe at level 1
+  raidBossDmg: 22,          // a swipe at level 1
   raidRewardPerMember: 70,  // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
   raidGoalPerDay: 5000,     // the squad's weekly goal before Sunday: this many steps a day for each player…
@@ -77,11 +78,14 @@ const DEFAULT_RULES = {
   spPerTap: 0.25,           // …which builds a little with every tap…
   spPerAbility: 8,          // …more with every row ability…
   spPerHit: 3,              // …and with every hit taken (half as much again at the front). Brains charges it faster
-  guardShare: 0.4,          // Front, Bodyguard: takes this share of every hit aimed at the back row
+  openingBonus: 0.4,        // hit harder while the boss winds up on someone else (it's looking the other way)
+  formationBonus: 0.1,
+  homeBonus: 1.12,          // your class's home row: hit this much harder there, and take this much less      // every row filled: the whole squad hits this much harder
+  tapHeal: 0.0012,          // Second Wind: every tap heals you this share of your health (Brains makes it more)
+  counterTaps: 1.2,         // Front, Counter: every hit you take, you hit back this many taps' worth (Guard adds more)
+  backCrit: 0.12,           // Back, Sharpshooter: extra crit chance
   interruptShare: 0.002,    // Middle, Interrupt: deal this share of the boss's health during a wind-up to stagger it…
   staggerMult: 0.5,         // …so it lands this hard (a Ground Slam is stopped outright)
-  supportEvery: 20,         // Back, Support: every this many taps…
-  supportHeal: 0.025,       // …heals the most hurt teammate this share of their health and clears slime, spores and burns
   feebleMult: 0.35,         // SHHH: the next two attacks land this hard
   brewVuln: 0.2,            // Volatile Brew: the boss takes this much more for 10s
   prophecyCrit: 0.2,        // Pound-Shop Prophecy: extra crit chance for the squad
@@ -158,9 +162,9 @@ function levelProgress(xp) {
 // ---------- stats and classes from quiz answers ----------
 const STATS = [
   { id: "power", label: "Power", e: "💪", what: "Every tap hits harder" },
-  { id: "guard", label: "Guard", e: "🛡️", what: "More health, less damage taken" },
+  { id: "guard", label: "Guard", e: "🛡️", what: "More health, less damage taken, harder Counters at the front" },
   { id: "speed", label: "Speed", e: "🏃", what: "Bigger combos, faster cooldowns" },
-  { id: "brains", label: "Brains", e: "🧠", what: "Your special charges faster, heals land harder, more trivia time" },
+  { id: "brains", label: "Brains", e: "🧠", what: "Your special charges faster, Second Wind heals more, more trivia time" },
   { id: "luck", label: "Luck", e: "🍀", what: "More critical hits" },
 ];
 const STAT_TOTAL = 30, STAT_MIN = 2, STAT_MAX = 10;
@@ -200,19 +204,21 @@ function classOf(st) {
   const top = STATS.map((s) => s.id).sort((a, b) => st[b] - st[a] || STATS.findIndex((s) => s.id === a) - STATS.findIndex((s) => s.id === b)).slice(0, 2);
   return CAT().CLASSES.find((c) => c.stats.includes(top[0]) && c.stats.includes(top[1])) || CAT().CLASSES[0];
 }
+// Every row deals damage, in its own way. Where you stand is the strategy: the front hits hardest and gets hit most
+// (and hits back), the middle staggers wind-ups, the back is safe and crits. Fill all three for the Formation bonus.
 const POSITIONS = [
-  { id: "front", label: "Front", e: "🛡️", ability: "Shield Wall", abilityWhat: "Front row takes 60% less damage for 8s", mult: 1.65, aggro: 70,
-    passive: "Bodyguard", passiveWhat: "Takes 40% of every hit aimed at the back row" },
+  { id: "front", label: "Front", e: "🛡️", ability: "Shield Bash", abilityWhat: "A huge bash (ten taps' worth), and the front row takes half damage for 6s", mult: 1.4, aggro: 70,
+    passive: "Counter", passiveWhat: "Every hit you take, you hit straight back. More Guard, bigger Counters" },
   { id: "mid", label: "Middle", e: "⚔️", ability: "Big Swing", abilityWhat: "Your next 8 taps hit 3× as hard", mult: 1.1, aggro: 25,
     passive: "Interrupt", passiveWhat: "Hit hard during a wind-up to stagger it to half damage (and stop a Ground Slam)" },
-  { id: "back", label: "Back", e: "🩹", ability: "Patch Up", abilityWhat: "Heal the most hurt teammate 35%", mult: 1.45, aggro: 5,
-    passive: "Support", passiveWhat: "Every 20 taps patches up whoever needs it and clears slime, spores and burns" },
+  { id: "back", label: "Back", e: "🎯", ability: "Volley", abilityWhat: "Five quick shots at double damage", mult: 1.0, aggro: 5,
+    passive: "Sharpshooter", passiveWhat: `${Math.round(DEFAULT_RULES.backCrit * 100)}% more crits, and the boss rarely looks your way` },
 ];
 const posOf = (id) => POSITIONS.find((p) => p.id === id) || POSITIONS[1];
 const posScores = (st) => ({ front: st.guard * 2 + st.power * 0.5, mid: st.power + st.speed, back: st.brains + st.luck * 0.8 + st.speed * 0.3 });
 // Every class has a home row, so everyone in a class gets the same advice. Pass base stats (not ones with
 // gear on): gear can shift your top two stats, but it never changes your class.
-const HOME_ROW = { bouncer: "front", lollipop: "front", pigeon: "front", menace: "mid", mad: "mid", gremlin: "mid", pickpocket: "mid", librarian: "back", courier: "back", hedge: "back" };
+const HOME_ROW = { bouncer: "front", lollipop: "front", pigeon: "front", menace: "mid", mad: "mid", gremlin: "mid", pickpocket: "mid", librarian: "front", courier: "back", hedge: "back" };
 const homeRow = (cls) => HOME_ROW[cls] || "mid";
 // What your stats do. Every point counts: your total (30 from the quiz, plus gear) sets how hard you hit and how
 // much you can take, so nobody's points are wasted. On top of that, each stat's share of your total is its edge,
@@ -230,7 +236,8 @@ function edges(g) {
     cd: 1 - Math.min(0.5, E.edgeCd * s("speed")),              // ability cooldowns ×
     move: 1 - Math.min(0.6, 1.5 * s("speed")),                 // time to change rows ×
     charge: 1 + E.edgeCharge * s("brains"),                    // special charge ×
-    heal: 1 + E.edgeHeal * s("brains"),                        // heals ×
+    heal: 1 + E.edgeHeal * s("brains"),                        // Second Wind ×
+    counter: E.edgeCounter * s("guard"),                       // extra Counter, in taps' worth
     warn: 3 * s("brains"),                                     // seconds of extra warning before attacks
     trivia: Math.round(12 * s("brains")),                      // seconds of extra trivia time
     audit: E.edgeAudit * s("brains"),                          // Taxman: extra damage through an Audit
@@ -250,22 +257,19 @@ function statEffects(g) {
   const e = edges(g), pct = (x) => Math.round(x * 100);
   return {
     power: `Taps +${pct(e.power - 1)}%`,
-    guard: `${e.hp} health, blocks ${pct(e.armour)}%`,
+    guard: `${e.hp} health, blocks ${pct(e.armour)}%, Counter ×${(RULES.counterTaps + e.counter).toFixed(1)}`,
     speed: `Full combo +${pct(e.combo)}%, cooldowns −${pct(1 - e.cd)}%`,
-    brains: `Special ${pct(e.charge - 1)}% faster, heals +${pct(e.heal - 1)}%`,
+    brains: `Special ${pct(e.charge - 1)}% faster, Second Wind +${pct(e.heal - 1)}%`,
     luck: `${pct(e.crit)}% crits`,
   };
 }
 function suggestedPosition(st) {
   return homeRow(classOf(st).id);
 }
-// 1 in your home row. Elsewhere your stats decide how well you cope (at most 0.75): out of position you hit
-// weaker, take more and heal less. st can include gear; home is your class's row.
+// Your class's home row suits you: you hit a bit harder and take a bit less there. Anywhere else is fine too.
 function posFit(st, pos, home) {
   home = home || suggestedPosition(st);
-  if (pos === home) return 1;
-  const sc = posScores(st);
-  return clamp((sc[pos] ?? 0) / Math.max(1, sc[home]), 0.3, 0.75);
+  return pos === home ? RULES.homeBonus : 1;
 }
 
 // ---------- gear ----------
@@ -534,30 +538,30 @@ const BOSSES = [
     sig: "ooze", style: "Slow and heavy. Slimes a whole row at a time",
     pattern: [["swipe", "swipe", "stomp", "stomp", "ooze"], ["swipe", "stomp", "stomp", "ooze", "scream", "feast"], ["swipe", "stomp", "ooze", "scream", "feast"]],
     attacks: { swipe: "Slap", stomp: "Belly Flop", scream: "Screech", feast: "Gorge", ooze: "Ooze" } },
-  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 1.03, dmg: 1.0, speed: 0.97, reward: 1.4,
+  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 1.07, dmg: 1.0, speed: 0.97, reward: 1.4,
     sig: "spores", style: "Stampedes and clouds of spores that keep on hurting",
     pattern: [["swipe", "swipe", "stomp", "spores", "scream"], ["swipe", "stomp", "stomp", "spores", "spores", "feast"], ["stomp", "spores", "scream", "scream", "feast"]],
     attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Bellow", feast: "Gorge", spores: "Spore Cloud" } },
-  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 0.95, dmg: 1.15, speed: 0.94, reward: 1.9,
+  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.01, dmg: 1.15, speed: 0.94, reward: 1.9,
     sig: "vanish", style: "Fades out where you can't hit it, then picks off the weakest",
     pattern: [["swipe", "swipe", "scream", "vanish"], ["swipe", "scream", "vanish", "vanish", "feast"], ["swipe", "scream", "scream", "vanish", "feast"]],
     attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain", vanish: "Vanish" } },
-  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.1, dmg: 1.3, speed: 0.91, reward: 2.5,
+  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.16, dmg: 1.3, speed: 0.91, reward: 2.5,
     sig: "gust", style: "Fast, and blows the front row out of position",
     pattern: [["swipe", "swipe", "gust", "stomp", "scream"], ["swipe", "gust", "stomp", "scream", "feast", "gust"], ["swipe", "gust", "scream", "scream", "feast"]],
     attacks: { swipe: "Slice", stomp: "Downdraft", scream: "Howl", feast: "Siphon", gust: "Gust" } },
-  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.14, dmg: 1.45, speed: 0.88, reward: 3.2,
+  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.19, dmg: 1.45, speed: 0.88, reward: 3.2,
     sig: "grab", style: "Two tentacles hit at once, and it grabs people",
     swipeHits: 2, swipeMult: 0.65,
     pattern: [["swipe", "swipe", "grab", "stomp", "scream"], ["swipe", "swipe", "grab", "stomp", "feast"], ["swipe", "grab", "scream", "stomp", "feast", "grab"]],
     attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour", grab: "Grab" } },
-  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.5, dmg: 1.6, speed: 0.85, reward: 4,
+  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.66, dmg: 1.6, speed: 0.85, reward: 4,
     sig: "slam", style: "Slow, crushing club swings. Stop the Ground Slam or it flattens you",
     swipeMult: 1.3,
     pattern: [["swipe", "swipe", "stomp", "slam"], ["swipe", "stomp", "slam", "scream", "feast"], ["swipe", "slam", "slam", "scream", "feast"]],
     attacks: { swipe: "Club Swing", stomp: "Boot Stomp", scream: "War Cry", feast: "Feast", slam: "Ground Slam" } },
-  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.76, dmg: 1.9, speed: 0.82, reward: 5,
-    sig: "breath", style: "Fire that keeps burning. Only a Shield Wall covers the rows behind",
+  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.92, dmg: 1.9, speed: 0.82, reward: 5,
+    sig: "breath", style: "Fire that keeps burning. Only a front row's raised shields cover the rows behind",
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
 ];
@@ -569,7 +573,7 @@ const EVENT_BOSSES = {
   spring: { id: "ev-spring", model: "autoplay", name: "Atchoo", title: "Orange, full of pollen, and up far too early for March", style: "Stampedes about like the clocks just changed, then sneezes clouds that keep on itching", blurb: "The clocks went forward and something orange woke up in the allotment. It sneezes a lot, and it's faster than you in a light jacket.", sig: "spores",
     pattern: [["swipe", "stomp", "spores", "gust"], ["swipe", "spores", "gust", "scream", "feast"], ["spores", "gust", "scream", "feast", "stomp"]],
     attacks: {"swipe": "Spring Clean", "stomp": "Lamb Stampede", "scream": "Almighty Sneeze", "feast": "Easter Binge", "spores": "Pollen Cloud", "gust": "April Shower"} },
-  solstice: { id: "ev-solstice", model: "dragon", name: "Solveig", title: "A sun-gold dragon that refuses to set", style: "Burns all day and will not go down. Only a Shield Wall keeps the back rows out of the glare", blurb: "On the longest day a dragon sits on the sun and won't let it go down. Out-walk it before the light runs out, at about half ten.", sig: "breath",
+  solstice: { id: "ev-solstice", model: "dragon", name: "Solveig", title: "A sun-gold dragon that refuses to set", style: "Burns all day and will not go down. Only raised shields at the front keep the back rows out of the glare", blurb: "On the longest day a dragon sits on the sun and won't let it go down. Out-walk it before the light runs out, at about half ten.", sig: "breath",
     pattern: [["swipe", "stomp", "breath", "slam"], ["swipe", "breath", "slam", "scream", "feast"], ["breath", "slam", "scream", "feast", "stomp"]],
     attacks: {"swipe": "Sunburn Claw", "stomp": "Heatwave Tail", "scream": "It's Still Light Out", "feast": "Barbecue", "breath": "Solar Flare", "slam": "Sunfall"} },
   harvest: { id: "ev-harvest", model: "algorithm", name: "Big Marrow Morris", title: "Brown, enormous, and swinging a prize-winning marrow", style: "Slow, heavy marrow swings. Stop the Harvest Slam or it flattens the whole allotment", blurb: "Every September he wins the village show by sitting on the judges. This year he wants your squad's steps instead.", sig: "slam",
@@ -633,7 +637,7 @@ const SPECIALS = {
   pigeon: { name: "Pigeon Swarm", short: "Swarm", what: "For 10s the pigeons take its Strikes, everything else hits half as hard, and they peck", icon: "crown" },
   courier: { name: "Express Delivery", short: "Delivery", what: "A parcel to the face, then brings a fallen teammate straight back (or fully heals the most hurt)", icon: "heart" },
   pickpocket: { name: "Lift Wallet", short: "Lift", what: "Swipes a chunk of its health, and it hits 25% softer for 15s", icon: "coin" },
-  hedge: { name: "Pound-Shop Prophecy", short: "Prophecy", what: "12s: the squad crits far more often and abilities recharge twice as fast", icon: "eye" },
+  hedge: { name: "Pound-Shop Prophecy", short: "Prophecy", what: "A crystal ball to the face, then 12s where the squad crits far more often", icon: "eye" },
 };
 const specialOf = (m) => SPECIALS[m.cls] || SPECIALS.bouncer;
 
@@ -644,7 +648,7 @@ function makeMember(m, row) {
   const e = edges(g), maxHp = e.hp;
   const cls = classOf(m.stats || {}).id, best = homeRow(cls), pos = m.pos || best;
   return { ...m, g, e, perks, gearPts: points, cls, best, atk: e.attack, weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
-    pos, home: pos, hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0, sp: 0, specials: 0, supTaps: 0,
+    pos, home: pos, hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0, sp: 0, specials: 0,
     cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
@@ -679,10 +683,10 @@ const ATTACKS = {
   ooze: { label: "Ooze", what: "slimes a row: half damage till they move or get healed", e: "🟢" },
   spores: { label: "Spore Cloud", what: "everyone, for 8s. Healing clears it", e: "🍄" },
   vanish: { label: "Vanish", what: "can't be hit, then it goes for the weakest", e: "👻", tele: 0.8 },
-  gust: { label: "Gust", what: "blows a row backwards. A Shield Wall holds", e: "🌪️" },
+  gust: { label: "Gust", what: "blows a row backwards. A raised shield holds", e: "🌪️" },
   grab: { label: "Grab", what: "grabs someone. Hit it hard to free them", e: "🐙" },
   slam: { label: "Ground Slam", what: "front and middle, very hard. Middle row: stop it", e: "💥", tele: 1.5, cut: true, stop: true },
-  breath: { label: "Fire Breath", what: "everyone, then burns. A Shield Wall covers the rows behind", e: "🔥" },
+  breath: { label: "Fire Breath", what: "everyone, then burns. Raised shields at the front cover the rows behind", e: "🔥" },
 };
 function scheduleAttack(R) {
   const B = R.boss;
@@ -741,7 +745,11 @@ const attackName = (R, type) => R.boss.attacks?.[type] || ATTACKS[type]?.label |
 // One ordinary tap's damage before combo, crits and buffs.
 // How big a walker stands in the raid: their week's steps against the squad (stride), 0.78× to 1.4×.
 const stepScale = (stride) => Math.max(0.78, Math.min(1.4, 1 + ((Number(stride) || 1) - 1) * 0.6));
-const tapBase = (m) => (20 + m.atk * 4) * m.e.power * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos, m.best) ** 1.5;
+const tapBase = (m) => (20 + m.atk * 4) * m.e.power * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos, m.best);
+// Every row filled: the squad's Formation bonus.
+const formation = (R) => { const up = alive(R); return ["front", "mid", "back"].every((p) => up.some((x) => x.pos === p)) ? 1 + RULES.formationBonus : 1; };
+// The boss is winding up on someone else: an opening for you.
+const opening = (R, m) => { const N = R.boss.next; return N && R.boss.warned && N.ids && !N.ids.includes(m.id) ? 1 + RULES.openingBonus : 1; };
 const charge = (m, n) => { m.sp = Math.min(RULES.spMax, (m.sp || 0) + n * m.e.charge * (1 + (m.perks.spCharge || 0))); };
 // How much the middle row has to deal during a wind-up to stagger it.
 const interruptNeed = (R, type) => Math.round(RULES.interruptShare * R.boss.max * (ATTACKS[type]?.stop ? 2 : 1) * (1 + (R.mods?.stagger || 0)));
@@ -785,19 +793,12 @@ function raidTap(R, id) {
   m.combo = joy || R.t - m.lastTap <= m.e.comboMs / 1000 ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
   m.lastTap = R.t;
   charge(m, RULES.spPerTap);
-  // Back row, Support: every so many taps patches up whoever needs it most.
-  if (m.pos === "back" && ++m.supTaps >= RULES.supportEvery) {
-    m.supTaps = 0;
-    const who = mostHurt(R);
-    if (who && (who.hp < who.max || R.t < who.slimeUntil || R.t < who.dotUntil)) {
-      const amt = mend(R, m, who, who.max * RULES.supportHeal * m.e.heal * posFit(m.g, m.pos, m.best));
-      fx(R, { type: "pulse", by: m.id, id: who.id, amt });
-    }
-  }
+  // Second Wind: hitting keeps you going.
+  if (m.hp < m.max) m.hp = Math.min(m.max, m.hp + m.max * RULES.tapHeal * m.e.heal * (1 + (m.perks.heal || 0)));
   if (B.hidden) { if (!m.you && R.r() < 0.2) fx(R, { type: "tap", id: m.id, miss: true }); return { dmg: 0, crit: false, swing: false, miss: true }; }
-  const crit = R.r() < m.e.crit + (m.perks.critChance || 0) + (R.t < R.prophecyUntil ? RULES.prophecyCrit : 0);
+  const crit = R.r() < m.e.crit + (m.perks.critChance || 0) + (R.t < R.prophecyUntil ? RULES.prophecyCrit : 0) + (m.pos === "back" ? RULES.backCrit : 0);
   // Stride: walk more than the squad this week and every hit lands harder.
-  let dmg = tapBase(m) * (1 + (m.combo / RULES.comboMax) * m.e.combo) * (crit ? 2.5 + (m.perks.critDmg || 0) + (R.mods?.crit || 0) : 1) * (joy ? 2 : 1) * (R.t < m.slimeUntil ? 0.5 : 1);
+  let dmg = tapBase(m) * (1 + (m.combo / RULES.comboMax) * m.e.combo) * (crit ? 2.5 + (m.perks.critDmg || 0) + (R.mods?.crit || 0) : 1) * (joy ? 2 : 1) * (R.t < m.slimeUntil ? 0.5 : 1) * opening(R, m) * formation(R);
   let swing = false;
   if (m.swing > 0) { dmg *= 3; m.swing--; swing = true; }
   if (B.feast) dmg *= m.perks.feast || 1;
@@ -807,25 +808,28 @@ function raidTap(R, id) {
   if (m.perks.lifesteal && m.alive) m.hp = Math.min(m.max, m.hp + dmg * m.perks.lifesteal / 2.5); // damage numbers run ~10× health
   return { dmg, crit, swing };
 }
-const abilityCd = (m) => Math.max(5, ({ front: 25, mid: 20, back: 18 }[m.pos]) * m.e.cd * (1 - Math.min(0.5, m.perks.cdr || 0)));
+const abilityCd = (m) => Math.max(5, ({ front: 22, mid: 20, back: 20 }[m.pos]) * m.e.cd * (1 - Math.min(0.5, m.perks.cdr || 0)));
 function raidAbility(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m) || R.t < m.cdUntil) return false;
   if (m.pos === "front") {
+    dmgBoss(R, m, tapBase(m) * 10 * formation(R));
     const row = alive(R).filter((x) => x.pos === "front");
-    for (const f of row) f.shieldUntil = R.t + 8 + (m.perks.shield || 0);
+    for (const f of row) f.shieldUntil = R.t + 6 + (m.perks.shield || 0);
     fx(R, { type: "shield", by: m.id, ids: row.map((x) => x.id) });
-    say(R, `${nm(m)} ${vb(m, "raises", "raise")} a Shield Wall`, "good");
+    say(R, `${nm(m)} ${vb(m, "shield-bashes", "shield-bash")} it`, "good");
   } else if (m.pos === "mid") {
     m.swing = 8 + (m.perks.swing || 0);
     fx(R, { type: "swing", by: m.id });
     say(R, `${nm(m)} ${vb(m, "winds", "wind")} up a Big Swing`, "good");
   } else {
-    const hurt = mostHurt(R);
-    if (!hurt) return false;
-    const heal = mend(R, m, hurt, hurt.max * (0.35 + (m.perks.heal || 0)) * m.e.heal * posFit(m.g, m.pos, m.best));
-    fx(R, { type: "heal", by: m.id, id: hurt.id, amt: heal });
-    say(R, `${nm(m)} ${vb(m, "patches", "patch")} up ${hurt === m ? vb(m, "themself", "yourself") : nm(hurt).replace(/^You$/, "you")} (+${heal})`, "good");
+    let total = 0;
+    for (let i = 0; i < 5; i++) {
+      const crit = R.r() < m.e.crit + (m.perks.critChance || 0) + RULES.backCrit;
+      total += dmgBoss(R, m, tapBase(m) * 2 * (crit ? 2.5 + (m.perks.critDmg || 0) : 1) * opening(R, m) * formation(R));
+      fx(R, { type: "tap", id: m.id, crit, swing: true });
+    }
+    say(R, `${nm(m)} ${vb(m, "looses", "loose")} a Volley for ${Math.round(total).toLocaleString("en-GB")}`, "good");
   }
   m.cdUntil = R.t + abilityCd(m);
   charge(m, RULES.spPerAbility);
@@ -859,7 +863,7 @@ function raidSpecial(R, id) {
       fx(R, { type: "revive", ids: [down.id] }); extra = ` ${nm(down)} ${vb(down, "is", "are")} back`;
     } else { const who = mostHurt(R); if (who) { const amt = mend(R, m, who, who.max); fx(R, { type: "heal", by: m.id, id: who.id, amt }); } }
   } else if (m.cls === "pickpocket") { dmgBoss(R, m, base * 30); R.weakUntil = R.t + 15; }
-  else if (m.cls === "hedge") R.prophecyUntil = R.t + 12;
+  else if (m.cls === "hedge") { dmgBoss(R, m, base * 25); R.prophecyUntil = R.t + 12; }
   m.sp = 0; m.specials = (m.specials || 0) + 1;
   fx(R, { type: "special", id: m.id, cls: m.cls, roll });
   say(R, `${nm(m)}: ${S.name}!${extra}`, "good");
@@ -868,7 +872,7 @@ function raidSpecial(R, id) {
 function raidMove(R, id, pos) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !m.alive || m.pos === pos || R.over) return false;
-  m.pos = pos; m.moveUntil = R.t + Math.max(1.2, 4 * m.e.move) * (1 + (R.mods?.move || 0)); m.swing = 0; m.slimeUntil = 0;
+  m.pos = pos; m.movedAt = R.t; m.moveUntil = R.t + Math.max(1.2, 4 * m.e.move) * (1 + (R.mods?.move || 0)); m.swing = 0; m.slimeUntil = 0;
   fx(R, { type: "move", id: m.id, pos });
   say(R, `${nm(m)} ${vb(m, "moves", "move")} to the ${posOf(pos).label.toLowerCase()}`);
   return true;
@@ -878,7 +882,7 @@ function raidMove(R, id, pos) {
 function dmgTo(R, m, base) {
   let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - m.e.armour) / posFit(m.g, m.pos, m.best);
   if (!alive(R).some((x) => x.pos === "front")) d *= RULES.noFrontDmg;
-  if (R.t < m.shieldUntil) d *= 0.4;
+  if (R.t < m.shieldUntil) d *= 0.5;
   if (R.t < R.weakUntil) d *= 0.75;
   if (R.t < R.swarmUntil) d *= 0.5;
   return d * (1 + (R.mods?.taken || 0));
@@ -896,18 +900,15 @@ function wound(R, m, d) {
     if (!R.trivia) startTrivia(R);
   }
 }
-function hit(R, m, base, guarded) {
+function hit(R, m, base) {
   if (!m.alive) return 0;
   if (m.perks.dodge && R.r() < m.perks.dodge) { fx(R, { type: "dodge", id: m.id }); return 0; }
-  // Front row, Bodyguard: someone at the front takes part of every hit aimed at the back.
-  if (!guarded && m.pos === "back") {
-    const g = alive(R).filter((x) => x.pos === "front" && x !== m).sort((a, b) => b.hp / b.max - a.hp / a.max)[0];
-    if (g) { hit(R, g, base * RULES.guardShare, true); base *= 1 - RULES.guardShare; }
-  }
   const d = Math.round(dmgTo(R, m, base));
   charge(m, RULES.spPerHit * (m.pos === "front" ? 1.5 : 1));
   wound(R, m, d);
   if (m.perks.thorns) dmgBoss(R, m, d * m.perks.thorns * 10);
+  // Front row, Counter: take a hit, give one back.
+  if (m.pos === "front" && m.alive && d > 0) { dmgBoss(R, m, tapBase(m) * (RULES.counterTaps + m.e.counter) * formation(R)); fx(R, { type: "tap", id: m.id, crit: true }); }
   return d;
 }
 // Let go of whoever the Kraken is holding.
@@ -918,6 +919,12 @@ function release(R, freed) {
   if (m) { if (m.stunUntil === G.until) m.stunUntil = R.t; m.dotUntil = 0; }
   fx(R, { type: "release", id: G.id, freed });
   if (m && freed) say(R, `${nm(m)} ${vb(m, "is", "are")} free`, "good");
+}
+// Someone the attack was aimed at moved rows after the warning: it misses them.
+function dodged(R, m, N) {
+  if (!N.warnAt || !(m.movedAt > N.warnAt)) return false;
+  fx(R, { type: "dodge", id: m.id }); say(R, `${nm(m)} ${vb(m, "dodges", "dodge")} it`, "good");
+  return true;
 }
 function bossAttack(R, echo = null) {
   const B = R.boss, N = echo || B.next, type = N.type, up = alive(R), name = attackName(R, type);
@@ -932,7 +939,7 @@ function bossAttack(R, echo = null) {
   const burn = (m, perSec, secs) => { if (m.alive) { m.dotBase = Math.max(R.t < m.dotUntil ? m.dotBase : 0, perSec); m.dotUntil = Math.max(m.dotUntil, R.t + secs); } };
   if (type === "swipe") {
     if (R.t < R.swarmUntil) { fx(R, { type: "attack", attack: "swipe", ids: [R.swarmBy] }); say(R, `The pigeons take the ${name}`, "good"); return; }
-    const ts = marked.length ? marked : [swipeTarget(R)].filter(Boolean);
+    const ts = (marked.length ? marked : [swipeTarget(R)].filter(Boolean)).filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: "swipe", ids: ts.map((m) => m.id) });
     const ds = ts.map((m) => hit(R, m, base * (B.swipeMult || 1)));
     if (R.mods?.leech) { const healed = ds.some((d) => d > 0) ? Math.round(B.max * R.mods.leech) : 0; if (healed) { B.hp = Math.min(B.max, B.hp + healed); fx(R, { type: "leech", amt: healed }); } }
@@ -942,7 +949,7 @@ function bossAttack(R, echo = null) {
     if (!rows.length) rows = up; // nobody in front: it reaches the back
     fx(R, { type: "attack", attack: type, ids: rows.map((m) => m.id) });
     // The front row takes the brunt; the middle catches the edge of it.
-    rows.forEach((m) => hit(R, m, base * (type === "slam" ? 1.5 : 0.6) * (m.pos === "mid" && rows.some((x) => x.pos === "front") ? 0.65 : 1)));
+    rows.forEach((m) => hit(R, m, base * (type === "slam" ? 1.5 : 0.6) * (m.pos === "mid" && rows.some((x) => x.pos === "front") ? 0.5 : 1)));
     say(R, `${name} hits ${rows.length} of you`, "bad");
   } else if (type === "scream") {
     fx(R, { type: "attack", attack: "scream", ids: up.map((m) => m.id) });
@@ -965,7 +972,7 @@ function bossAttack(R, echo = null) {
     say(R, `${name}. Everyone's choking`, "bad");
   } else if (type === "vanish") {
     const t = marked[0] || up.slice().sort((a, b) => a.hp / a.max - b.hp / b.max)[0];
-    if (!t) return;
+    if (!t || dodged(R, t, N)) return;
     fx(R, { type: "attack", attack: "vanish", ids: [t.id] });
     const d = hit(R, t, base * 1.8);
     say(R, `${B.name} reappears behind ${t.you ? "you" : t.name} for ${d}`, "bad");
@@ -979,10 +986,10 @@ function bossAttack(R, echo = null) {
       m.pos = m.pos === "front" ? "mid" : "back"; m.moveUntil = R.t + 1.5; m.swing = 0; m.botBackAt = R.t + 1.5 + R.r() * 2;
       fx(R, { type: "move", id: m.id, pos: m.pos }); blown.push(m);
     }
-    say(R, blown.length ? `${name} blows ${who(blown)} back. Get back in place` : row.length ? `The Shield Wall holds against the ${name}` : `${name} hits nothing`, blown.length ? "bad" : "good");
+    say(R, blown.length ? `${name} blows ${who(blown)} back. Get back in place` : row.length ? `The shields hold against the ${name}` : `${name} hits nothing`, blown.length ? "bad" : "good");
   } else if (type === "grab") {
     const t = marked[0] || swipeTarget(R);
-    if (!t) return;
+    if (!t || dodged(R, t, N)) return;
     fx(R, { type: "attack", attack: "grab", ids: [t.id] });
     hit(R, t, base * 0.3);
     if (t.alive && !R.grab) {
@@ -996,7 +1003,7 @@ function bossAttack(R, echo = null) {
     fx(R, { type: "attack", attack: "breath", ids: up.map((m) => m.id) });
     const wall = up.some((m) => m.pos === "front" && R.t < m.shieldUntil);
     up.forEach((m) => { hit(R, m, base * 0.6 * (wall && m.pos !== "front" ? 0.5 : 1)); burn(m, base * 0.08 * (wall && m.pos !== "front" ? 0.5 : 1), 6); });
-    say(R, wall ? `${name}. The Shield Wall takes the worst of it` : `${name} burns everyone`, "bad");
+    say(R, wall ? `${name}. The shields take the worst of it` : `${name} burns everyone`, "bad");
   }
 }
 
@@ -1082,11 +1089,18 @@ function botAct(R, m) {
     m.botNext = R.t + 1 / rate;
   }
   if (m.sp >= RULES.spMax && R.r() < 0.05 && botWantsSpecial(R, m)) raidSpecial(R, m.id);
+  const B = R.boss, warned = B.next && B.warned;
+  // Marked for a single-target hit: sometimes step out of the way, like a person watching the warnings would.
+  if (warned && ["swipe", "vanish", "grab"].includes(B.next.type) && (B.next.ids || []).includes(m.id) && !m.dodgeTry) {
+    m.dodgeTry = true;
+    if (R.r() < 0.35) { raidMove(R, m.id, m.pos === "back" ? "mid" : "back"); m.botBackAt = R.t + 3 + R.r() * 2; return; }
+  }
+  if (!warned) m.dodgeTry = false;
   if (R.t >= m.cdUntil) {
-    const B = R.boss, warned = B.next && B.warned;
-    // The middle row saves its Big Swing for wind-ups it can stagger.
-    const want = m.pos === "back" ? alive(R).some((x) => x.hp / x.max < 0.6 || R.t < x.slimeUntil) && R.r() < 0.02
-      : m.pos === "front" ? warned && R.r() < 0.02
+    // The front bashes when a hit's coming, the middle saves its Big Swing for wind-ups it can stagger, the back
+    // fires its Volley when the boss is busy with someone else.
+    const want = m.pos === "back" ? (warned ? R.r() < 0.3 : R.r() < 0.003)
+      : m.pos === "front" ? warned && R.r() < 0.05
       : warned && ATTACKS[B.next.type]?.cut ? R.r() < 0.3 : R.r() < 0.004;
     if (want) raidAbility(R, m.id);
   }
@@ -1203,49 +1217,49 @@ const affixInfo = (id) => { const L = affixList(id); return L.length ? { name: L
 const S1_START = "2026-11-02", SEASON_DAYS = 91;
 const MILES = [0, 80, 165, 245, 330, 410, 495, 575, 660, 740, 825, 910, 1000];
 const WRITTEN = [
-  { name: "The Long Way Up", route: "Land's End to John o' Groats", affix: "fog", miles: [0, 110, 200, 270, 360, 450, 540, 610, 680, 760, 830, 900, 1000] },
-  { name: "The Northern Line", route: "Lindesnes to Nordkapp", affix: "frost" },
-  { name: "Sun Over the Gulf", route: "Round the Gulf of Bothnia to Tallinn", affix: "haste" },
-  { name: "The Amber Road", route: "Tallinn to Vienna", affix: "thickhide" },
+  { name: "The Long Count", route: "From the Blotmarsh to the Gilded Void", affix: "fog", miles: [0, 110, 200, 270, 360, 450, 540, 610, 680, 760, 830, 900, 1000] },
+  { name: "The Frozen Ledger", route: "Through seven frozen realms, and round again", affix: "frost" },
+  { name: "Wait for Me", route: "Seven realms at double speed, to the Render Shore", affix: "haste" },
+  { name: "The Error Throne", route: "From Bogbody Crossing to the table by the window", affix: "thickhide" },
 ];
-// Seasons 5 onwards: [name, route], round the world (kept in step with world.js).
+// Seasons 5 onwards: [name, route], one realm cycle each (kept in step with world.js).
 const LEGS = [
-  ["The Blue Danube", "Vienna to Belgrade"],
-  ["The Dinaric Way", "Belgrade to Kotor"],
-  ["Gods and Goat Paths", "Kotor to Athens"],
-  ["Where Europe Stops", "Athens to Istanbul"],
-  ["Fairy Chimneys", "Istanbul to Göreme"],
-  ["In Ararat's Shadow", "Göreme to Tbilisi"],
-  ["The Land of Fire", "Tbilisi to Baku"],
-  ["The Silk Road", "Baku to Samarkand"],
-  ["The Roof of the World", "Samarkand to Kashgar"],
-  ["The Karakoram", "Kashgar to Amritsar"],
-  ["The Grand Trunk Road", "Amritsar to Varanasi"],
-  ["Where the Buddha Walked", "Varanasi to Kathmandu"],
-  ["Tea and Thunder", "Kathmandu to Imphal"],
-  ["The Golden Land", "Imphal to Bangkok"],
-  ["The Temple Road", "Bangkok to Ho Chi Minh City"],
-  ["The Long Coast", "Ho Chi Minh City to Hanoi"],
-  ["The Karst Country", "Hanoi to Xi'an"],
-  ["The Long Wall", "Xi'an to Shanhaiguan"],
-  ["The Yellow Sea", "Shanhaiguan to Busan"],
-  ["The Tōkaidō", "Busan to Tokyo"],
-  ["The Island Chain", "Tokyo to Manila"],
-  ["Ten Thousand Islands", "Manila to Darwin"],
-  ["The Red Centre", "Darwin to Uluru"],
-  ["Back of Beyond", "Uluru to Sydney"],
-  ["The Long White Cloud", "Sydney to Auckland"],
-  ["The Date Line", "Auckland to Taveuni"],
-  ["The Long Ferry", "Taveuni to Valparaíso"],
-  ["Salt and Stars", "Valparaíso to Puno"],
-  ["The Inca Road", "Puno to Quito"],
-  ["Coffee and Canals", "Quito to Arenal"],
-  ["Pyramids in the Trees", "Arenal to Campeche"],
-  ["The Silver Road", "Campeche to El Paso"],
-  ["The Long Road East", "El Paso to Washington DC"],
-  ["Lighthouse to Lighthouse", "Washington DC to Cape Spear"],
-  ["The Norse Way Back", "Cape Spear to Gullfoss"],
-  ["The Long Way Home", "Gullfoss to Land's End"],
+  ["The First Rung", "From the Blotmarsh down the first rung"],
+  ["Rising Damp", "From a flooded Blotmarsh into every realm below"],
+  ["Spore Season", "From Puffcap Hollow's gate to the bottom of the Void"],
+  ["The Long Hush", "Through seven realms with the sound turned down"],
+  ["Loose Moorings", "From the Blotmarsh to the Void by drifting island"],
+  ["Low Water", "Down to where the Lowmost Deep has drained"],
+  ["Copy Errors", "Through realms Grimm has started to redraw"],
+  ["The Gold Rush", "From the Blotmarsh to a Gilded Void that's spilling"],
+  ["Two by Two", "Every realm twice over, with the next one showing through"],
+  ["The Undertow", "From the Blotmarsh to the bottom of the Deep, and down"],
+  ["Lanterns Out", "Through seven realms with the lamps going dark"],
+  ["The Halfway Rung", "Down to the middle of Holloway's ladder"],
+  ["The Hundred Lights", "Towards the blue lights at the bottom of everything"],
+  ["Head Office", "From the Blotmarsh to the Taxman's employers"],
+  ["Old Debts", "Through the realms the 1911 squad walked"],
+  ["Krampus Weather", "Across seven realms with a bailiff behind you"],
+  ["The Boot Fair", "From the Blotmarsh to the Void, collecting boots"],
+  ["The Sleepers", "Through realms full of people who sat down"],
+  ["Wrong Way Up", "From the Misrendered Realm's edge back round to it"],
+  ["The Chorus", "Through seven realms that have started to sing"],
+  ["Weather Swap", "From a frozen Blotmarsh to a melting Void"],
+  ["The Missing Hour", "Through realms that have each lost an hour"],
+  ["Deep Water", "Down to the Lowmost Deep, and through the floor of it"],
+  ["The Second Lamp", "Towards a light that goes round at the bottom"],
+  ["Kit's Way", "Down the road Kit walked, rung by rung"],
+  ["The Register", "Through realms where every name is written down"],
+  ["Nobody Left", "From the Blotmarsh to the Void, counting heads"],
+  ["The Long Sofa", "Through realms that want you to sit down"],
+  ["Glass Floors", "Over realms with the bottom showing through"],
+  ["Every Step a Stitch", "Seven realms, mending as you go"],
+  ["Under the Lamp", "To the foot of a lighthouse standing on its head"],
+  ["All Hands", "Every realm at once, with everyone who ever walked"],
+  ["The Stillness", "Down to the thing that sits at the bottom"],
+  ["The Last Rungs", "Down the last of Holloway's ladder"],
+  ["The Vote", "Through seven realms to a decision"],
+  ["The Last Lamp", "Up through the seam to Morwenna's light"],
 ];
 const SOLO = ["volatile", "leech", "bloodmoon", "silence", "brittle", "echo", "fog", "frost"];
 function affixFor(n) {
@@ -1288,7 +1302,7 @@ function seasonSetItems(n) {
     const nm = names[slot] || {};
     const stats = slot === "trinket" ? { [a]: Math.round(6 * k) } : { [a]: Math.round(8 * k), [b]: Math.round(3 * k) };
     return { id: `s${n}-${slot}`, slot, tier: `s${n}`, set: `s${n}`, season: `s${n}`, name: nm.name || `${S.name} ${noun}`, e: nm.e || e, stats, perk: null,
-      text: nm.text || `Issued to every squad that walked ${S.route}.` };
+      text: nm.text || `Issued to every squad that walked ${S.name}.` };
   });
 }
 // Adds season tiers, sets and set bonuses (s2 onwards) to the catalogue once it's loaded. Season 1's are in items.js.
@@ -1380,6 +1394,9 @@ const SKINS = [
   { id: "skin-gilded", tier: "house", name: "The Gilded House", look: { base: "#d9a520", trim: "#fff2b0", pattern: "filigree", glow: "#ffe27a", trail: "#ffd23d", aura: "coins", spark: "#ffe27a", body: "gold", crown: "crown", dance: "flex" }, text: "The house always wins. Now it walks too." },
   { id: "skin-void", tier: "house", name: "Void Walker", look: { base: "#0a0620", trim: "#b48cff", pattern: "stars", glow: "#c9a8ff", trail: "#8f6bff", aura: "orbit", spark: "#e6d8ff", body: "galaxy", crown: "halo", dance: "warp" }, text: "Stepped out of the space between screens." },
 ];
+// One Stripe Payment Link per price. The app adds who's buying what (client_reference_id), and the effort-house
+// webhook checks the amount paid covers it, so one link serves every item at that price. Empty until set up.
+const HOUSE_LINKS = { 99: "", 299: "", 499: "", 999: "", 1999: "" };
 const skinById = (id) => SKINS.find((k) => k.id === id) || null;
 const skinTier = (k) => SKIN_TIERS.find((t) => t.id === (k?.tier || k)) || null;
 const pounds = (p) => `£${(p / 100).toFixed(2)}`;
@@ -1389,6 +1406,9 @@ const pounds = (p) => `£${(p / 100).toFixed(2)}`;
 // less than it costs: the House always wins (about 12p in every £1 here). Most buckets lose; a few win big.
 const GAMBA = {
   price: 200, perDay: 5,
+  // Past the daily 5, buckets for real money (paid buckets don't cost Endeavours). Capped each week.
+  packs: [{ id: "gamba-3", buckets: 3, pence: 99 }, { id: "gamba-10", buckets: 10, pence: 299 }],
+  weeklyPence: 1000,
   // [chance, payout in Efforts, label, rarity colour the reveal climbs to]
   prizes: [
     [0.50, 0, "Empty bucket", "dud"],
@@ -1400,6 +1420,13 @@ const GAMBA = {
     [0.003, 8000, "Winny's Jackpot", "jackpot"],
   ],
 };
+// Anything The House sells for money: a skin or a bucket pack. { id, kind, name, pence, link }
+function houseItem(id) {
+  const k = skinById(id), p = GAMBA.packs.find((x) => x.id === id);
+  if (k) { const t = skinTier(k); return { id, kind: "skin", name: k.name, pence: t.pence, link: HOUSE_LINKS[t.pence] || "" }; }
+  if (p) return { id, kind: "pack", name: `${p.buckets} Gamba Buckets`, pence: p.pence, buckets: p.buckets, link: HOUSE_LINKS[p.pence] || "" };
+  return null;
+}
 const gambaReturn = () => GAMBA.prizes.reduce((s, [p, v]) => s + p * v, 0) / GAMBA.price;
 // u: a uniform 0–1 roll (the server's).
 function gambaRoll(u) {
@@ -1502,6 +1529,6 @@ root.Game = {
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
-  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
+  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, HOUSE_LINKS, houseItem, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
 })(typeof window !== "undefined" ? window : globalThis);
