@@ -374,13 +374,16 @@ function pushBlock() {
 // nothing flickers). depth: how many levels down to look for unchanged pieces inside a changed one.
 // Remember each element's markup as drawn (before pictures fill in), a few levels down.
 function stamp(node, depth) { node._src = node.outerHTML; if (depth > 0) for (const c of node.children) stamp(c, depth - 1); }
+// The loose text inside an element (not its child elements'): if that changed, patching the children alone would
+// leave the old words on screen, so the element is replaced instead.
+const ownText = (e) => [...e.childNodes].filter((x) => x.nodeType === 3).map((x) => x.data).join(" ");
 function morph(el, html, depth) {
   const t = document.createElement("template"); t.innerHTML = html;
   const next = [...t.content.children], prev = [...el.children];
   next.forEach((n, i) => {
     const src = n.outerHTML, old = prev[i];
     if (old && old._src === src) return;
-    if (old && depth > 0 && old.tagName === n.tagName && old.className === n.className && old.getAttribute("style") === n.getAttribute("style") && old.children.length && n.children.length) {
+    if (old && depth > 0 && old.tagName === n.tagName && old.className === n.className && old.getAttribute("style") === n.getAttribute("style") && old.children.length && n.children.length && ownText(old) === ownText(n)) {
       for (const a of n.attributes) if (old.getAttribute(a.name) !== a.value) old.setAttribute(a.name, a.value);
       for (const a of [...old.attributes]) if (!n.hasAttribute(a.name)) old.removeAttribute(a.name);
       morph(old, n.innerHTML, depth - 1);
@@ -1104,10 +1107,10 @@ function testEndCard() {
   const leader = before ? sq.members.slice().sort((a, b) => b.weekSteps - a.weekSteps)[0] : null;
   const who = (m, line) => `<div class="champ-row">${face(m.id, 40)}<span class="grow"><b>${esc(m.id === me().id ? "You" : m.name)}</b><small>${line}</small></span></div>`;
   const body = day === E.day
-    ? `${before && leader ? `<p class="small" style="margin:0 0 8px">Whoever has walked furthest by <b>12pm today</b> wins <b>${esc(skin.name)}</b>, a skin nobody else will ever get. Wear it into tonight's fight.</p>${who(leader, `Leading with ${fmt(leader.weekSteps)} steps`)}`
-        : champ ? who(champ, `Won ${esc(skin.name)}: walked furthest in the test season`) : `<p class="small" style="margin:0">The champion is being crowned.</p>`}
-      <p class="small muted" style="margin:10px 0 0"><b>At 11:59pm tonight everything resets.</b> The last fortnight was the test: steps, Efforts, Endeavours, gear, levels and the ladder all go back to zero, as if tonight's Brett never happened. Skins from The House and ${esc(skin.name)} stay.</p>`
-    : `<p class="small" style="margin:0 0 8px">The test is over and everyone started again from zero at midnight. Good luck.</p>${champ ? who(champ, `Test season champion, wearing ${esc(skin.name)}`) : ""}`;
+    ? `${before && leader ? `<p class="small" style="margin:0 0 8px">Most steps by <b>12pm</b> wins <b>${esc(skin.name)}</b>, a one-off skin.</p>${who(leader, `Leading with ${fmt(leader.weekSteps)}`)}`
+        : champ ? who(champ, `Won ${esc(skin.name)}`) : ""}
+      <p class="small muted" style="margin:10px 0 0"><b>Everything resets at 11:59pm.</b> Bought skins stay.</p>`
+    : `<p class="small" style="margin:0 0 8px">Everyone starts from zero. Good luck.</p>${champ ? who(champ, `Test season champion`) : ""}`;
   return `<section class="panel champ"><div class="ptitle"><span class="ic-badge gold">${ic("trophy")}</span><h2 class="ol-sm">${day === E.day ? "Last day of the test" : "Season 1 starts now"}</h2></div>${body}</section>`;
 }
 function tabToday() {
@@ -1132,7 +1135,7 @@ function statRows(st, gear = me().gear, inv = S.D.inv) {
     const [icon, col] = STAT_LOOK[s.id];
     return `<div class="stat fx${mine.includes(s.id) ? " cl" : ""}" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
       <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
-  }).join("") + `<p class="tiny faint" style="margin:6px 0 0">Every point adds to your attack and health. On top of that, the bigger a stat's share of your total, the bigger its bonus. Gold names are your class's stats.</p>`;
+  }).join("");
 }
 // What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
 function raidPreview() {
@@ -1264,7 +1267,7 @@ function itemCard(item, { deal = false } = {}) {
 function swapLine(item) {
   const gear = me().gear, inv = S.D.inv, st = myStats();
   const now = G.loadout(st, gear, inv).g, then = G.loadout(st, { ...gear, [item.slot]: item.id }, { ...inv, [item.id]: inv[item.id] || 0 }).g;
-  const flip = item.flip ? `<span class="tiny faint" style="display:block;margin-top:3px">Class gear: its biggest numbers always go into your best class stat.</span>` : "";
+  const flip = item.flip ? `<span class="tiny faint" style="display:block;margin-top:3px">Follows your best class stat.</span>` : "";
   if (gear[item.slot] === item.id) return flip ? `<div class="swapline">${flip}</div>` : "";
   const dh = Math.round((G.hitIndex(then) / G.hitIndex(now) - 1) * 100), dhp = G.edges(then).hp - G.edges(now).hp;
   const sg = (n, u = "") => `<b class="${n > 0 ? "up" : n < 0 ? "down" : ""}">${n > 0 ? "+" : ""}${n}${u}</b>`;
@@ -1322,21 +1325,19 @@ const bucketArt = (rar = "dud") => `<svg class="bucket-svg" viewBox="0 0 120 120
   <circle cx="45" cy="37" r="5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/><circle cx="62" cy="35" r="5" fill="#ffe58a" stroke="#0a0f26" stroke-width="2"/><circle cx="76" cy="38" r="4.5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/>
   <text x="60" y="84" text-anchor="middle" font-family="Lilita One, sans-serif" font-size="30" fill="#fff" stroke="#0a0f26" stroke-width="5" paint-order="stroke">W</text></svg>`;
 function gambaPanel() {
-  const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), rtp = Math.round(G.gambaReturn() * 100), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0;
+  const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0, junk = junkDrawer();
   const pack = (pk) => { const it = G.houseItem(pk.id), over = week + pk.pence > Gm.weeklyPence;
     return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}>${pk.buckets} buckets · ${G.pounds(pk.pence)}</button>`; };
   return `<section class="panel gamba">
       <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
       <div class="bucket-stage">${bucketArt("legendary")}</div>
-      <p class="small" style="margin:0 0 6px">A bucket of Efforts from Winny, who runs the Taxman's back room. Some buckets are empty, most come up short and a lucky few overflow.</p>
-      <p class="small muted" style="margin:0 0 12px">On average a bucket pays back ${rtp}% of what it costs. The House always wins.</p>
       ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Buy a bucket ${priceTag(Gm.price)}</button>`
         : credits ? `<button class="btn gold xl block" data-act="gamba-buy">Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
-      <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today for Endeavours` : "Back at midnight for Endeavours"}${credits && left ? ` · ${credits} bought bucket${credits === 1 ? "" : "s"} waiting` : ""}. Winnings can't be cashed out.</p>
+      <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "Back at midnight"}${credits && left ? ` · ${credits} bought waiting` : ""}${Object.keys(junk).length ? ` · <button class="linkbtn" data-act="junk">Junk drawer (${Object.values(junk).reduce((a, b) => a + b, 0)})</button>` : ""}</p>
       <div class="gamba-more">
         <span class="field-label">More buckets for real money</span>
         <div class="btn-row">${Gm.packs.map(pack).join("")}</div>
-        <p class="tiny faint" style="margin:6px 0 0">${G.HOUSE_LINKS[Gm.packs[0].pence] ? `18+ only. Up to ${G.pounds(Gm.weeklyPence)} a week (${G.pounds(Math.max(0, Gm.weeklyPence - week))} left this week). Bought buckets skip the daily limit and cost no Endeavours. The money goes into The House.` : "Opens once The House takes payments."}</p>
+        <p class="tiny faint" style="margin:6px 0 0">18+. Up to ${G.pounds(Gm.weeklyPence)} a week.</p>
       </div>
     </section>`;
 }
@@ -1344,8 +1345,8 @@ function gambaOdds() {
   const Gm = G.GAMBA, pc = (p) => `${(p * 100).toFixed(1)}%`;
   openSheet(`${sheetHead("The odds")}
     <div class="oddsbar">${Gm.prizes.map(([p, , , r]) => `<i style="flex:${p};background:${GAMBA_COL[r]}"></i>`).join("")}</div>
-    <div class="oddsrows">${Gm.prizes.map(([p, v, l, r]) => `<div class="oddsrow"><span class="dot" style="background:${GAMBA_COL[r]}"></span><b class="grow">${esc(l)}</b><span class="muted">${v ? `${fmt(v)} Efforts` : "Nothing"}</span><span class="pc">${pc(p)}</span></div>`).join("")}</div>
-    <p class="small muted" style="margin:12px 0 0">Each bucket costs ${fmt(Gm.price)} Efforts. You win more than you paid ${pc(Gm.prizes.filter(([, v]) => v > Gm.price).reduce((a, [p]) => a + p, 0))} of the time. Over many buckets you get back about ${Math.round(G.gambaReturn() * 100)}%. The result is decided the moment you pay; the taps only reveal it.</p>`);
+    <div class="oddsrows">${Gm.prizes.map(([p, v, l, r]) => `<div class="oddsrow"><span class="dot" style="background:${GAMBA_COL[r]}"></span><b class="grow">${esc(l)}</b><span class="muted">${v ? `${fmt(v / PER_E())} Endeavour${v === PER_E() ? "" : "s"}` : "Something useless"}</span><span class="pc">${pc(p)}</span></div>`).join("")}</div>
+    <p class="small muted" style="margin:12px 0 0">${fmt(Gm.price / PER_E())} Endeavours a bucket. Winnings can't be cashed out.</p>`);
 }
 async function gambaBuy() {
   if (S.busy) return; S.busy = true;
@@ -1357,6 +1358,30 @@ async function gambaBuy() {
   FX.play("buy");
   gambaReveal(r);
 }
+// Nothing comes out of a bucket empty-handed: the worst you get is something useless for the junk drawer.
+const JUNK = ["A soggy chip", "One left sock", "Winny's IOU (void)", "A receipt for a receipt", "Half a bus ticket", "A rubber duck that doesn't squeak",
+  "A pigeon feather", "A bent spoon", "A pebble shaped like Brett", "Tangled headphones", "The lid of a different bucket", "An expired coupon for buckets"];
+const pickJunk = () => {
+  const j = JUNK[Math.floor(Math.random() * JUNK.length)], drawer = junkDrawer();
+  drawer[j] = (drawer[j] || 0) + 1; store.set(`junk:${me().id}`, drawer);
+  return j;
+};
+const junkDrawer = () => store.get(`junk:${me().id}`) || {};
+function junkSheet() {
+  const d = Object.entries(junkDrawer()).sort((a, b) => b[1] - a[1]);
+  openSheet(`${sheetHead("Junk drawer")}<div class="oddsrows">${d.map(([j, n]) => `<div class="oddsrow"><b class="grow">${esc(j)}</b><span class="pc">×${n}</span></div>`).join("")}</div>`);
+}
+// What happened in the bucket, one line each.
+const TALES = {
+  dud: ["Winny shakes the bucket. That's all that falls out.", "Nothing in here but this. Winny calls it a collectible.", "Winny swears it was full when he left it."],
+  common: ["Half of it was chocolate coins. You keep the real half.", "A pigeon got to it first. It left you half."],
+  rare: ["The bucket was a mimic. It snapped, you yanked, and you got away with every Endeavour you put in.", "It bit. You bit back. You escape with exactly what you paid."],
+  epic: ["The bucket had a false bottom. Winny looks the other way while you pocket double.", "A second purse was wedged underneath. Double."],
+  legendary: ["Two false bottoms. Winny is furious.", "The Taxman hid his float in this one. Four times what you paid."],
+  mythic: ["You tip it out and it keeps coming.", "It's heavier than it looks. Much heavier."],
+  jackpot: ["Winny's own savings were in this one. He's not talking to you."],
+};
+const bucketTale = (rar) => { const t = TALES[rar] || TALES.dud; return t[Math.floor(Math.random() * t.length)]; };
 // Three taps, then the flood of colour and the prize. Rarities only ever climb to what was really won.
 function gambaReveal(r) {
   const [, win, label, rar] = G.GAMBA.prizes[r.prize], top = GAMBA_RANK[rar], names = Object.keys(GAMBA_RANK);
@@ -1374,9 +1399,10 @@ function gambaReveal(r) {
     setTimeout(() => {
       el.querySelector(".gr-hint").hidden = true; bucket.hidden = true;
       const P = el.querySelector(".gr-prize"); P.hidden = false;
-      P.innerHTML = `<div class="gr-card"><span class="gr-rar">${win ? esc(rar === "jackpot" ? "Jackpot" : rar) : "Empty"}</span><h2 class="ol disp">${esc(label)}</h2>
-        <div class="gr-win">${win ? `+${fmt(win)} Efforts` : "Nothing this time"}</div><p class="small muted">${win > G.GAMBA.price ? "Winny is not happy about this." : win === G.GAMBA.price ? "Your money back. Winny shrugs." : "Winny thanks you for your custom."}</p>
-        <button class="btn gold block" data-act="gamba-close">${win ? "Collect" : "Fair enough"}</button></div>`;
+      const junk = win ? null : pickJunk(), tale = bucketTale(rar);
+      P.innerHTML = `<div class="gr-card"><span class="gr-rar">${esc(rar === "jackpot" ? "Jackpot" : rar === "dud" ? "Junk" : rar)}</span><h2 class="ol disp">${esc(label)}</h2>
+        <div class="gr-win">${win ? `+${fmt(win / PER_E())} Endeavour${win === PER_E() ? "" : "s"}` : esc(junk)}</div><p class="small muted">${esc(tale)}</p>
+        <button class="btn gold block" data-act="gamba-close">${win ? "Collect" : "Keep it"}</button></div>`;
       if (win) { FX.coins(x, y, Math.min(60, 6 + top * 9)); FX.play("coin"); }
       if (top >= 5) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); } else if (top >= 3) { FX.shake(el, 10, 400); FX.buzz(40); }
     }, 600);
@@ -1411,8 +1437,6 @@ function housePanel() {
   const owned = new Set(me().owned || []), wear = me().wear || {}, H = S.D.house || { pence: 0, count: 0 };
   return `<section class="panel house">
       <div class="ptitle"><span class="ic-badge red">${ic("crown")}</span><h2 class="ol-sm">The House</h2><span class="side chip gold">${G.pounds(H.pence)} raised</span></div>
-      <p class="small" style="margin:0 0 4px">Skins for real money. They change how you look and move, never how you play. Every penny goes into The House.</p>
-      <p class="tiny faint" style="margin:0 0 12px">Each tier has everything the one below it has, and more.</p>
       ${G.SKIN_TIERS.map((t) => `<div class="tierrow">${tierBadge(t)}<span class="grow"><b>${esc(t.label)}</b> <span class="muted small">${G.pounds(t.pence)}</span><small>${esc(t.adds)}</small></span></div>
         <div class="skins">${G.SKINS.filter((k) => k.tier === t.id && !k.award).map((k) => `<button class="skincard" data-skin="${k.id}" style="--tc:${t.color}">${skinSwatch(k)}<b>${esc(k.name)}</b>
           <span class="tiny">${wear.skin === k.id ? "Wearing" : owned.has(k.id) ? "Owned" : G.pounds(t.pence)}</span></button>`).join("")}</div>`).join("")}
@@ -1428,7 +1452,7 @@ function skinSheet(id) {
     <ul class="ticks">${G.SKIN_TIERS.slice(0, ti + 1).map((x) => `<li>${ic("check")} ${esc(x.adds)}</li>`).join("")}${G.SKIN_TIERS.slice(ti + 1).map((x) => `<li class="off">${ic("lock")} ${esc(x.adds)} <span class="muted">(${esc(x.label)})</span></li>`).join("")}</ul>
     <div class="btn-row" style="margin-top:12px">${owned ? (on ? `<button class="btn" data-act="wear" data-kind="skin" data-id="">Take off</button>` : `<button class="btn blue block" data-act="wear" data-kind="skin" data-id="${k.id}">Wear it</button>`)
       : G.houseItem(k.id).link ? `<button class="btn green xl block" data-act="house-pay" data-id="${k.id}">Buy for ${G.pounds(t.pence)}</button>` : `<button class="btn block" disabled>Payments open soon</button>`}</div>
-    <p class="tiny faint" style="margin:10px 0 0;text-align:center">Paid by card through Stripe. Purely cosmetic: no stats, no advantage. It's yours on this account for good.</p>`, { rc: t.color });
+    <p class="tiny faint" style="margin:10px 0 0;text-align:center">Looks only. Yours for good.</p>`, { rc: t.color });
   // The live turntable, if this phone does 3D.
   const host = $("#skin-preview");
   S.skinPreview?.dispose?.(); S.skinPreview = null;
@@ -1453,9 +1477,9 @@ function lookSheet() {
   openSheet(`${sheetHead("Change my look")}
     <div class="skin-preview" id="skin-preview"><div class="has-fallback"><span class="fb">${Walker.svg(ANS[me().id], { mood: "fresh" })}</span></div></div>
     <div class="skins">${card(null)}${owned.map(card).join("")}</div>
-    ${owned.length ? "" : `<p class="small muted" style="margin:12px 0 0">No skins yet. They're in The House, from ${G.pounds(G.SKIN_TIERS[0].pence)}.</p>`}
+
     <button class="btn block" style="margin-top:12px" data-act="look-house">${ic("crown")} Browse The House</button>
-    <p class="tiny faint" style="margin:10px 0 0;text-align:center">Your answers set your stats and class, so they stay as they are. Skins only change how you look.</p>`);
+`);
   S.sheetKind = "look";
   const host = $("#skin-preview");
   S.skinPreview?.dispose?.(); S.skinPreview = null;
@@ -1487,8 +1511,7 @@ function housePay(id, sure = false) {
   const it = G.houseItem(id); if (!it?.link) return;
   if (!sure) {
     openSheet(`${sheetHead("Real money")}
-      <p class="small" style="margin:0 0 8px"><b>${esc(it.name)}</b> for <b>${G.pounds(it.pence)}</b>, paid by card through Stripe. It goes into The House.</p>
-      <p class="small muted" style="margin:0 0 12px">${it.kind === "pack" ? "Each bucket is a gamble with the odds shown in Winny's: most come up short. " : "Purely cosmetic. "}You must be 18 or over, or have a parent's OK. No refunds once it's yours.</p>
+      <p class="small" style="margin:0 0 12px"><b>${esc(it.name)}</b>, <b>${G.pounds(it.pence)}</b> by card. 18+ or a parent's OK. No refunds.</p>
       <div class="btn-row"><button class="btn" data-act="close-sheet">Cancel</button><button class="btn green" data-act="house-pay-go" data-id="${it.id}">Pay ${G.pounds(it.pence)}</button></div>`);
     return;
   }
@@ -1560,7 +1583,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge blue">${ic("phone")}</span><h2 class="ol-sm">Scrolling</h2><span class="side chip ${S.D.today.scrollLinked ? "green" : "red"}">${S.D.today.scrollLinked ? `${S.D.today.scroll ?? 0} min today` : "Not linked"}</span></div>
-      <p class="small muted" style="margin:0 0 10px">You get ${G.RULES.scrollFreeMin} min of app time free, plus ${G.RULES.scrollMinPer1kSteps} min for every 1,000 steps (${G.scrollBudget(S.D.today.steps)} min today). Anything over adds to the Taxman's cut. ${S.D.today.scrollLinked ? "" : `<b>Not linked yet: every day counts as ${G.RULES.unlinkedOverMin} min over, so link it.</b>`}</p>
+      <p class="small muted" style="margin:0 0 10px">${G.scrollBudget(S.D.today.steps)} min free today. Over that, the Taxman takes more.${S.D.today.scrollLinked ? "" : ` <b>Not linked: counts as ${G.RULES.unlinkedOverMin} min over.</b>`}</p>
       <div class="btn-row"><button class="btn sm blue" data-act="setup-scroll">${ic("refresh")} ${S.D.today.scrollLinked ? "Tracking setup" : "Link my apps"}</button></div>
     </section>
     ${wardrobePanel()}
@@ -3125,6 +3148,7 @@ document.addEventListener("click", async (e) => {
     case "wear": wardrobe({ [d.kind]: d.id || null }, d.id ? "Looking sharp" : null); if (d.kind === "skin") closeSheet(); break;
     case "gamba-buy": gambaBuy(); break;
     case "gamba-odds": gambaOdds(); break;
+    case "junk": junkSheet(); break;
     case "house-pay": housePay(d.id); break;
     case "house-pay-go": housePay(d.id, true); break;
     case "chapter": playChapter(Number(d.k)); break;

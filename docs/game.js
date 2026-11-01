@@ -1424,9 +1424,9 @@ const GAMBA = {
   weeklyPence: 1000,
   // [chance, payout in Efforts, label, rarity colour the reveal climbs to]
   prizes: [
-    [0.50, 0, "Empty bucket", "dud"],
+    [0.50, 0, "Junk", "dud"],
     [0.20, 100, "Half back", "common"],
-    [0.15, 200, "Money back", "rare"],
+    [0.15, 200, "Mimic!", "rare"],
     [0.09, 400, "Double", "epic"],
     [0.045, 800, "Quadruple", "legendary"],
     [0.012, 2500, "Big bucket", "mythic"],
