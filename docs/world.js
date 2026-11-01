@@ -134,7 +134,7 @@ const beats = {
     "{boss} arrives at {place} in a hurry and leaves in a worse one. In between there's a lot of shouting, some excellent teamwork and one moment that nobody will ever be allowed to forget.",
   ],
   taxman: [
-    "The Taxman has set up a folding table at {place}. The sign says Walking Levy: All Steps Over Ten Thousand. You walk round the table. He follows you with a calculator.",
+    "The Taxman has set up a folding table at {place}. The sign says Walking Levy: Twenty Percent of All Efforts. You walk round the table. He follows you with a calculator.",
     "A letter from the Taxman catches up with you at {place}. It's eleven pages long and lists every step you've taken this season, with an invoice for each one. It makes excellent kindling.",
     "The Taxman has been learning the local language at {place}. So far he's got as far as receipt, penalty and I'm afraid that isn't my department.",
     "The Taxman and Grimm are seen having lunch together at {place}. They split the bill to the penny. Grimm pays in coins, one at a time, very slowly, and the Taxman counts every one.",

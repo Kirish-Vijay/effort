@@ -98,7 +98,7 @@ const BOSS_LORE = {
   kraken: "The Kraken: lives at the bottom of the Lowmost Deep, where it's always three in the morning.",
   algorithm: "Grimm: the Algorithm. Redraws the Misrendered Realm and decides what everyone sees. Wants the Long Count switched off.",
   dragon: "Vex: sleeps in the Gilded Void on a hoard of every hour ever lost to the glow. She counts them.",
-  taxman: "The Taxman: collects the Stillness's rent from 6 to 9pm. Beat him and keep your steps.",
+  taxman: "The Taxman: collects the Stillness's rent from 6 to 9pm. Beat him and keep your Efforts.",
 };
 const EVENT_LORE = {
   newyear: "Rez: made of every midnight promise. The Stillness loves a plan to start tomorrow.",
@@ -250,7 +250,7 @@ Taxman: Allow me to explain. Between six and nine the kettle's on and the sofa's
 Taxman: That's when the Stillness collects its rent.
 mate: The what?
 Taxman: The thing at the very bottom of all this. The thing your little monsters are pets of. It doesn't move, and it doesn't like anyone else to. I'm its collector.
-Taxman: Every evening, six till nine, I'm owed a fifth of your day's steps.
+Taxman: Every evening, six till nine, I'm owed a fifth of your day's Efforts.
 you: And if we don't pay?
 Taxman: Then you'll have to stop me. People do try. Some of them even manage it. Be quick and you might pick my pocket. I'd call that theft.
 ? The Taxman waits, pen poised. The bridge sways.
@@ -259,7 +259,7 @@ Taxman: Then you'll have to stop me. People do try. Some of them even manage it.
   Taxman: I always do.
 - "What does the Stillness want with steps?"
   you: What does a thing that sits still want with steps?
-  Taxman: Steps nobody walks are steps nobody has to tax. Think how tidy that would be.
+  Taxman: Nobody walks, nobody earns, nothing to tax. Think how tidy that would be.
   Taxman: It doesn't want them, exactly. It wants you not to have them.
 - "Who are you really?" {s1.asktax}
   you: Who are you, really?
@@ -847,7 +847,7 @@ Taxman: Next week, the last tollgate. I'll be there. I'm always there. It's the 
 `@misrendered
 ~ The Last Tollgate stands at the far end of the Misrendered Realm, where the road just stops and the world is a grey chequered nothing.
 ~ The Taxman has set up a folding table in front of it.
-Taxman: Steps, please. Exact change.
+Taxman: Efforts, please. Exact change.
 ~ You're too tired to argue. It's only steps, and he looks so pleased.
 ~ He counts them twice and writes you a receipt. Sticking out of his top pocket: the pilgrim passport.
 ? This is your chance.
@@ -857,7 +857,7 @@ Taxman: Steps, please. Exact change.
   Taxman: Four of them sat down. I was standing up, counting the money, when it came out of the snow-glare.
   Taxman: It offered terms. I've always been good at terms.
   mate: What terms?
-  Taxman: They stay, kept nice and warm. I go free, as long as I collect. A fifth of every walker's day, every evening, for as long as there are walkers.
+  Taxman: They stay, kept nice and warm. I go free, as long as I collect. A fifth of every walker's Efforts, every evening, for as long as there are walkers.
   Taxman: They were good walkers. I was a better accountant.
   you: That's monstrous.
   Taxman: It's paperwork. Paperwork is how monstrous things get done politely.
@@ -1200,7 +1200,7 @@ boss:notification: You have 99+ unread. You have 100+ unread. You have...
 - Go for one big hit
   ~ You wind up one enormous hit. It bounces off. Brett looks almost touched by the effort.
 ~ Under the planks, the bogbody opens one eye.
-Local (The man under the planks): Holloway came this way. Paid his toll in steps. Said he was going all the way down.
+Local (The man under the planks): Holloway came this way. Paid his toll in Efforts. Said he was going all the way down.
 Local (The man under the planks): Never came back up. Mind how you go.
 ~ He shuts his eye again. The planks settle.`,
 
