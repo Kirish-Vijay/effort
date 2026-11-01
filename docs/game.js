@@ -1403,6 +1403,13 @@ const HOUSE_LINKS = {
   999: "https://buy.stripe.com/dRmeVc9x02Md8adg3w67S03",
   1999: "https://buy.stripe.com/cNicN46kObiJ9eh4kO67S04",
 };
+// Won, never sold. Pathfinder went to whoever walked furthest in the test fortnight (to Sunday 1 November, noon).
+// Neon-level effects: glowing gold filigree and a gold trail, so it stands out without shouting.
+SKINS.push({ id: "skin-pathfinder", tier: "neon", award: "Test season champion", name: "Pathfinder",
+  look: { base: "#13294b", trim: "#f2c14e", pattern: "filigree", glow: "#ffe08a", trail: "#ffd36b" },
+  text: "Walked furthest in the test season. The first footprints on the path are theirs." });
+// The test fortnight: it ends with a full reset at 11:59pm on this day, and the champion is crowned at noon.
+const TEST_END = { day: "2026-11-01", champion: "skin-pathfinder" };
 const skinById = (id) => SKINS.find((k) => k.id === id) || null;
 const skinTier = (k) => SKIN_TIERS.find((t) => t.id === (k?.tier || k)) || null;
 const pounds = (p) => `£${(p / 100).toFixed(2)}`;
@@ -1429,6 +1436,7 @@ const GAMBA = {
 // Anything The House sells for money: a skin or a bucket pack. { id, kind, name, pence, link }
 function houseItem(id) {
   const k = skinById(id), p = GAMBA.packs.find((x) => x.id === id);
+  if (k?.award) return null; // won, not sold
   if (k) { const t = skinTier(k); return { id, kind: "skin", name: k.name, pence: t.pence, link: HOUSE_LINKS[t.pence] || "" }; }
   if (p) return { id, kind: "pack", name: `${p.buckets} Gamba Buckets`, pence: p.pence, buckets: p.buckets, link: HOUSE_LINKS[p.pence] || "" };
   return null;
@@ -1535,6 +1543,6 @@ root.Game = {
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
-  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, HOUSE_LINKS, houseItem, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
+  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
 })(typeof window !== "undefined" ? window : globalThis);

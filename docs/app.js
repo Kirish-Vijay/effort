@@ -1095,8 +1095,23 @@ function ledgerPanel() {
   return `<section class="panel flat"><div class="ptitle"><h2 class="ol-sm">Wallet</h2><span class="side small faint">${fmt(S.D.wallet)} Efforts</span></div>
     <div class="feedlist">${rows.map((r) => `<div class="it"><span class="grow">${esc(label(r))}</span><span class="amt ${r.amount >= 0 ? "plus" : "minus"}">${signedEfforts(r.amount)}</span></div>`).join("")}</div></section>`;
 }
+// The end of the test fortnight: who's leading for Pathfinder, the reset at 11:59pm, and (the day after) who won.
+function testEndCard() {
+  const E = G.TEST_END, day = S.D.today.day, sq = squad();
+  if (!sq || day > G.dayOf(G.dayNo(E.day) + 1)) return "";
+  const skin = G.skinById(E.champion), champ = sq.members.find((m) => m.wear?.skin === skin.id);
+  const before = day === E.day && new Date().getHours() < 12 && !champ;
+  const leader = before ? sq.members.slice().sort((a, b) => b.weekSteps - a.weekSteps)[0] : null;
+  const who = (m, line) => `<div class="champ-row">${face(m.id, 40)}<span class="grow"><b>${esc(m.id === me().id ? "You" : m.name)}</b><small>${line}</small></span></div>`;
+  const body = day === E.day
+    ? `${before && leader ? `<p class="small" style="margin:0 0 8px">Whoever has walked furthest by <b>12pm today</b> wins <b>${esc(skin.name)}</b>, a skin nobody else will ever get. Wear it into tonight's fight.</p>${who(leader, `Leading with ${fmt(leader.weekSteps)} steps`)}`
+        : champ ? who(champ, `Won ${esc(skin.name)}: walked furthest in the test season`) : `<p class="small" style="margin:0">The champion is being crowned.</p>`}
+      <p class="small muted" style="margin:10px 0 0"><b>At 11:59pm tonight everything resets.</b> The last fortnight was the test: steps, Efforts, Endeavours, gear, levels and the ladder all go back to zero, as if tonight's Brett never happened. Skins from The House and ${esc(skin.name)} stay.</p>`
+    : `<p class="small" style="margin:0 0 8px">The test is over and everyone started again from zero at midnight. Good luck.</p>${champ ? who(champ, `Test season champion, wearing ${esc(skin.name)}`) : ""}`;
+  return `<section class="panel champ"><div class="ptitle"><span class="ic-badge gold">${ic("trophy")}</span><h2 class="ol-sm">${day === E.day ? "Last day of the test" : "Season 1 starts now"}</h2></div>${body}</section>`;
+}
 function tabToday() {
-  return `${updateBanner()}${authNudge()}${taxHero()}${huntCard()}${eventCard()}${journeyTeaser()}${weekPanel()}${ledgerPanel()}
+  return `${updateBanner()}${authNudge()}${testEndCard()}${taxHero()}${huntCard()}${eventCard()}${journeyTeaser()}${weekPanel()}${ledgerPanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How a day works</h2></div>
       <div class="how">
@@ -1399,7 +1414,7 @@ function housePanel() {
       <p class="small" style="margin:0 0 4px">Skins for real money. They change how you look and move, never how you play. Every penny goes into The House.</p>
       <p class="tiny faint" style="margin:0 0 12px">Each tier has everything the one below it has, and more.</p>
       ${G.SKIN_TIERS.map((t) => `<div class="tierrow">${tierBadge(t)}<span class="grow"><b>${esc(t.label)}</b> <span class="muted small">${G.pounds(t.pence)}</span><small>${esc(t.adds)}</small></span></div>
-        <div class="skins">${G.SKINS.filter((k) => k.tier === t.id).map((k) => `<button class="skincard" data-skin="${k.id}" style="--tc:${t.color}">${skinSwatch(k)}<b>${esc(k.name)}</b>
+        <div class="skins">${G.SKINS.filter((k) => k.tier === t.id && !k.award).map((k) => `<button class="skincard" data-skin="${k.id}" style="--tc:${t.color}">${skinSwatch(k)}<b>${esc(k.name)}</b>
           <span class="tiny">${wear.skin === k.id ? "Wearing" : owned.has(k.id) ? "Owned" : G.pounds(t.pence)}</span></button>`).join("")}</div>`).join("")}
     </section>`;
 }
@@ -1432,7 +1447,7 @@ function lookSheet() {
     const t = k && G.skinTier(k), wearing = (k?.id || null) === on;
     return `<button class="skincard${wearing ? " on" : ""}" data-act="look-wear" data-id="${k?.id || ""}" style="--tc:${t?.color || "var(--line-2)"}">
       ${k ? skinSwatch(k) : `<span class="skinsw own"><span class="fb">${head2d(answersOf({ ...me(), wear: {} }))}</span></span>`}
-      <b>${k ? esc(k.name) : "Your own look"}</b><span class="tiny" data-label="${k ? `${esc(t.label)} skin` : "From your answers"}">${wearing ? "Wearing" : k ? `${esc(t.label)} skin` : "From your answers"}</span></button>`;
+      <b>${k ? esc(k.name) : "Your own look"}</b><span class="tiny" data-label="${k ? esc(k.award || `${t.label} skin`) : "From your answers"}">${wearing ? "Wearing" : k ? esc(k.award || `${t.label} skin`) : "From your answers"}</span></button>`;
   };
   S.sheetKind = "look";
   openSheet(`${sheetHead("Change my look")}
