@@ -304,7 +304,7 @@ const head2d = (answers) => Walker.svg(answers, { crop: "head", mood: "fresh" })
 const face = (id, size = 52) => `<div class="face has-fallback" style="width:${size}px;height:${size}px"><span class="fb">${head2d(ANS[id])}</span>${portraitImg("walker", id, { w: size * 2, h: size * 2, frame: "head" })}</div>`;
 
 // ---------- notifications ----------
-// A ping at 6pm when the Taxman's in (and the raid lobby on Sunday), and a last call at 8:30pm if you haven't fought. The server sends it;
+// A ping at 5pm before the Taxman's in (and the raid lobby on Sunday), and one at 9pm if you missed him. The server sends it;
 // this phone just has to sign up. iPhones only allow it once Effort is on the Home Screen.
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 async function callPush(action, body) {
@@ -341,7 +341,7 @@ async function enablePush() {
     await callPush("subscribe", { token: S.token, sub: sub.toJSON() });
     store.set("pushSynced", S.D?.today.day || "");
     S.push = "on"; render(); FX.play("levelup");
-    toast("You'll get a ping at 6pm, and a last call at 8:30 if you haven't fought");
+    toast("Pings at 5pm, and 9pm if you miss him");
   } catch (e) { toast(`Couldn't turn them on: ${e.message}`); }
 }
 async function disablePush() {
@@ -405,6 +405,20 @@ function render() {
 }
 const viewBoot = () => { $("#app").innerHTML = `<div class="boot"><div class="logo ol">EFFORT</div><p class="muted">Lacing up…</p></div>`; };
 
+// One-off gifts: a "gift" ledger row (added by hand) is shown once as a message, then never again on this phone.
+function giftCheck() {
+  const g = (S.D.ledger || []).find((r) => r.kind === "gift" && !store.get(`gift:${r.ref}`));
+  if (!g || $(".gift-pop") || !$("#sheet").hidden) return;
+  const el = document.createElement("div");
+  el.className = "gift-pop";
+  el.innerHTML = `<div class="gift-card"><p class="gift-text">${esc(g.note)}</p><div class="gr-win">+${fmt(g.amount / PER_E())} Endeavour${g.amount === PER_E() ? "" : "s"}</div><span class="tiny faint">Tap anywhere</span></div>`;
+  document.body.appendChild(el);
+  FX.play("combo");
+  el.addEventListener("click", () => {
+    store.set(`gift:${g.ref}`, 1);
+    el.remove(); FX.play("coin");
+  });
+}
 function viewMain() {
   const D = S.D, p = G.levelProgress(D.xp), cls = myClass();
   const tabs = { today: tabToday, raid: tabRaid, journey: tabJourney, shop: tabShop, me: tabMe };
@@ -422,6 +436,7 @@ function viewMain() {
   if (app.firstElementChild?.matches("header.header")) morph(app, html, 3);
   else { app.innerHTML = html; for (const c of app.children) stamp(c, 3); }
   if (S.tab === "journey") mountRealm(); else { S.realm?.dispose?.(); S.realm = null; }
+  giftCheck();
 }
 // Today's walking that isn't in the wallet yet. Before the Taxman's settled it's the full amount so far, shown as a
 // badge (his cut isn't known). Once he's settled (beaten, fought or missed) his rate covers the whole day, midnight
@@ -1589,7 +1604,7 @@ function tabMe() {
     ${wardrobePanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("bell")}</span><h2 class="ol-sm">Reminders</h2></div>
-      <p class="small muted" style="margin:0 0 10px">The Taxman is in from 6pm to 9pm, and the raid lobby is Sunday 6pm to 9pm. Get a ping at 6pm, and a last call at 8:30 if you haven't fought.</p>
+      <p class="small muted" style="margin:0 0 10px">A ping at 5pm, and at 9pm if you miss the Taxman.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -2028,7 +2043,7 @@ function viewSetup() {
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss the Taxman</h1>
-      <p class="muted">The Taxman's in from 6 to 9pm, and the raid's Sunday 6 to 9pm. We'll ping you at 6, and at 8:30 if you haven't fought.</p>
+      <p class="muted">The Taxman's in from 6 to 9pm, and the raid's Sunday 6 to 9pm. We'll ping you at 5, and at 9 if you miss him.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}

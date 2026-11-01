@@ -14,16 +14,17 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZonedDateTime
 
-// Two evening pings: 6pm when the Taxman's in (and on Sunday, the raid lobby), and an 8:30pm last call if you
-// haven't fought him yet. The phone books them itself, so they work without the internet. Android forgets an
-// app's alarms when the app is updated or the phone restarts, so they're booked again then, and every time
-// the app opens.
+// Two evening pings: 5pm, an hour before the Taxman's in (and on Sunday, the raid lobby), and 9pm if you missed
+// him. The phone books them itself, so they work without the internet. A sleeping phone can deliver an alarm
+// late, so each ping checks the clock first and stays quiet if its moment has passed. Android forgets an app's
+// alarms when the app is updated or the phone restarts, so they're booked again then, and every time the app opens.
 object Reminders {
     private const val CHANNEL = "evening"
-    private const val OPEN = "open"
-    private const val LAST = "last"
+    private const val SOON = "soon"
+    private const val MISSED = "missed"
 
     fun enabled(c: Context) = Sync.prefs(c).getBoolean("reminders", false)
     fun canNotify(c: Context) = Build.VERSION.SDK_INT < 33 ||
@@ -31,18 +32,18 @@ object Reminders {
 
     fun enable(c: Context, on: Boolean) {
         Sync.prefs(c).edit().putBoolean("reminders", on).apply()
-        if (on) schedule(c) else listOf(OPEN, LAST).forEach { c.getSystemService(AlarmManager::class.java).cancel(pending(c, it)) }
+        if (on) schedule(c) else listOf(SOON, MISSED).forEach { c.getSystemService(AlarmManager::class.java).cancel(pending(c, it)) }
     }
 
-    // The game tells the app when today's fight is done, so the last call stays quiet.
+    // The game tells the app when today's fight is done, so the 9pm ping stays quiet.
     fun taxDone(c: Context, day: String) = Sync.prefs(c).edit().putString("taxDone", day).apply()
 
-    // The next 6pm and 8:30pm on this phone's clock. Inexact on purpose (no special alarm permission needed);
-    // they land within a minute or so.
+    // The next 5pm and 9pm on this phone's clock. Inexact on purpose (no special alarm permission needed);
+    // they usually land within a minute or so.
     fun schedule(c: Context) {
         if (!enabled(c)) return
-        book(c, OPEN, 18, 0)
-        book(c, LAST, 20, 30)
+        book(c, SOON, 17, 0)
+        book(c, MISSED, 21, 0)
     }
 
     private fun book(c: Context, kind: String, hour: Int, minute: Int) {
@@ -53,22 +54,27 @@ object Reminders {
     }
 
     private fun pending(c: Context, kind: String) =
-        PendingIntent.getBroadcast(c, if (kind == LAST) 3 else 1, Intent(c, ReminderReceiver::class.java).putExtra("kind", kind),
+        PendingIntent.getBroadcast(c, if (kind == MISSED) 3 else 1, Intent(c, ReminderReceiver::class.java).putExtra("kind", kind),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-    fun show(c: Context, kind: String = OPEN, test: Boolean = false) {
+    fun show(c: Context, kind: String = SOON, test: Boolean = false) {
         if (!canNotify(c)) return
-        if (kind == LAST && Sync.prefs(c).getString("taxDone", null) == LocalDate.now().toString()) return
+        // Late alarms stay quiet: the 5pm one only before the Taxman leaves at 9, the 9pm one only that evening.
+        val hour = LocalTime.now().hour
+        if (!test && kind == SOON && hour !in 17..20) return
+        if (!test && kind == MISSED && hour !in 21..23) return
+        if (kind == MISSED && Sync.prefs(c).getString("taxDone", null) == LocalDate.now().toString()) return
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Evening reminders", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "When the Taxman's in (6pm to 9pm), a last call at 8:30pm, and the Sunday raid lobby"
+            description = "5pm before the Taxman's in (6pm to 9pm), and 9pm if you missed him"
         })
         val sunday = LocalDate.now().dayOfWeek == DayOfWeek.SUNDAY
         val (title, body) = when {
-            test -> "Notifications are on" to "You'll get a ping at 6pm when the Taxman's in, and a last call at 8:30 if you haven't fought him."
-            kind == LAST -> "Last call: the Taxman goes at 9" to "You haven't fought him yet. Five minutes to stop him taking his cut of today."
-            sunday -> "Raid lobby's open till 9pm" to "4 or more of you, everyone ready, one boss. The Taxman's in till 9 too."
-            else -> "The Taxman's in" to "He's here till 9pm. Five minutes to stop him taking his cut of today's steps."
+            test -> "Notifications are on" to "A ping at 5pm before the Taxman's in, and at 9pm if you miss him."
+            kind == MISSED -> "You missed the Taxman" to "He took his cut of today's Efforts."
+            sunday -> "Raid and Taxman at 6pm" to "Lobby's open 6pm to 9pm."
+            hour >= 18 -> "The Taxman's in till 9pm" to "Five minutes to stop him taking his cut."
+            else -> "The Taxman's in at 6pm" to "He's here 6pm to 9pm."
         }
         val open = PendingIntent.getActivity(
             c, 2, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -89,11 +95,11 @@ object Reminders {
     }
 }
 
-// Fires at 6pm and 8:30pm (shows the ping and books the next), and after a restart or an update (rebooks them).
+// Fires at 5pm and 9pm (shows the ping and books the next), and after a restart or an update (rebooks them).
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, intent: Intent) {
         if (!Reminders.enabled(c)) return
-        if (intent.action == null) Reminders.show(c, intent.getStringExtra("kind") ?: "open")
+        if (intent.action == null) Reminders.show(c, intent.getStringExtra("kind") ?: "soon")
         Reminders.schedule(c)
     }
 }

@@ -1,10 +1,11 @@
-// Effort push notifications: 6pm when the Taxman's in (till 9pm), and on Sunday the raid lobby too; an 8:30pm
-// last call to anyone who hasn't fought him yet.
+// Effort push notifications: 5pm, an hour before the Taxman's in (and on Sunday the raid lobby too), and 9pm to
+// anyone who missed him. Nothing in between, and a ping that can't arrive within 15 minutes is dropped, so nobody
+// hears about a fight after it's over.
 //   GET  /key          the public key phones subscribe with (made on first use, kept in app_config)
 //   POST /subscribe    {token, sub}       this phone wants notifications
 //   POST /unsubscribe  {token, endpoint}  this phone doesn't
 //   POST /test         {token}            send yourself one now
-//   POST /tick         pg_cron calls this on the hour and half hour; it pings everyone whose local time is 6pm or 8:30pm
+//   POST /tick         pg_cron calls this on the hour and half hour; it pings everyone whose local time is 5pm or 9pm
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import webpush from "npm:web-push@3.6.7";
 import { rules } from "./rules.ts";
@@ -19,7 +20,6 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const fail = (msg: string, status = 400) => json({ ok: false, error: msg }, status);
 const APP = "https://effort-game.vercel.app/";
 const SQUAD_TZ = "Europe/London";
-const NO_SCROLL_MIN = 30;
 // deno-lint-ignore no-explicit-any
 type Any = any;
 
@@ -76,8 +76,9 @@ async function sendTo(subs: Any[], msg: Any) {
   return sent;
 }
 
-// What the evening ping says: the Taxman's cut on today's steps so far, and on Sunday (at 6) the raid too.
-async function evening(players: Any[], now: number, last: boolean) {
+// What the evening ping says: at 5pm the Taxman's cut on today's steps so far (and on Sunday the raid too); at 9pm,
+// what he took from someone who didn't turn up.
+async function evening(players: Any[], now: number, missed: boolean) {
   const G = await rules();
   const ids = players.map((p) => p.id);
   const { data: mine } = await db.from("memberships").select("player_id, group_id, groups(tier)").in("player_id", ids);
@@ -97,9 +98,9 @@ async function evening(players: Any[], now: number, last: boolean) {
     const s = stepsOn(p.id, L.day), E = G.effortsFromSteps(s);
     const sc = scroll?.find((r: Any) => r.player_id === p.id && r.day === L.day);
     const avg = squadIds.length > 1 ? squadIds.reduce((a: number, id: string) => a + stepsOn(id, L.day), 0) / squadIds.length : 0;
-    const pct = Math.round(G.taxRate(s, sc ? sc.minutes ?? sc.auto_minutes ?? NO_SCROLL_MIN : NO_SCROLL_MIN, avg) * 100);
-    const tax = E ? `He wants ${pct}% of today's ${E} Efforts, and that covers every step till midnight. Five minutes to stop him.` : "You've no steps in yet today. Sync them, then fight him before 9.";
-    if (last) return { player: p, msg: { title: "Last call: the Taxman goes at 9", body: `You haven't fought him yet. ${tax}`, tag: "taxman", url: APP } };
+    const pct = Math.round(G.taxRate(s, G.scrollCounted(s, sc ? sc.minutes ?? sc.auto_minutes ?? 0 : 0, p.scroll_source === "auto"), avg) * 100);
+    if (missed) return { player: p, msg: { title: "You missed the Taxman", body: `He took ${pct}% of today's Efforts.`, tag: "taxman", url: APP } };
+    const tax = E ? `He'll want ${pct}% of today's ${E} Efforts. 6pm to 9pm.` : "Get today's steps synced before 6.";
     if (g && L.sunday) {
       const week = (id: string) => [0, 1, 2, 3, 4, 5, 6].reduce((a, i) => a + stepsOn(id, addDays(mondayOf(L.day), i)), 0);
       const freshAfter = Date.parse(addDays(mondayOf(L.day), 3) + "T00:00:00Z");
@@ -107,9 +108,9 @@ async function evening(players: Any[], now: number, last: boolean) {
       const row = T.rows.find((r: Any) => r.id === p.id);
       const boss = G.bossFor(g.groups?.tier ?? 1);
       const note = row?.title === "top" ? " You're top walker this week." : row?.title === "last" ? " You're the lowest walker. It's coming for you." : "";
-      return { player: p, msg: { title: `Raid lobby's open till 9pm`, body: `Get 4 or more of you in, pick the boss, everyone taps Ready. Your steps give you ×${(row?.stride ?? 1).toFixed(2)} power.${note} The Taxman's in till 9 too.`, tag: "raid", url: APP } };
+      return { player: p, msg: { title: "Raid and Taxman at 6pm", body: `Lobby's open 6pm to 9pm. Your steps give you ×${(row?.stride ?? 1).toFixed(2)} power.${note}`, tag: "raid", url: APP } };
     }
-    return { player: p, msg: { title: "The Taxman's in till 9pm", body: tax, tag: "taxman", url: APP } };
+    return { player: p, msg: { title: "The Taxman's in at 6pm", body: tax, tag: "taxman", url: APP } };
   });
 }
 
@@ -148,7 +149,7 @@ Deno.serve(async (req) => {
         if (error) return fail("One test a minute");
         const { data: subs } = await db.from("push_subs").select("*").eq("player_id", p.id);
         if (!subs?.length) return fail("This phone isn't signed up for notifications");
-        const sent = await sendTo(subs, { title: "Notifications are on", body: "You'll get a ping at 6pm when the Taxman's in, and a last call at 8:30 if you haven't fought him.", tag: "test", url: APP });
+        const sent = await sendTo(subs, { title: "Notifications are on", body: "A ping at 5pm before the Taxman's in, and at 9pm if you miss him.", tag: "test", url: APP });
         return sent ? json({ ok: true, sent }) : fail("Couldn't reach your phone. Try turning notifications off and on again.");
       }
 
@@ -156,31 +157,31 @@ Deno.serve(async (req) => {
         const { data: cfg } = await db.from("app_config").select("value").eq("key", "cron_key").maybeSingle();
         if (!cfg || req.headers.get("x-cron-key") !== cfg.value) return fail("Not allowed", 403);
         const now = Date.now();
-        const { data: subs } = await db.from("push_subs").select("endpoint,p256dh,auth,player_id,players(id,name,tz)");
-        // 6pm (the Taxman's in) and 8:30pm (last call), each give or take a quarter of an hour.
-        const due = { open: new Map<string, Any>(), last: new Map<string, Any>() };
+        const { data: subs } = await db.from("push_subs").select("endpoint,p256dh,auth,player_id,players(id,name,tz,scroll_source)");
+        // 5pm (an hour before the Taxman) and 9pm (missed him), each within the first quarter of the hour.
+        const due = { soon: new Map<string, Any>(), missed: new Map<string, Any>() };
         for (const s of (subs ?? []) as Any[]) {
           const L = local(now, s.players?.tz || SQUAD_TZ);
-          const kind = L.hour === 18 && L.minute < 15 ? "open" : L.hour === 20 && L.minute >= 30 && L.minute < 45 ? "last" : null;
+          const kind = L.hour === 17 && L.minute < 15 ? "soon" : L.hour === 21 && L.minute < 15 ? "missed" : null;
           if (!kind) continue;
           const m = due[kind];
           if (!m.has(s.player_id)) m.set(s.player_id, { player: s.players, day: L.day, subs: [] });
           m.get(s.player_id).subs.push(s);
         }
-        // The last call is only for people who haven't fought today.
-        if (due.last.size) {
-          const { data: fought } = await db.from("tax_fights").select("player_id,day").in("player_id", [...due.last.keys()]);
-          for (const f of fought ?? []) if (due.last.get(f.player_id)?.day === f.day) due.last.delete(f.player_id);
+        // "Missed" is only for people who didn't fight today.
+        if (due.missed.size) {
+          const { data: fought } = await db.from("tax_fights").select("player_id,day").in("player_id", [...due.missed.keys()]);
+          for (const f of fought ?? []) if (due.missed.get(f.player_id)?.day === f.day) due.missed.delete(f.player_id);
         }
         let sent = 0, count = 0;
-        for (const kind of ["open", "last"] as const) {
+        for (const kind of ["soon", "missed"] as const) {
           const m = due[kind];
           if (!m.size) continue;
           count += m.size;
-          for (const { player, msg } of await evening([...m.values()].map((x) => x.player), now, kind === "last")) {
+          for (const { player, msg } of await evening([...m.values()].map((x) => x.player), now, kind === "missed")) {
             const x = m.get(player.id);
             // Once each a day, however often the timer fires.
-            const { error } = await db.from("push_log").insert({ player_id: player.id, kind: kind === "open" ? "evening" : "lastcall", day: x.day });
+            const { error } = await db.from("push_log").insert({ player_id: player.id, kind, day: x.day });
             if (error) continue;
             sent += await sendTo(x.subs, msg);
           }
