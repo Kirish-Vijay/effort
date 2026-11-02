@@ -149,7 +149,20 @@ async function dataFor(ids: string[], sinceDays: number) {
   };
 }
 
+// A day's steps only ever go up. Phones can briefly report less while their health app rewrites its records, and
+// a lower number arriving late mustn't undo steps already counted. Two exceptions: the owner's corrections, and the
+// Effort app's Health Connect count ("android-hc") replacing what an older version of the app sent ("android-app"),
+// which mixed in the phone's raw step sensor and ran a little high. Once a day has a Health Connect count, an older
+// app can't overwrite it.
 async function saveDay(playerId: string, day: string, steps: number, source: string) {
+  if (source !== "admin") {
+    const { data: old } = await db.from("daily_steps").select("steps,source").eq("player_id", playerId).eq("day", day).maybeSingle();
+    if (old) {
+      if (old.source === "android-hc" && source === "android-app") return;
+      const replaces = source === "android-hc" && old.source === "android-app";
+      if (!replaces && steps <= old.steps) return;
+    }
+  }
   const { error } = await db.from("daily_steps").upsert(
     { player_id: playerId, day, steps, source, updated_at: new Date().toISOString() },
     { onConflict: "player_id,day" },

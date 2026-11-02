@@ -85,8 +85,8 @@ object Sync {
             if (stepsAllowed(c)) {
                 val client = HealthConnectClient.getOrCreate(c)
                 for (day in listOf(today.minusDays(1), today)) {
-                    // Today never goes below what the app showed live (Health Connect can lag the phone's counter).
-                    val steps = stepsOn(client, day).let { if (day == today) maxOf(it, liveToday(c)) else it }
+                    // Health Connect's total, exactly: the server keeps the highest it's been sent for each day.
+                    val steps = stepsOn(client, day)
                     log(token, day, steps)
                     if (day == today) todaySteps = steps
                 }
@@ -110,11 +110,7 @@ object Sync {
     // Today's total in Health Connect, for the live count while the app's open.
     suspend fun todaySteps(c: Context): Long = stepsOn(HealthConnectClient.getOrCreate(c), LocalDate.now())
 
-    // The live count, so the background sync never sends less than the app showed.
-    fun rememberLive(c: Context, steps: Long) = prefs(c).edit().putString("liveDay", LocalDate.now().toString()).putLong("liveSteps", steps).apply()
-    private fun liveToday(c: Context) = if (prefs(c).getString("liveDay", null) == LocalDate.now().toString()) prefs(c).getLong("liveSteps", 0) else 0L
-
-    // Sends today's live count.
+    // Sends today's live count (Health Connect's total while the app's open).
     suspend fun logToday(c: Context, steps: Long) {
         val token = token(c) ?: return
         log(token, LocalDate.now(), steps)
@@ -122,7 +118,7 @@ object Sync {
     }
 
     private suspend fun log(token: String, day: LocalDate, steps: Long) =
-        post("log", JSONObject().put("token", token).put("steps", steps).put("date", day.toString()).put("source", "android-app"))
+        post("log", JSONObject().put("token", token).put("steps", steps).put("date", day.toString()).put("source", "android-hc"))
 
     // Minutes the short-video apps were on screen during a day, from Android's own usage records.
     fun scrollMinutes(c: Context, day: LocalDate): Long {

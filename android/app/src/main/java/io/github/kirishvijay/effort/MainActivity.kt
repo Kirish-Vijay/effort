@@ -149,7 +149,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun onLive(n: Long) {
-        Sync.rememberLive(this, n)
         web.evaluateJavascript("window.onEffortSteps && window.onEffortSteps($n)", null)
     }
 

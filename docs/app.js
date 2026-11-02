@@ -1062,7 +1062,7 @@ function syncChip() {
   if (NATIVE && !S.native?.steps) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps not connected · connect</button>`;
   if (!m.steps_synced_at) return `<button class="chip red" data-act="setup-steps">${ic("warning")} Steps aren't syncing · set up</button>`;
   if (NATIVE) return `<span class="chip green">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span><button class="chip cyan" data-act="native-sync">${ic("refresh")} Sync now</button>`;
-  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : m.steps_source === "android-app" ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
+  return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : /^android-(app|hc)$/.test(m.steps_source || "") ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
 }
 function dayTiles() {
   const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll;
@@ -1656,7 +1656,7 @@ function tabMe() {
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge green">${ic("steps")}</span><h2 class="ol-sm">Steps</h2><span class="side chip ${m.steps_synced_at ? "green" : "red"}">${m.steps_synced_at ? `Synced ${ago(m.steps_synced_at)}` : "Not syncing"}</span></div>
-      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(m.steps_source === "android-app" ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Set it up once and your steps sync by themselves."}</p>
+      <p class="small muted" style="margin:0 0 10px">${m.steps_synced_at ? `From ${esc(/^android-(app|hc)$/.test(m.steps_source || "") ? "the Effort app" : m.steps_source === "android" || /health/.test(m.steps_source || "") ? "HC Webhook" : m.steps_source === "manual" ? "typing them in" : "your iPhone Shortcut")}. Today so far: ${fmt(S.D.today.rawSteps)}.` : "Set it up once and your steps sync by themselves."}</p>
       <div class="btn-row"><button class="btn sm green" data-act="setup-steps">${ic("refresh")} Set up sync</button></div>
     </section>
     <section class="panel">
