@@ -293,3 +293,32 @@ has to do conversions in their head.
 Fonts and palette unchanged (Lilita One, Rubik; existing tokens).
 
 Result screenshots: `overhaul-steps-home.jpg`, `overhaul-fight.jpg`, `overhaul-profile.jpg`, `overhaul-money.jpg` (test squad).
+
+---
+
+# Squad combos and Dodge on the raid screen (added 2 Nov 2026)
+
+## Outcome
+
+With rows gone, the raid's strategy is timing: fire specials together. Everyone has to see, mid-fight and at a
+glance, whose special is ready and when a combo is open, and have one obvious button for getting out of a marked
+attack.
+
+## References
+
+1. **Overwatch ultimate tracker** *(play knowledge)*. Teammates' ultimate charge is shown so a team can combine
+   ultimates; "ult combos" are the game's core coordination.
+2. **Brawl Stars / Clash Royale super meters** *(play knowledge)*. A meter that fills and glows when ready, readable
+   at thumb distance.
+3. **Monster Hunter / MMO dodge** *(play knowledge)*. One dodge with a short cooldown, the button flashes when you're
+   the target.
+
+## Steal list
+
+| Decision | From | What we take | Why |
+|---|---|---|---|
+| A strip of everyone's charge beside the controls | Overwatch ult tracker | One small bar per squad-mate, gold when full, ringed when they're in the combo | Shows when to fire |
+| "Combo open: fire your special!" hint and ×1.5 / ×2 / ×3 pops | Overwatch ult callouts | Text over the boss as the chain grows, "Combo ×2!" when it lands | Makes the payoff obvious |
+| Dodge button that turns red and pulses when you're marked | MMO dodge | One button, 8s cooldown shown on it | Replaces three row buttons with one decision |
+
+Result screenshot: `combos-raid-screen.jpg` (a Hunt against Brett with three bots).

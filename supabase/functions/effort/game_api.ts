@@ -567,10 +567,10 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const cls = G.classOf(statsOf(player)).id, lvl = level(L);
       if (item.cls && item.cls !== cls) return fail("That's for another class");
       if (G.tierOf(item.tier).lvl > lvl) return fail(`Unlocks at level ${G.tierOf(item.tier).lvl}`);
-      if (!G.onSale(item, localDate(now, SQUAD_TZ))) return fail("That's not in the shop right now");
-      const deal = body.deal === true && G.dealsFor(localDate(now, tz), cls, lvl).includes(item.id);
-      const price = G.priceOf(item, deal);
-      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "buy", p_ref: item.id, p_amount: price, p_note: `Bought ${item.name}${deal ? " (deal)" : ""}` });
+      // The shop is class gear and the open market: no season sets, no daily deals.
+      if (item.season || !G.onSale(item, localDate(now, SQUAD_TZ))) return fail("That's not in the shop");
+      const price = G.priceOf(item, false);
+      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "buy", p_ref: item.id, p_amount: price, p_note: `Bought ${item.name}` });
       if (error) throw error;
       if (bal === -1) return fail("Not enough Efforts");
       if (bal === -2) return fail("You already own that");

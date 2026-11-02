@@ -97,7 +97,6 @@ const coin = (sz = 20) => window.Icons?.coin?.(sz) || `<i class="cdot coin" styl
 const gem = (sz = 20) => window.Icons?.gem?.(sz) || `<i class="cdot gem" style="width:${sz}px;height:${sz}px"></i>`;
 const itemArt = (item) => window.Icons?.item?.(item, 64) || `<span>${item.e}</span>`;
 const STAT_LOOK = { power: ["power", "#ff6a3d"], guard: ["guard", "#3a9cf0"], speed: ["speed", "#4fd67f"], brains: ["brains", "#a86bff"], luck: ["luck", "#ffc83d"] };
-const ROW_ICON = { front: "shieldWall", mid: "bigSwing", back: "target" };
 const priceTag = (efforts) => `<span class="price">${coin(18)}${fmt(efforts)}</span>`;
 const effortTag = (n) => `${coin(18)}${fmt(n)}`;
 const signedEfforts = (n) => `${n >= 0 ? "+" : "−"}${coin(16)}${fmt(Math.abs(n))}`;
@@ -1246,7 +1245,7 @@ function tabRaid() {
   const live = ["open", "live"].includes(raidState());
   const daily = `${taxHero()}${huntCard()}${eventCard()}`;
   if (!squad()) return `${daily}${noSquadPanel()}${howDay()}${howRaids()}`;
-  const st = myStats(), cls = myClass(), sug = G.suggestedPosition(st), pos = me().pos || sug, tier = squad().tier;
+  const st = myStats(), cls = myClass(), tier = squad().tier;
   const lap = Math.floor((tier - 1) / G.BOSSES.length) + 1;
   return `${live ? `${raidHero()}${daily}` : `${daily}${raidHero()}`}${goalPanel()}
     <section class="panel">
@@ -1258,13 +1257,10 @@ function tabRaid() {
       <p class="small muted" style="margin:10px 0 0">Each Sunday: last week's boss, one up or one down. Climb before your gear's ready and you'll lose. After Vex the bosses come round again, tougher and richer.</p>
     </section>
     <section class="panel">
-      <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2><span class="side chip gold">Best: ${G.posOf(sug).label}</span></div>
+      <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2></div>
       <p class="small muted" style="margin:-4px 0 8px">${esc(cls.blurb)}</p>
       <div class="special-card" style="--sc:${SPECIAL_COL[cls.id] || "#ffd166"}"><span class="si">${ic(G.specialOf({ cls: cls.id }).icon)}</span><span><small>Class special</small><b>${esc(G.specialOf({ cls: cls.id }).name)}</b><span>${esc(G.specialOf({ cls: cls.id }).what)}</span></span></div>
       ${statRows(st)}
-      <span class="field-label">Where you start on Sunday</span>
-      <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
-      <p class="tiny faint" style="margin:8px 0 0">${esc(G.posOf(pos).ability)}: ${esc(G.posOf(pos).abilityWhat)}. ${pos === sug ? `The ${G.posOf(sug).label.toLowerCase()} is every ${esc(cls.name)}'s home row.` : `Every ${esc(cls.name)}'s home row is the ${G.posOf(sug).label.toLowerCase()}. Here you hit ${Math.round((1 - G.posFit(G.loadout(st, me().gear, S.D.inv).g, pos, sug) ** 1.5) * 100)}% weaker and take more damage.`} You can move rows during the fight.</p>
     </section>
     ${denPanel()}
     ${S.D.lastRaid && S.D.raid?.status !== "done" ? lastRaidPanel(S.D.lastRaid) : ""}
@@ -1279,8 +1275,9 @@ function howRaids() {
   return `<details class="panel howbox"><summary class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></summary>
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit and how big you stand. Half the loot goes by steps, half by the fight. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>Three rows</b><span>${G.POSITIONS.map((p) => `${p.label}: ${p.ability}`).join(". ")}. Every row deals damage: the front hits hardest and hits back, the middle staggers wind-ups, the back crits from safety. Fill all three for +${Math.round(G.RULES.formationBonus * 100)}% (Formation). When the boss winds up on someone else, everyone else gets an opening (+${Math.round(G.RULES.openingBonus * 100)}%); if it's you, move rows to dodge. Every hit heals you a little (Second Wind). Your class's home row (yours is the ${G.posOf(G.suggestedPosition(myStats())).label.toLowerCase()}) gives a small bonus; with nobody at the front, every hit lands ${G.RULES.noFrontDmg}× harder.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("guard")}</span><div><b>Each row has a job</b><span>${G.POSITIONS.map((p) => `${p.label}, ${p.passive}: ${p.passiveWhat.charAt(0).toLowerCase() + p.passiveWhat.slice(1)}`).join(". ")}.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Squad combos</b><span>Fire specials within ${G.RULES.comboWindow}s of each other and they combo: ×${G.comboMult(2)} for two, ×${G.comboMult(3)} for three, ×${G.comboMult(4)} for four or more. Call it in chat. His Scream drains everyone's charge, so don't sit on it too long.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("arrowRight")}</span><div><b>Dodge</b><span>Marked by an attack? Tap Dodge before it lands and it misses you.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("bigSwing")}</span><div><b>Stagger the wind-ups</b><span>Hit hard together while he winds up (Big Swing helps) and the attack lands at half strength, or not at all.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>It charges as you tap, use your ability and take hits. Fire it when it glows. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
         <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
@@ -1324,8 +1321,6 @@ function tabShop() {
     class: I.ITEMS.filter((i) => i.cls === cls.id).sort(sort),
     all: I.ITEMS.filter((i) => !i.cls && !i.season && (S.shopSlot === "any" || !S.shopSlot || i.slot === S.shopSlot) && (!S.shopStyle || S.shopStyle === "any" || i.market === S.shopStyle)
       && G.tierOut(G.tierOf(i.tier), S.D.today.day) && (G.tierOf(i.tier).lvl <= lvl || G.tierOf(i.tier) === I.TIERS.find((t) => t.lvl > lvl && !t.season) || i.id in inv)).sort(sort),
-    season: I.ITEMS.filter((i) => i.season && (G.onSale(i, S.D.today.day) || i.id in inv)).sort(sort),
-    deals: dealsToday().map(G.itemById).filter(Boolean),
     bag: I.ITEMS.filter((i) => i.id in inv).sort(sort),
   };
   const tab = lists[S.shopTab] || S.shopTab === "gamba" || S.shopTab === "house" ? S.shopTab : "class";
@@ -1344,14 +1339,11 @@ function tabShop() {
           : `<div class="slot"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[s])}<span>${slotName[s]}</span></div></div>`;
       }).join("")}</div>
     </section>
-    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ...(lists.season.length ? [["season", "Season", 0]] : []), ["deals", "Deals", lists.deals.filter((i) => !(i.id in inv)).length], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
+    <div class="tabs-sub">${[["class", cls.name, 0], ["all", "Open market", 0], ["bag", "Bag", Object.keys(inv).length]].map(([k, l, n]) =>
       `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
-    ${tab === "season" ? setNote() : ""}
-    ${tab === "all" ? `<p class="small muted" style="margin:0">Gear any class can wear. Five styles in every tier, each with its own perk. Your class gear is a slightly better fit for you; these let you build your own way.</p>
-      <div class="chips-row">${[["any", "All"], ["weapon", "Weapons"], ["armour", "Armour"], ["trinket", "Trinkets"]].map(([k, l]) => `<button class="fchip" data-shopslot="${k}" aria-pressed="${(S.shopSlot || "any") === k}">${l}</button>`).join("")}</div>
+    ${tab === "all" ? `<div class="chips-row">${[["any", "All"], ["weapon", "Weapons"], ["armour", "Armour"], ["trinket", "Trinkets"]].map(([k, l]) => `<button class="fchip" data-shopslot="${k}" aria-pressed="${(S.shopSlot || "any") === k}">${l}</button>`).join("")}</div>
       <div class="chips-row">${[["any", "Any style"], ["power", "Power"], ["guard", "Guard"], ["speed", "Speed"], ["brains", "Brains"], ["luck", "Luck"]].map(([k, l]) => `<button class="fchip" data-shopstyle="${k}" aria-pressed="${(S.shopStyle || "any") === k}">${l}</button>`).join("")}</div>` : ""}
-    ${tab === "deals" ? `<p class="small muted" style="margin:0">Three picks for your class each day, about ${Math.round(G.RULES.dealDiscount * 100)}% off. New ones at midnight.</p>` : ""}
-    ${tab === "gamba" ? gambaPanel() : tab === "house" ? housePanel() : `<div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i, { deal: tab === "deals" })).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`}`;
+    ${tab === "gamba" ? gambaPanel() : tab === "house" ? housePanel() : `<div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i)).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`}`;
 }
 
 // ---------- Winny's Gamba Bucket ----------
@@ -1794,12 +1786,12 @@ function profileSheet(id) {
   const you = id === me().id, st = G.stats(x.character || {}), cls = G.classOf(st);
   const row = weekRows().rows.find((r) => r.id === id), gear = you ? me().gear : x.gear || {};
   // Best spot from their stats with gear on; if they've picked somewhere else, say so too.
-  const best = G.posOf(G.suggestedPosition(st)), picked = (you ? me().pos : x.pos) || null;
+
   const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
   openSheet(`${sheetHead(esc(you ? "You" : x.name))}
     <div class="profile">
       <div class="walker-big has-fallback"><span class="fb">${Walker.svg(ANS[id], { mood: "fresh", label: `${x.name}'s walker` })}</span>${portraitImg("walker", id, { w: 340, h: 400 })}</div>
-      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span>${titleOf(you ? me() : x) ? `<span class="chip">${ic("crown")} ${esc(titleOf(you ? me() : x))}</span>` : ""}<span class="chip">Level ${x.level}</span><span class="chip">${best.e} Best at the ${best.label.toLowerCase()}</span>${picked && picked !== best.id ? `<span class="chip">Plays ${G.posOf(picked).label.toLowerCase()}</span>` : ""}</div>
+      <div class="row" style="justify-content:center;flex-wrap:wrap;gap:6px;margin-top:10px"><span class="chip gold">${esc(cls.name)}</span>${titleOf(you ? me() : x) ? `<span class="chip">${ic("crown")} ${esc(titleOf(you ? me() : x))}</span>` : ""}<span class="chip">Level ${x.level}</span></div>
       <p class="tiny faint" style="text-align:center;margin:8px 0 12px">${esc(cls.blurb)}</p>
       <div class="special-card" style="--sc:${SPECIAL_COL[cls.id] || "#ffd166"};margin-bottom:12px"><span class="si">${ic(G.specialOf({ cls: cls.id }).icon)}</span><span><small>Class special</small><b>${esc(G.specialOf({ cls: cls.id }).name)}</b><span>${esc(G.specialOf({ cls: cls.id }).what)}</span></span></div>
     </div>
@@ -2413,7 +2405,7 @@ function viewLobby() {
         <span class="grow"><small>${tag}</small><b>${esc(b.name)}</b><span class="tiny" style="display:block">${esc(b.title)}</span><span class="tiny faint" style="display:block;margin-bottom:2px">${esc(b.style || "")}</span><span class="tiny ${g.met ? "" : "red-t"}">${g.met ? "Step goal made" : "Step goal missed: enraged"}</span></span>
       </button>`;
   };
-  const st = myStats(), best = G.suggestedPosition(st), pos = me().pos || best;
+  const st = myStats();
   const noGear = G.SLOTS.filter((sl) => !me().gear?.[sl]);
   $("#app").innerHTML = `<section class="onboard rlobby">${head}
     <h1 class="ol disp ob-title">Raid lobby</h1>
@@ -2434,8 +2426,7 @@ function viewLobby() {
           : `<button class="slot" data-act="gear-pick" data-slot="${sl}" aria-label="Pick a ${sl}"><div class="ph">${ic({ weapon: "sword", armour: "guard", trinket: "star" }[sl])}<span>${sl[0].toUpperCase() + sl.slice(1)}</span></div></button>`;
       }).join("")}</div>
       <p class="tiny faint" style="margin:6px 0 10px">Tap a slot to swap in anything you own.</p>
-      <div class="seg">${G.POSITIONS.map((p) => `<button data-pos="${p.id}" aria-pressed="${p.id === pos}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div>
-      <p class="tiny ${pos === best ? "faint" : "red-t"}" style="margin:8px 0 0">${pos === best ? `${G.posOf(pos).label} is your home row.` : `Your home row is the ${G.posOf(best).label.toLowerCase()}. Here you hit weaker and take more.`}${noGear.length ? ` <span class="red-t">Nothing in your ${noGear.join(", ")} slot${noGear.length > 1 ? "s" : ""}.</span>` : ""}</p>
+      ${noGear.length ? `<p class="tiny red-t" style="margin:8px 0 0">Nothing in your ${noGear.join(", ")} slot${noGear.length > 1 ? "s" : ""}.</p>` : ""}
     </div>
     <button class="btn ${mine?.ready ? "" : "gold"} xl block" style="margin-top:14px" data-act="lobby-ready">${mine?.ready ? "Not ready" : `${ic("check")} Ready`}</button>
   </section>`;
@@ -2647,13 +2638,14 @@ function renderRaid() {
     <div class="foot"><div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
         <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
-        <div class="rows">${G.POSITIONS.map((p) => `<button data-move="${p.id}" aria-label="Move to ${p.label}">${ic(ROW_ICON[p.id])}${p.label}</button>`).join("")}</div></div>
+        <div class="rside"><div class="sqsp" id="sqsp">${R.members.map((m) => `<span class="q" id="q-${m.id}"><i></i><b>${esc((m.id === v.my ? "You" : m.name).slice(0, 3))}</b></span>`).join("")}</div>
+          <button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div></div>
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
   FX.init($("#arena"));
   if (!R.over) FX.music(true, R.boss.phase || 1);
   if (three) {
-    v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: m.pos, scale: G.stepScale(m.stride) })) });
+    v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m, i) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: i % 2 ? "mid" : "front", scale: G.stepScale(m.stride) })) });
     if (!v.A) return renderRaid();
     $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.id === v.my ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.id === v.my ? "You" : m.name)}<span class="pw ${m.stride >= 1.15 ? "hi" : m.stride <= 0.85 ? "lo" : ""}">×${(m.stride || 1).toFixed(2)}</span><span class="st"></span><i><s></s></i></div>`).join("");
   }
@@ -2699,12 +2691,16 @@ function raidFx(e) {
   const [bx, by] = bossXY();
   switch (e.type) {
     case "tap": if (!e.miss) A?.heroAttack(e.id, { crit: e.crit, big: e.swing }); break;
-    case "move": A?.move(e.id, e.pos); break;
+    case "dodgeStep": if (e.id === my) FX.play("tap"); break;
+    case "comboOpen": if (e.id !== my) { FX.play("combo"); hint(`${ic("star")} ${esc(R.members.find((x) => x.id === e.id)?.name || "")} fired. Combo open!`); } break;
+    case "comboUp": FX.play("combo"); FX.number(bx, by - 60, `×${e.mult}`, { size: 44, grad: ["#ffffff", "#ffd166"] }); break;
+    case "combo": FX.play("levelup"); FX.shake($("#shake"), 12, 600); FX.number(bx, by - 30, `Combo ×${e.mult}!`, { size: 34, grad: ["#fff3a0", "#ff7a3d"] }); setTimeout(() => FX.sparks(bx, by, "#ffd166", 40, 800), 200); bossHurt(true); break;
     case "windup": {
       if (A) A.bossWindup(e.attack, e.ids || []);
       FX.play(e.attack === "vanish" ? "vanish" : "warn");
       const mine = R.members.find((m) => m.id === my);
-      if (mine?.pos === "mid" && G.ATTACKS[e.attack]?.cut) hint(`${ic("bigSwing")} ${G.ATTACKS[e.attack].stop ? "Stop it" : "Stagger it"}: hit hard now`);
+      if ((e.ids || []).includes(my) && ["swipe", "vanish", "grab", "ooze", "gust"].includes(e.attack)) hint(`${ic("arrowRight")} It's coming for you: Dodge!`);
+      else if (mine && G.ATTACKS[e.attack]?.cut) hint(`${ic("bigSwing")} ${G.ATTACKS[e.attack].stop ? "Stop it" : "Stagger it"}: hit hard now`);
       break;
     }
     case "attack": {
@@ -2785,7 +2781,7 @@ function paintRaid() {
     const a = G.ATTACKS[B.next.type], total = B.next.at - B.next.warnAt;
     const N = B.next, need = a.cut ? G.interruptNeed(R, N.type) : 0;
     tele.className = `tele hot ${N.staggered ? "staggered" : ""}`;
-    const meter = a.cut && !N.staggered && R.members.some((m) => m.alive && m.pos === "mid") ? ` · middle ${Math.min(100, Math.round((N.mid / need) * 100))}% to ${a.stop ? "stop" : "stagger"}` : N.staggered ? (N.cancel ? " · stopped" : " · staggered") : "";
+    const meter = a.cut && !N.staggered ? ` · ${Math.min(100, Math.round((N.mid / need) * 100))}% to ${a.stop ? "stop" : "stagger"}` : N.staggered ? (N.cancel ? " · stopped" : " · staggered") : "";
     tt.innerHTML = `${esc(B.attacks[N.type] || a.label)}<small>${esc(a.what)}${meter} · ${Math.max(0, N.at - R.t).toFixed(1)}s</small>`;
     cdbar.style.width = `${Math.max(0, (B.next.at - R.t) / total) * 100}%`;
   } else {
@@ -2813,8 +2809,8 @@ function paintRaid() {
   const ab = $("#ab");
   if (!mine) { ab.disabled = true; hint(`${ic("squad")} Joining the fight…`); }
   else {
-    const p = G.posOf(mine.pos), cd = Math.max(0, mine.cdUntil - R.t), total = G.abilityCd(mine);
-    if (v.abRow !== mine.pos) { v.abRow = mine.pos; ab.querySelector(".ic-slot").innerHTML = ic(ROW_ICON[mine.pos]); ab.querySelector(".al").textContent = p.ability; }
+    const cd = Math.max(0, mine.cdUntil - R.t), total = G.abilityCd(mine);
+    if (!v.abSet) { v.abSet = true; ab.querySelector(".ic-slot").innerHTML = ic("bigSwing"); ab.querySelector(".al").textContent = "Big Swing"; }
     ab.querySelector(".secs").textContent = cd > 0 ? Math.ceil(cd) : "";
     ab.querySelector(".ic-slot").style.opacity = cd > 0 ? 0.25 : 1;
     ab.style.setProperty("--cd", `${cd > 0 ? (cd / total) * 360 : 0}deg`);
@@ -2828,14 +2824,26 @@ function paintRaid() {
     sp.disabled = !spReady; sp.classList.toggle("ready", spReady);
     if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); toast(`${S.name} is ready: ${S.what}`); }
     if (!spReady) v.spToast = false;
-    document.querySelectorAll("[data-move]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.move === mine.pos)));
+    // Everyone's special charge, and who's in the combo that's going.
+    const C = R.combo && R.t <= R.combo.until ? R.combo : null;
+    for (const m of R.members) {
+      const q = $(`#q-${m.id}`); if (!q) continue;
+      q.querySelector("i").style.width = `${Math.min(1, (m.sp || 0) / G.RULES.spMax) * 100}%`;
+      q.classList.toggle("full", (m.sp || 0) >= G.RULES.spMax && m.alive);
+      q.classList.toggle("in", !!C?.ids.includes(m.id));
+      q.classList.toggle("dead", !m.alive);
+    }
+    const dg = $("#dg"), dcd = Math.max(0, mine.dodgeUntil - R.t), marked = B.warned && (B.next?.ids || []).includes(mine.id);
+    dg.disabled = dcd > 0 || !mine.alive || R.t < mine.stunUntil;
+    dg.querySelector("em").textContent = dcd > 0 ? Math.ceil(dcd) : "";
+    dg.classList.toggle("hot", marked && dcd <= 0);
     if (!mine.alive) hint(`${ic("skull")} You're down. Answer your question`);
     else if (R.t < mine.stunUntil) hint(`${ic("bolt")} Paralysed`);
     else if (R.grab?.id === mine.id) hint(`${ic("lock")} Grabbed! Your squad has to hit it to free you`);
-    else if (R.t < mine.moveUntil) hint(`${ic("arrowRight")} Moving rows`);
+    else if (R.t < mine.moveUntil) hint(`${ic("arrowRight")} Dodging`);
+    else if (C && spReady && !C.ids.includes(mine.id)) hint(`${ic("star")} Combo open: fire your special!`);
     else if (B.hidden) hint(`${ic("eye")} It's vanished. It'll go for the weakest`);
-    else if (mine.pos !== mine.home && mine.botBackAt && R.t < mine.botBackAt + 6) hint(`${ic("arrowRight")} Blown out of place: tap ${G.posOf(mine.home).label} to get back`);
-    else if (R.t < mine.slimeUntil) hint(`${ic("warning")} Slimed: half damage. Move rows or get healed`);
+    else if (R.t < mine.slimeUntil) hint(`${ic("warning")} Slimed: half damage. Dodge to shake it off`);
     else if (mine.swing) hint(`${ic("fire")} Big swing: ${mine.swing} hits left`);
     else hint(v.taps >= 6 ? null : `${ic("target")} Tap the boss`);
     paintCombo(mine.combo, 1 + mine.combo / (G.RULES.comboMax * 2));
@@ -2894,7 +2902,7 @@ function raidTapEvent(e) {
     // The host decides the real hit; show a fair estimate straight away so tapping feels instant.
     v.out.taps++;
     const swing = mine.swing > 0;
-    hit = { dmg: (20 + mine.g.power * 4) * mine.stride * G.posOf(mine.pos).mult * (1 + mine.combo / (G.RULES.comboMax * 2)) * (swing ? 3 : 1), crit: false, swing };
+    hit = { dmg: (20 + mine.g.power * 4) * mine.stride * G.RULES.lineMult * (1 + mine.combo / (G.RULES.comboMax * 2)) * (swing ? 3 : 1), crit: false, swing };
   }
   if (hit.miss) { FX.number(x, y, "Miss", { size: 18, color: "#b9c8ff" }); FX.play("blocked"); return; }
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, color: hit.swing ? "#ff9f43" : "#ffd166" });

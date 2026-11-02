@@ -176,7 +176,7 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 /* ---------- Bottom dock ---------- */
 .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 8px 10px calc(env(safe-area-inset-bottom) + 8px);
   background: linear-gradient(180deg, rgba(10,16,40,.9), #070b1d); border-top: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.dock .inner { max-width: 600px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+.dock .inner { max-width: 600px; margin: 0 auto; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
 .dock button { position: relative; border: 0; background: transparent; color: var(--text-3); cursor: pointer; display: grid; justify-items: center; gap: 3px; padding: 6px 0 4px; border-radius: 14px; font: 700 10.5px/1 var(--ui); letter-spacing: .08em; text-transform: uppercase; }
 .dock button .ic { font-size: 24px; }
 .dock button[aria-current="page"] { color: #fff; background: linear-gradient(180deg, #3a4b8c, #26356f); border: 2px solid var(--ink); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.22), 0 3px 0 var(--ink); transform: translateY(-4px); }
@@ -1009,3 +1009,21 @@ s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-co
 .howbox > summary::after { content: "+"; margin-left: auto; font: 400 22px/1 var(--display); color: var(--text-3); }
 .howbox[open] > summary::after { content: "–"; }
 .howbox[open] > summary { margin-bottom: 10px; }
+/* Narrow phones: the dock labels tighten up rather than crowd. */
+@media (max-width: 360px) { .dock { padding-left: 6px; padding-right: 6px; } .dock .inner { gap: 2px; } .dock button { letter-spacing: .02em; font-size: 10px; } }
+
+/* Raid: everyone's special charge (lit when full, ringed when in a combo) and the Dodge button. */
+.rside { display: grid; gap: 6px; min-width: 0; }
+.sqsp { display: flex; gap: 4px; padding: 5px; border-radius: 14px; background: rgba(10,15,38,.7); border: 2px solid var(--ink); }
+.sqsp .q { position: relative; flex: 1; min-width: 0; height: 26px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.08); display: grid; place-items: center; }
+.sqsp .q i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #6c5cff, #b693ff); transition: width .2s; }
+.sqsp .q b { position: relative; font: 700 10.5px/1 var(--ui); color: #fff; text-shadow: 0 1px 2px #000; }
+.sqsp .q.full i { background: linear-gradient(90deg, #ffb21e, #ffe58a); }
+.sqsp .q.full { box-shadow: 0 0 0 2px #ffd166 inset; }
+.sqsp .q.in { box-shadow: 0 0 0 2px #fff inset, 0 0 12px #ffd166; }
+.sqsp .q.dead { opacity: .35; }
+.dodge { position: relative; height: 44px; border-radius: 14px; border: 2px solid var(--ink); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: #fff;
+  font: 400 16px/1 var(--display); background: linear-gradient(180deg, #5a6cb0, #2b3a78); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.3), 0 3px 0 var(--ink); }
+.dodge:disabled { filter: saturate(.3) brightness(.7); cursor: default; }
+.dodge em { font-style: normal; font: 400 14px/1 var(--display); opacity: .8; }
+.dodge.hot { background: linear-gradient(180deg, #ff9a88, #c8283d); animation: ready .5s ease-in-out infinite alternate; }

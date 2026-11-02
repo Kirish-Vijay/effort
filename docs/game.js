@@ -66,7 +66,7 @@ const DEFAULT_RULES = {
   stepHp: 1.05, stepDmg: 1.02, stepReward: 1.015, // (1: compounds instead; 0: the old ×2 laps)
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
-  raidBossDmg: 22,          // a swipe at level 1
+  raidBossDmg: 14,          // a swipe at level 1
   raidRewardPerMember: 70,  // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
   raidGoalPerDay: 5000,     // the squad's weekly goal before Sunday: this many steps a day for each player…
@@ -76,15 +76,21 @@ const DEFAULT_RULES = {
   enragedDmg: 1.35,         // …and hits this much harder (beatable only with gear well past what it asks for)
   spMax: 100,               // a class special is ready at this much charge…
   spPerTap: 0.25,           // …which builds a little with every tap…
-  spPerAbility: 8,          // …more with every row ability…
-  spPerHit: 3,              // …and with every hit taken (half as much again at the front). Brains charges it faster
+  spPerAbility: 8,          // …more with every Big Swing…
+  spPerHit: 3,              // …and with every hit taken. Brains charges it faster
+  comboWindow: 3,           // squad combos: specials fired within this many seconds of each other combo…
+  comboMult: [1, 1, 1.5, 2, 3], // …and the specials' damage lands again at ×1.5 for two, ×2 for three, ×3 for four or more
+  comboFloor: 100,          // each special counts as at least this many taps' worth towards a combo (buffs included)
+  roarDrain: 0.25,          // the boss's Scream knocks this much off everyone's special charge
+  dodgeCd: 8,               // Dodge: step out of a marked attack, then wait this long to do it again
+  lineMult: 1.2,            // everyone fights from one line now; taps are scaled to where the rows used to average
   openingBonus: 0.4,        // hit harder while the boss winds up on someone else (it's looking the other way)
   formationBonus: 0.1,
   homeBonus: 1.12,          // your class's home row: hit this much harder there, and take this much less      // every row filled: the whole squad hits this much harder
   tapHeal: 0.0012,          // Second Wind: every tap heals you this share of your health (Brains makes it more)
   counterTaps: 1.2,         // Front, Counter: every hit you take, you hit back this many taps' worth (Guard adds more)
   backCrit: 0.12,           // Back, Sharpshooter: extra crit chance
-  interruptShare: 0.002,    // Middle, Interrupt: deal this share of the boss's health during a wind-up to stagger it…
+  interruptShare: 0.006,    // Interrupt: the squad deals this share of the boss's health during a wind-up to stagger it…
   staggerMult: 0.5,         // …so it lands this hard (a Ground Slam is stopped outright)
   feebleMult: 0.35,         // SHHH: the next two attacks land this hard
   brewVuln: 0.2,            // Volatile Brew: the boss takes this much more for 10s
@@ -161,7 +167,7 @@ function levelProgress(xp) {
 // ---------- stats and classes from quiz answers ----------
 const STATS = [
   { id: "power", label: "Power", e: "💪", what: "Every tap hits harder" },
-  { id: "guard", label: "Guard", e: "🛡️", what: "More health, less damage taken, harder Counters at the front" },
+  { id: "guard", label: "Guard", e: "🛡️", what: "More health, less damage taken" },
   { id: "speed", label: "Speed", e: "🏃", what: "Bigger combos, faster cooldowns" },
   { id: "brains", label: "Brains", e: "🧠", what: "Your special charges faster, Second Wind heals more, more trivia time" },
   { id: "luck", label: "Luck", e: "🍀", what: "More critical hits" },
@@ -203,8 +209,8 @@ function classOf(st) {
   const top = STATS.map((s) => s.id).sort((a, b) => st[b] - st[a] || STATS.findIndex((s) => s.id === a) - STATS.findIndex((s) => s.id === b)).slice(0, 2);
   return CAT().CLASSES.find((c) => c.stats.includes(top[0]) && c.stats.includes(top[1])) || CAT().CLASSES[0];
 }
-// Every row deals damage, in its own way. Where you stand is the strategy: the front hits hardest and gets hit most
-// (and hits back), the middle staggers wind-ups, the back is safe and crits. Fill all three for the Formation bonus.
+// The old rows. Fights no longer use them (everyone stands in one line and the strategy is squad combos); they're
+// kept so the owner's lab and old saved raids still read.
 const POSITIONS = [
   { id: "front", label: "Front", e: "🛡️", ability: "Shield Bash", abilityWhat: "A huge bash (ten taps' worth), and the front row takes half damage for 6s", mult: 1.4, aggro: 70,
     passive: "Counter", passiveWhat: "Every hit you take, you hit straight back. More Guard, bigger Counters" },
@@ -256,7 +262,7 @@ function statEffects(g) {
   const e = edges(g), pct = (x) => Math.round(x * 100);
   return {
     power: `Taps +${pct(e.power - 1)}%`,
-    guard: `${e.hp} health, blocks ${pct(e.armour)}%, Counter ×${(RULES.counterTaps + e.counter).toFixed(1)}`,
+    guard: `${e.hp} health, blocks ${pct(e.armour)}%`,
     speed: `Full combo +${pct(e.combo)}%, cooldowns −${pct(1 - e.cd)}%`,
     brains: `Special ${pct(e.charge - 1)}% faster, Second Wind +${pct(e.heal - 1)}%`,
     luck: `${pct(e.crit)}% crits`,
@@ -645,10 +651,10 @@ const specialOf = (m) => SPECIALS[m.cls] || SPECIALS.bouncer;
 function makeMember(m, row) {
   const { g, perks, points } = loadout(m.stats, m.equipped, m.inv);
   const e = edges(g), maxHp = e.hp;
-  const cls = classOf(m.stats || {}).id, best = homeRow(cls), pos = m.pos || best;
+  const cls = classOf(m.stats || {}).id, best = "mid", pos = "mid";
   return { ...m, g, e, perks, gearPts: points, cls, best, atk: e.attack, weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
     pos, home: pos, hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0, sp: 0, specials: 0,
-    cdUntil: 0, moveUntil: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
+    cdUntil: 0, moveUntil: 0, dodgeUntil: 0, fullSince: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null } = {}) {
@@ -667,7 +673,7 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
     members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: affixList(affix).join("+") || null, mods: modsFor(affix, den), atkCount: 0, echo: null,
     // Squad-wide effects from specials (each is a time it lasts until, or a count of attacks).
-    vulnUntil: 0, weakUntil: 0, prophecyUntil: 0, swarmUntil: 0, swarmBy: null, peckAcc: 0, blockNext: 0, feeble: 0, grab: null,
+    vulnUntil: 0, weakUntil: 0, prophecyUntil: 0, swarmUntil: 0, swarmBy: null, peckAcc: 0, blockNext: 0, feeble: 0, grab: null, combo: null,
   };
   for (const m of R.members) m.perks.spCharge = (m.perks.spCharge || 0) + (R.mods.spCharge || 0);
   scheduleAttack(R);
@@ -709,24 +715,23 @@ function swipeTarget(R, skip = []) {
   const up = alive(R).filter((m) => !skip.includes(m.id));
   if (!up.length) return null;
   // The week's lowest walker draws far more of the boss's attention.
-  const weights = up.map((m) => posOf(m.pos).aggro * (m.pos === "front" && R.t < m.shieldUntil ? 1.3 : 1) * (m.title === "last" ? RULES.slackerAggro : 1));
+  const weights = up.map((m) => (m.title === "last" ? RULES.slackerAggro : 1));
   let x = R.r() * weights.reduce((s, w) => s + w, 0);
   for (let i = 0; i < up.length; i++) { x -= weights[i]; if (x <= 0) return up[i]; }
   return up[up.length - 1];
 }
-// The fullest row, front first on a tie.
-function busiestRow(R) {
-  const up = alive(R);
-  const order = ["front", "mid", "back"].map((p) => [p, up.filter((m) => m.pos === p).length]).sort((a, b) => b[1] - a[1]);
-  return up.filter((m) => m.pos === order[0][0]);
+// A few people picked at random (for the attacks that mark more than one).
+function pickSome(R, n) {
+  const up = alive(R).slice(), out = [];
+  while (up.length && out.length < n) out.push(up.splice(Math.floor(R.r() * up.length), 1)[0]);
+  return out;
 }
 // Who an attack will hit, decided at the warning so the ground markers are honest.
 function targetsOf(R, type) {
   const up = alive(R), B = R.boss;
   if (type === "swipe") { const ids = []; for (let i = 0; i < (B.swipeHits || 1); i++) { const t = swipeTarget(R, ids); if (t) ids.push(t.id); } return ids; }
-  if (type === "stomp" || type === "slam") { const rows = up.filter((m) => m.pos !== "back"); return (rows.length ? rows : up).map((m) => m.id); }
-  if (type === "ooze") return busiestRow(R).map((m) => m.id);
-  if (type === "gust") { const row = ["front", "mid"].map((p) => up.filter((m) => m.pos === p)).find((x) => x.length) || []; return row.map((m) => m.id); }
+  if (type === "stomp" || type === "slam") return up.map((m) => m.id);
+  if (type === "ooze" || type === "gust") return pickSome(R, 2).map((m) => m.id);
   if (type === "vanish") { const t = up.slice().sort((a, b) => a.hp / a.max - b.hp / b.max)[0]; return t ? [t.id] : []; }
   if (type === "grab") { const t = swipeTarget(R); return t ? [t.id] : []; }
   if (type === "scream" || type === "spores" || type === "breath") return up.map((m) => m.id);
@@ -744,13 +749,11 @@ const attackName = (R, type) => R.boss.attacks?.[type] || ATTACKS[type]?.label |
 // One ordinary tap's damage before combo, crits and buffs.
 // How big a walker stands in the raid: their week's steps against the squad (stride), 0.78× to 1.4×.
 const stepScale = (stride) => Math.max(0.78, Math.min(1.4, 1 + ((Number(stride) || 1) - 1) * 0.6));
-const tapBase = (m) => (20 + m.atk * 4) * m.e.power * m.stride * posOf(m.pos).mult * posFit(m.g, m.pos, m.best);
-// Every row filled: the squad's Formation bonus.
-const formation = (R) => { const up = alive(R); return ["front", "mid", "back"].every((p) => up.some((x) => x.pos === p)) ? 1 + RULES.formationBonus : 1; };
+const tapBase = (m) => (20 + m.atk * 4) * m.e.power * m.stride * RULES.lineMult;
 // The boss is winding up on someone else: an opening for you.
 const opening = (R, m) => { const N = R.boss.next; return N && R.boss.warned && N.ids && !N.ids.includes(m.id) ? 1 + RULES.openingBonus : 1; };
 const charge = (m, n) => { m.sp = Math.min(RULES.spMax, (m.sp || 0) + n * m.e.charge * (1 + (m.perks.spCharge || 0))); };
-// How much the middle row has to deal during a wind-up to stagger it.
+// How much the squad has to deal during a wind-up to stagger it.
 const interruptNeed = (R, type) => Math.round(RULES.interruptShare * R.boss.max * (ATTACKS[type]?.stop ? 2 : 1) * (1 + (R.mods?.stagger || 0)));
 // Every bit of damage to the boss goes through here.
 function dmgBoss(R, m, dmg) {
@@ -761,7 +764,7 @@ function dmgBoss(R, m, dmg) {
   if (B.feast) B.feast.dealt += dmg;
   if (R.grab) { R.grab.dealt += dmg; if (R.grab.dealt >= R.grab.need) release(R, true); }
   const N = B.next;
-  if (N && B.warned && m.pos === "mid" && ATTACKS[N.type]?.cut && !N.staggered) {
+  if (N && B.warned && ATTACKS[N.type]?.cut && !N.staggered) {
     N.mid += dmg;
     if (N.mid >= interruptNeed(R, N.type)) {
       N.staggered = true; N.cancel = !!ATTACKS[N.type].stop;
@@ -795,9 +798,9 @@ function raidTap(R, id) {
   // Second Wind: hitting keeps you going.
   if (m.hp < m.max) m.hp = Math.min(m.max, m.hp + m.max * RULES.tapHeal * m.e.heal * (1 + (m.perks.heal || 0)));
   if (B.hidden) { if (!m.you && R.r() < 0.2) fx(R, { type: "tap", id: m.id, miss: true }); return { dmg: 0, crit: false, swing: false, miss: true }; }
-  const crit = R.r() < m.e.crit + (m.perks.critChance || 0) + (R.t < R.prophecyUntil ? RULES.prophecyCrit : 0) + (m.pos === "back" ? RULES.backCrit : 0);
+  const crit = R.r() < m.e.crit + (m.perks.critChance || 0) + (R.t < R.prophecyUntil ? RULES.prophecyCrit : 0);
   // Stride: walk more than the squad this week and every hit lands harder.
-  let dmg = tapBase(m) * (1 + (m.combo / RULES.comboMax) * m.e.combo) * (crit ? 2.5 + (m.perks.critDmg || 0) + (R.mods?.crit || 0) : 1) * (joy ? 2 : 1) * (R.t < m.slimeUntil ? 0.5 : 1) * opening(R, m) * formation(R);
+  let dmg = tapBase(m) * (1 + (m.combo / RULES.comboMax) * m.e.combo) * (crit ? 2.5 + (m.perks.critDmg || 0) + (R.mods?.crit || 0) : 1) * (joy ? 2 : 1) * (R.t < m.slimeUntil ? 0.5 : 1) * opening(R, m);
   let swing = false;
   if (m.swing > 0) { dmg *= 3; m.swing--; swing = true; }
   if (B.feast) dmg *= m.perks.feast || 1;
@@ -807,29 +810,14 @@ function raidTap(R, id) {
   if (m.perks.lifesteal && m.alive) m.hp = Math.min(m.max, m.hp + dmg * m.perks.lifesteal / 2.5); // damage numbers run ~10× health
   return { dmg, crit, swing };
 }
-const abilityCd = (m) => Math.max(5, ({ front: 22, mid: 20, back: 20 }[m.pos]) * m.e.cd * (1 - Math.min(0.5, m.perks.cdr || 0)));
+const abilityCd = (m) => Math.max(5, 20 * m.e.cd * (1 - Math.min(0.5, m.perks.cdr || 0)));
 function raidAbility(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m) || R.t < m.cdUntil) return false;
-  if (m.pos === "front") {
-    dmgBoss(R, m, tapBase(m) * 10 * formation(R));
-    const row = alive(R).filter((x) => x.pos === "front");
-    for (const f of row) f.shieldUntil = R.t + 6 + (m.perks.shield || 0);
-    fx(R, { type: "shield", by: m.id, ids: row.map((x) => x.id) });
-    say(R, `${nm(m)} ${vb(m, "shield-bashes", "shield-bash")} it`, "good");
-  } else if (m.pos === "mid") {
-    m.swing = 8 + (m.perks.swing || 0);
-    fx(R, { type: "swing", by: m.id });
-    say(R, `${nm(m)} ${vb(m, "winds", "wind")} up a Big Swing`, "good");
-  } else {
-    let total = 0;
-    for (let i = 0; i < 5; i++) {
-      const crit = R.r() < m.e.crit + (m.perks.critChance || 0) + RULES.backCrit;
-      total += dmgBoss(R, m, tapBase(m) * 2 * (crit ? 2.5 + (m.perks.critDmg || 0) : 1) * opening(R, m) * formation(R));
-      fx(R, { type: "tap", id: m.id, crit, swing: true });
-    }
-    say(R, `${nm(m)} ${vb(m, "looses", "loose")} a Volley for ${Math.round(total).toLocaleString("en-GB")}`, "good");
-  }
+  // Big Swing: the next 8 taps hit three times as hard. Save it for a wind-up and the squad staggers it.
+  m.swing = 8 + (m.perks.swing || 0);
+  fx(R, { type: "swing", by: m.id });
+  say(R, `${nm(m)} ${vb(m, "winds", "wind")} up a Big Swing`, "good");
   m.cdUntil = R.t + abilityCd(m);
   charge(m, RULES.spPerAbility);
   return true;
@@ -837,7 +825,7 @@ function raidAbility(R, id) {
 function raidSpecial(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m) || (m.sp || 0) < RULES.spMax) return false;
-  const B = R.boss, S = specialOf(m), base = tapBase(m);
+  const B = R.boss, S = specialOf(m), base = tapBase(m), before = m.dmg;
   let roll = null, extra = "";
   if (m.cls === "bouncer") {
     dmgBoss(R, m, base * 40);
@@ -866,21 +854,42 @@ function raidSpecial(R, id) {
   m.sp = 0; m.specials = (m.specials || 0) + 1;
   fx(R, { type: "special", id: m.id, cls: m.cls, roll });
   say(R, `${nm(m)}: ${S.name}!${extra}`, "good");
+  comboJoin(R, m, Math.max(m.dmg - before, base * RULES.comboFloor));
   return true;
 }
-function raidMove(R, id, pos) {
+// Squad combos. Fire specials within a few seconds of each other and they chain; when the window closes the squad
+// lands a bonus hit worth the specials' damage again: ×1.5 in all for two, ×2 for three, ×3 for four or more.
+const comboMult = (n) => RULES.comboMult[Math.min(n, RULES.comboMult.length - 1)];
+function comboJoin(R, m, dealt) {
+  const C = R.combo && R.t <= R.combo.until ? R.combo : (R.combo = { until: 0, ids: [], dealt: 0 });
+  C.ids.push(m.id); C.dealt += dealt; C.until = R.t + RULES.comboWindow;
+  if (C.ids.length >= 2) fx(R, { type: "comboUp", n: C.ids.length, mult: comboMult(C.ids.length), ids: C.ids.slice(), until: C.until });
+  else fx(R, { type: "comboOpen", id: m.id, until: C.until });
+}
+function comboEnd(R) {
+  const C = R.combo; R.combo = null;
+  const n = C.ids.length, mult = comboMult(n);
+  if (n < 2) { fx(R, { type: "comboFizzle", id: C.ids[0] }); return; }
+  const who = C.ids.map((id) => R.members.find((x) => x.id === id)).filter(Boolean);
+  let total = 0;
+  for (const m of who) total += dmgBoss(R, m, (C.dealt * (mult - 1)) / who.length);
+  fx(R, { type: "combo", n, mult, ids: C.ids, dmg: Math.round(total) });
+  say(R, `Combo ×${mult}! ${who.map(nm).join(", ")} for ${Math.round(total).toLocaleString("en-GB")}`, "good");
+}
+// Dodge: step out of the way. If the boss had marked you, the hit misses (and a dodge shakes off slime).
+function raidDodge(R, id) {
   const m = R.members.find((x) => x.id === id);
-  if (!m || !m.alive || m.pos === pos || R.over) return false;
-  m.pos = pos; m.movedAt = R.t; m.moveUntil = R.t + Math.max(1.2, 4 * m.e.move) * (1 + (R.mods?.move || 0)); m.swing = 0; m.slimeUntil = 0;
-  fx(R, { type: "move", id: m.id, pos });
-  say(R, `${nm(m)} ${vb(m, "moves", "move")} to the ${posOf(pos).label.toLowerCase()}`);
+  if (!m || !canAct(R, m) || R.t < m.dodgeUntil) return false;
+  m.movedAt = R.t; m.moveUntil = R.t + 0.6; m.dodgeUntil = R.t + RULES.dodgeCd * (1 + (R.mods?.move || 0)); m.slimeUntil = 0;
+  fx(R, { type: "dodgeStep", id: m.id });
   return true;
 }
+// Old name: the owner's lab still calls it.
+const raidMove = (R, id) => raidDodge(R, id);
 
 // What a hit of `base` does to someone, after guard, position, shields and specials.
 function dmgTo(R, m, base) {
-  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - m.e.armour) / posFit(m.g, m.pos, m.best);
-  if (!alive(R).some((x) => x.pos === "front")) d *= RULES.noFrontDmg;
+  let d = base * R.boss.dmg * R.lvl ** 0.9 * R.sizeDmg * (1 - m.e.armour);
   if (R.t < m.shieldUntil) d *= 0.5;
   if (R.t < R.weakUntil) d *= 0.75;
   if (R.t < R.swarmUntil) d *= 0.5;
@@ -903,11 +912,9 @@ function hit(R, m, base) {
   if (!m.alive) return 0;
   if (m.perks.dodge && R.r() < m.perks.dodge) { fx(R, { type: "dodge", id: m.id }); return 0; }
   const d = Math.round(dmgTo(R, m, base));
-  charge(m, RULES.spPerHit * (m.pos === "front" ? 1.5 : 1));
+  charge(m, RULES.spPerHit);
   wound(R, m, d);
   if (m.perks.thorns) dmgBoss(R, m, d * m.perks.thorns * 10);
-  // Front row, Counter: take a hit, give one back.
-  if (m.pos === "front" && m.alive && d > 0) { dmgBoss(R, m, tapBase(m) * (RULES.counterTaps + m.e.counter) * formation(R)); fx(R, { type: "tap", id: m.id, crit: true }); }
   return d;
 }
 // Let go of whoever the Kraken is holding.
@@ -919,7 +926,7 @@ function release(R, freed) {
   fx(R, { type: "release", id: G.id, freed });
   if (m && freed) say(R, `${nm(m)} ${vb(m, "is", "are")} free`, "good");
 }
-// Someone the attack was aimed at moved rows after the warning: it misses them.
+// Someone the attack was aimed at dodged after the warning: it misses them.
 function dodged(R, m, N) {
   if (!N.warnAt || !(m.movedAt > N.warnAt)) return false;
   fx(R, { type: "dodge", id: m.id }); say(R, `${nm(m)} ${vb(m, "dodges", "dodge")} it`, "good");
@@ -944,27 +951,24 @@ function bossAttack(R, echo = null) {
     if (R.mods?.leech) { const healed = ds.some((d) => d > 0) ? Math.round(B.max * R.mods.leech) : 0; if (healed) { B.hp = Math.min(B.max, B.hp + healed); fx(R, { type: "leech", amt: healed }); } }
     if (ts.length) say(R, `${name} hits ${who(ts)} for ${ds.join(" and ")}`, "bad");
   } else if (type === "stomp" || type === "slam") {
-    let rows = up.filter((m) => m.pos !== "back");
-    if (!rows.length) rows = up; // nobody in front: it reaches the back
-    fx(R, { type: "attack", attack: type, ids: rows.map((m) => m.id) });
-    // The front row takes the brunt; the middle catches the edge of it.
-    rows.forEach((m) => hit(R, m, base * (type === "slam" ? 1.5 : 0.6) * (m.pos === "mid" && rows.some((x) => x.pos === "front") ? 0.5 : 1)));
-    say(R, `${name} hits ${rows.length} of you`, "bad");
+    fx(R, { type: "attack", attack: type, ids: up.map((m) => m.id) });
+    up.forEach((m) => hit(R, m, base * (type === "slam" ? 0.9 : 0.4)));
+    say(R, `${name} hits everyone`, "bad");
   } else if (type === "scream") {
     fx(R, { type: "attack", attack: "scream", ids: up.map((m) => m.id) });
-    up.forEach((m) => hit(R, m, base * 0.45));
-    say(R, `${name} hits everyone`, "bad");
+    up.forEach((m) => { hit(R, m, base * 0.45); m.sp = Math.max(0, (m.sp || 0) * (1 - RULES.roarDrain)); });
+    say(R, `${name} hits everyone and drains your specials`, "bad");
   } else if (type === "feast") {
     const need = Math.round(RULES.raidSquadSize * 1100 * R.lvl * B.dmg * (mult < 1 ? mult : 1));
     B.feast = { until: R.t + 6, need, dealt: 0 };
     fx(R, { type: "attack", attack: "feast", ids: [] });
     say(R, `${name}. Deal ${need.toLocaleString("en-GB")} damage in 6s or it heals`, "warn");
   } else if (type === "ooze") {
-    // Whoever moved out of the marked row got away.
-    const row = marked.filter((m) => m.pos === N.row);
+    // Whoever dodged got away.
+    const row = marked.filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: "ooze", ids: row.map((m) => m.id) });
     row.forEach((m) => { hit(R, m, base * 0.35); if (m.alive) m.slimeUntil = R.t + 15; });
-    say(R, row.length ? `${name} slimes ${who(row)}. Move or get healed` : `${name} misses`, row.length ? "bad" : "good");
+    say(R, row.length ? `${name} slimes ${who(row)}. Dodge or get healed` : `${name} misses`, row.length ? "bad" : "good");
   } else if (type === "spores") {
     fx(R, { type: "attack", attack: "spores", ids: up.map((m) => m.id) });
     up.forEach((m) => { hit(R, m, base * 0.15); burn(m, base * 0.12, 8); });
@@ -976,16 +980,10 @@ function bossAttack(R, echo = null) {
     const d = hit(R, t, base * 1.8);
     say(R, `${B.name} reappears behind ${t.you ? "you" : t.name} for ${d}`, "bad");
   } else if (type === "gust") {
-    const row = marked.filter((m) => m.pos === N.row);
+    const row = marked.filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: "gust", ids: row.map((m) => m.id) });
-    const blown = [];
-    for (const m of row) {
-      hit(R, m, base * 0.4);
-      if (!m.alive || R.t < m.shieldUntil || m.pos === "back") continue;
-      m.pos = m.pos === "front" ? "mid" : "back"; m.moveUntil = R.t + 1.5; m.swing = 0; m.botBackAt = R.t + 1.5 + R.r() * 2;
-      fx(R, { type: "move", id: m.id, pos: m.pos }); blown.push(m);
-    }
-    say(R, blown.length ? `${name} blows ${who(blown)} back. Get back in place` : row.length ? `The shields hold against the ${name}` : `${name} hits nothing`, blown.length ? "bad" : "good");
+    for (const m of row) { hit(R, m, base * 0.4); if (m.alive) { m.stunUntil = Math.max(m.stunUntil, R.t + 1.5); m.swing = 0; } }
+    say(R, row.length ? `${name} knocks ${who(row)} flat` : `${name} hits nothing`, row.length ? "bad" : "good");
   } else if (type === "grab") {
     const t = marked[0] || swipeTarget(R);
     if (!t || dodged(R, t, N)) return;
@@ -1000,9 +998,8 @@ function bossAttack(R, echo = null) {
     }
   } else if (type === "breath") {
     fx(R, { type: "attack", attack: "breath", ids: up.map((m) => m.id) });
-    const wall = up.some((m) => m.pos === "front" && R.t < m.shieldUntil);
-    up.forEach((m) => { hit(R, m, base * 0.6 * (wall && m.pos !== "front" ? 0.5 : 1)); burn(m, base * 0.08 * (wall && m.pos !== "front" ? 0.5 : 1), 6); });
-    say(R, wall ? `${name}. The shields take the worst of it` : `${name} burns everyone`, "bad");
+    up.forEach((m) => { hit(R, m, base * 0.6); burn(m, base * 0.08, 6); });
+    say(R, `${name} burns everyone`, "bad");
   }
 }
 
@@ -1078,8 +1075,6 @@ function botWantsSpecial(R, m) {
 }
 function botAct(R, m) {
   if (!canAct(R, m)) return;
-  // Knocked out of place: get back after a moment, like a person would.
-  if (m.pos !== m.home && m.botBackAt && R.t >= m.botBackAt) { m.botBackAt = 0; raidMove(R, m.id, m.home); return; }
   if (R.t >= m.botNext) {
     // Bots tap at 3–5 taps a second, about what a person keeps up (the same for every class: people don't tap
     // faster because their ninja's quick).
@@ -1087,20 +1082,24 @@ function botAct(R, m) {
     raidTap(R, m.id);
     m.botNext = R.t + 1 / rate;
   }
-  if (m.sp >= RULES.spMax && R.r() < 0.05 && botWantsSpecial(R, m)) raidSpecial(R, m.id);
+  // Specials: join a combo that's going, or go when a squad-mate's nearly ready too, or stop waiting after a while.
+  if (m.sp < RULES.spMax) m.fullSince = 0;
+  else {
+    m.fullSince ||= R.t;
+    const open = R.combo && R.t <= R.combo.until, mates = alive(R).some((x) => x !== m && (x.sp || 0) >= RULES.spMax * 0.85);
+    const go = open ? R.r() < 0.4 : (mates && R.r() < 0.04) || (R.t - m.fullSince > 8 && R.r() < 0.05);
+    if (go && botWantsSpecial(R, m)) raidSpecial(R, m.id);
+  }
   const B = R.boss, warned = B.next && B.warned;
   // Marked for a single-target hit: sometimes step out of the way, like a person watching the warnings would.
-  if (warned && ["swipe", "vanish", "grab"].includes(B.next.type) && (B.next.ids || []).includes(m.id) && !m.dodgeTry) {
+  if (warned && ["swipe", "vanish", "grab", "ooze", "gust"].includes(B.next.type) && (B.next.ids || []).includes(m.id) && !m.dodgeTry) {
     m.dodgeTry = true;
-    if (R.r() < 0.35) { raidMove(R, m.id, m.pos === "back" ? "mid" : "back"); m.botBackAt = R.t + 3 + R.r() * 2; return; }
+    if (R.r() < 0.35 && raidDodge(R, m.id)) return;
   }
   if (!warned) m.dodgeTry = false;
   if (R.t >= m.cdUntil) {
-    // The front bashes when a hit's coming, the middle saves its Big Swing for wind-ups it can stagger, the back
-    // fires its Volley when the boss is busy with someone else.
-    const want = m.pos === "back" ? (warned ? R.r() < 0.3 : R.r() < 0.003)
-      : m.pos === "front" ? warned && R.r() < 0.05
-      : warned && ATTACKS[B.next.type]?.cut ? R.r() < 0.3 : R.r() < 0.004;
+    // Save the Big Swing for a wind-up the squad can stagger.
+    const want = warned && ATTACKS[B.next.type]?.cut ? R.r() < 0.3 : R.r() < 0.004;
     if (want) raidAbility(R, m.id);
   }
 }
@@ -1132,6 +1131,7 @@ function raidStep(R, dt) {
   if (R.echo && R.t >= R.echo.at && !R.over) { const E = R.echo; R.echo = null; fx(R, { type: "echo", attack: E.type }); bossAttack(R, { type: E.type, ids: targetsOf(R, E.type), row: E.row, mid: 0 }); }
   if (R.over) return;
   if (R.grab && R.t >= R.grab.until) release(R, false);
+  if (R.combo && R.t > R.combo.until) comboEnd(R);
   // Spores, burns and the Kraken's squeeze tick once a second.
   for (const m of R.members) {
     if (!m.alive || m.away || R.t >= m.dotUntil) { m.dotAcc = 0; continue; }
@@ -1539,7 +1539,7 @@ root.Game = {
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
-  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidAnswer, raidStep, abilityCd, triviaTime,
+  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
   DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
