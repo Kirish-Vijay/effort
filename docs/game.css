@@ -1027,3 +1027,8 @@ s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-co
 .dodge:disabled { filter: saturate(.3) brightness(.7); cursor: default; }
 .dodge em { font-style: normal; font: 400 14px/1 var(--display); opacity: .8; }
 .dodge.hot { background: linear-gradient(180deg, #ff9a88, #c8283d); animation: ready .5s ease-in-out infinite alternate; }
+
+/* Chat: @everyone in the picker, and a gold marker on messages that mention you. */
+.cmention button small { margin-left: auto; font: 600 11px/1 var(--ui); color: var(--text-3); }
+.cmention .cav .ic { width: 18px; height: 18px; color: var(--gold-hi); }
+.cmsg.pinged { box-shadow: inset 3px 0 0 var(--gold); background: rgba(255,200,61,.06); }

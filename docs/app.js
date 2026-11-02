@@ -487,14 +487,16 @@ function richText(t) {
   const names = (squad()?.members || []).map((m) => m.name).sort((a, b) => b.length - a.length);
   let h = esc(t).replace(/(https?:\/\/[^\s<]+[^\s<.,!?)])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
   for (const n of names) h = h.split(`@${esc(n)}`).join(`<span class="mention ${n === me().name ? "me" : ""}">@${esc(n)}</span>`);
+  h = h.replace(/@everyone\b/gi, '<span class="mention me">@everyone</span>');
   return h.replace(/\n/g, "<br>");
 }
+const pingsMe = (m) => m.by !== me().id && !!m.text && (/@everyone\b/i.test(m.text) || m.text.includes(`@${me().name}`));
 function msgHtml(m, prev) {
   const sameDay = prev && dayKey(prev.at) === dayKey(m.at);
   const grouped = sameDay && prev.by === m.by && Date.parse(m.at) - Date.parse(prev.at) < 7 * 60000 && !m.reply;
   const r = m.reply && CH.msgs.get(m.reply);
   return `${sameDay ? "" : `<div class="cday"><span>${esc(dayKey(m.at))}</span></div>`}
-    <div class="cmsg ${grouped ? "grouped" : ""} ${m.by === me().id ? "mine" : ""}" id="cm-${m.id}" data-cm="${m.id}">
+    <div class="cmsg ${grouped ? "grouped" : ""} ${m.by === me().id ? "mine" : ""} ${pingsMe(m) ? "pinged" : ""}" id="cm-${m.id}" data-cm="${m.id}">
       ${grouped ? `<span class="ctime-side">${timeOf(m.at)}</span>` : `<span class="cav">${face(m.by, 38)}</span>`}
       <div class="cbody">
         ${m.reply ? `<button class="creply" data-jump="${m.reply}">${ic("back")} <b>${esc(r ? nameOf(r.by) : "")}</b> ${esc(r?.text ? r.text.slice(0, 80) : r ? "(message deleted)" : "an earlier message")}</button>` : ""}
@@ -625,7 +627,7 @@ function mentionCheck() {
   const before = ta.value.slice(0, ta.selectionStart), m = before.match(/(?:^|\s)@([^\s@]{0,24})$/);
   if (!m || ta.selectionStart !== ta.selectionEnd) return mentionShow(null);
   const q = m[1].toLowerCase(), mates = (squad()?.members || []).filter((x) => x.id !== me().id);
-  const list = [...mates.filter((x) => x.name.toLowerCase().startsWith(q)), ...mates.filter((x) => !x.name.toLowerCase().startsWith(q) && x.name.toLowerCase().includes(q))].slice(0, 6).map((x) => x.name);
+  const list = [...("everyone".startsWith(q) ? ["everyone"] : []), ...mates.filter((x) => x.name.toLowerCase().startsWith(q)), ...mates.filter((x) => !x.name.toLowerCase().startsWith(q) && x.name.toLowerCase().includes(q))].slice(0, 7).map((x) => x.name || x);
   mentionShow(list.length ? { at: before.length - m[1].length - 1, list, i: 0 } : null);
 }
 function mentionShow(M) {
@@ -633,7 +635,7 @@ function mentionShow(M) {
   const box = $("#cmention"); if (!box) return;
   box.hidden = !M;
   box.innerHTML = M ? M.list.map((n, i) => { const x = squad().members.find((y) => y.name === n);
-    return `<button type="button" role="option" aria-selected="${i === M.i}" class="${i === M.i ? "on" : ""}" data-mention="${esc(n)}"><span class="cav">${face(x.id, 26)}</span><b>${esc(n)}</b></button>`; }).join("") : "";
+    return `<button type="button" role="option" aria-selected="${i === M.i}" class="${i === M.i ? "on" : ""}" data-mention="${esc(n)}"><span class="cav">${x ? face(x.id, 26) : ic("squad")}</span><b>${esc(n)}</b>${x ? "" : '<small>The whole squad</small>'}</button>`; }).join("") : "";
 }
 function mentionPick(name) {
   const ta = $("#cinput"), M = CH.mention; if (!ta || !M || !name) return;
@@ -656,6 +658,20 @@ async function chatSearch(q) {
       : `<p class="small muted cpad">Nothing matches “${esc(q)}”.</p>`;
   } catch (e) { box.innerHTML = `<p class="small muted cpad">${esc(e.message)}</p>`; }
 }
+// The chat sits above the dock; while the keyboard's up the dock steps aside. That goes by whether the keyboard is
+// actually on screen (the window shrinks), not by whether the message box has focus: Android's back button closes
+// the keyboard and leaves the box focused, which used to leave the dock hidden.
+let chatFullH = 0;
+function chatFit() {
+  const cv = $("#chatview"), dock = $("#app > .dock"), h = window.visualViewport?.height || innerHeight;
+  chatFullH = Math.max(chatFullH, innerHeight, h);
+  const kb = !!cv && document.activeElement?.id === "cinput" && chatFullH - h > 120;
+  document.body.classList.toggle("typing", kb);
+  if (cv && dock) cv.style.bottom = kb ? "0px" : `${dock.offsetHeight}px`;
+}
+addEventListener("resize", chatFit);
+window.visualViewport?.addEventListener("resize", chatFit);
+addEventListener("orientationchange", () => { chatFullH = 0; setTimeout(chatFit, 300); });
 function viewChat() {
   if ($("#chatview")) return; // already built: it updates itself
   $("#app").innerHTML = `<section class="chatview" id="chatview">
@@ -674,11 +690,11 @@ function viewChat() {
         <button class="btn gold csend" aria-label="Send">${ic("arrowRight")}</button></div>
     </form>
   </section>${dockHtml("chat")}`;
-  // The chat sits above the dock; while typing the dock steps aside for the keyboard.
-  const fit = () => { const cv = $("#chatview"), dock = $("#app > .dock"); if (cv && dock) cv.style.bottom = document.body.classList.contains("typing") ? "0px" : `${dock.offsetHeight}px`; };
-  fit(); addEventListener("resize", fit);
-  $("#chatview").addEventListener("focusin", (e) => { if (e.target.id === "cinput") { document.body.classList.add("typing"); fit(); } });
-  $("#chatview").addEventListener("focusout", (e) => { if (e.target.id === "cinput") setTimeout(() => { if (document.activeElement?.id !== "cinput") { document.body.classList.remove("typing"); fit(); } }, 120); });
+  chatFit();
+  $("#chatview").addEventListener("focusin", chatFit);
+  $("#chatview").addEventListener("focusout", () => setTimeout(chatFit, 120));
+  // Belt and braces: any tap in the chat re-checks, in case a phone hid the keyboard without saying so.
+  $("#chatview").addEventListener("pointerdown", () => setTimeout(chatFit, 60));
   const list = $("#clist");
   list.addEventListener("scroll", () => {
     if (list.scrollTop < 160) chatOlder();
