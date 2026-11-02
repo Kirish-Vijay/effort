@@ -1065,14 +1065,14 @@ function syncChip() {
 function dayTiles() {
   const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll;
   return `<div class="tiles">
-      <div class="tile gold"><div class="k">${ic("coin")} Earned today</div><div class="v">${effortTag(T.efforts)}<small>${fmt(S.D.today.steps)} steps</small></div></div>
+      <button class="tile gold tilebtn" data-act="steps-week"><div class="k">${ic("coin")} Earned today ${ic("arrowRight")}</div><div class="v">${effortTag(T.efforts)}<small>${S.D.today.debt ? `<s class="was">${fmt(S.D.today.rawSteps)}</s> <span class="cut-t">${fmt(S.D.today.steps)}</span>` : fmt(S.D.today.steps)} steps</small></div></button>
       <div class="tile red"><div class="k">${ic("warning")} At stake</div><div class="v">${Math.round(T.taxRate * 100)}%<small>${stake} Efforts</small></div></div>
       <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(T.hp)}</div></div>
       <div class="tile cyan"><div class="k">${ic("phone")} App time</div><div class="v">${S.D.today.scrollLinked ? sc ?? 0 : "Not linked"}<small>${S.D.today.scrollLinked ? `/ ${G.scrollBudget(S.D.today.steps)} min allowed` : `counts as ${G.RULES.unlinkedOverMin} min over`}</small></div></div>
     </div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">
       ${T.pace > 0 ? `<span class="chip green">${ic("steps")} Ahead of the squad · −${Math.round(G.RULES.paceTax * 100)}% tax</span>` : T.pace < 0 ? `<span class="chip red">${ic("steps")} Behind the squad · +${Math.round(G.RULES.paceTax * 100)}% tax</span>` : squad()?.members.length > 1 ? `<span class="chip">${ic("steps")} Level with the squad</span>` : ""}
-      ${S.D.today.debt ? `<span class="chip red">${ic("bolt")} Paralysed: −${fmt(S.D.today.debt)} steps today</span>` : ""}
+      ${S.D.today.debt ? `<button class="chip red" data-act="steps-week">${ic("bolt")} Paralysed: −${fmt(S.D.today.debt)} steps today</button>` : ""}
       ${syncChip()}
     </div>`;
 }
@@ -1382,6 +1382,29 @@ const pickJunk = () => {
   return j;
 };
 const junkDrawer = () => store.get(`junk:${me().id}`) || {};
+// This week's steps, Monday to Sunday: what you walked, and what counted after anything the game took off.
+const CUT_WHY = { paralysed: "Paralysed in the raid" };
+function stepsSheet() {
+  const today = S.D.today.day;
+  const days = (S.D.stepWeek || []).map((d) => {
+    const raw = d.day === today ? S.D.today.rawSteps : d.raw ?? 0, cut = d.cuts.reduce((a, c) => a + c.steps, 0), lost = Math.min(cut, raw);
+    return { ...d, raw, cut, lost, counted: raw - lost, future: d.day > today };
+  });
+  const sum = (k) => days.reduce((a, d) => a + d[k], 0), top = Math.max(1, ...days.map((d) => d.raw));
+  const wd = (day) => new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" });
+  const bars = days.map((d) => `<div class="sw-col${d.day === today ? " now" : d.future ? " later" : ""}">
+      <div class="sw-bar" style="height:${d.future ? 0 : Math.max(2, (d.raw / top) * 100)}%">${d.lost ? `<i class="sw-lost" style="height:${(d.lost / d.raw) * 100}%"></i>` : ""}</div>
+      <span>${wd(d.day)[0]}</span></div>`).join("");
+  const rows = days.map((d) => `<div class="sw-row${d.cut ? " cut" : ""}">
+      <b class="grow">${wd(d.day)}${d.day === today ? " · today" : ""}</b>
+      ${d.future ? `<span class="faint">–</span>` : d.cut ? `<s class="was">${fmt(d.raw)}</s><span class="cut-t num">${fmt(d.counted)}</span>` : `<span class="num">${fmt(d.counted)}</span>`}
+      ${d.cuts.map((c) => `<div class="sw-why">${ic("bolt")} ${esc(CUT_WHY[c.why] || "Taken off")} · −${fmt(c.steps)}</div>`).join("")}</div>`).join("");
+  const walked = sum("raw"), counted = sum("counted");
+  openSheet(`${sheetHead("Steps this week")}
+    <div class="sw-total"><b class="num">${fmt(counted)}</b><span class="small muted">counted</span>${walked !== counted ? `<span class="small cut-t">Walked ${fmt(walked)} · −${fmt(walked - counted)}</span>` : ""}</div>
+    <div class="sw-chart">${bars}</div>
+    <div class="sw-rows">${rows}</div>`);
+}
 function junkSheet() {
   const d = Object.entries(junkDrawer()).sort((a, b) => b[1] - a[1]);
   openSheet(`${sheetHead("Junk drawer")}<div class="oddsrows">${d.map(([j, n]) => `<div class="oddsrow"><b class="grow">${esc(j)}</b><span class="pc">×${n}</span></div>`).join("")}</div>`);
@@ -3164,6 +3187,7 @@ document.addEventListener("click", async (e) => {
     case "gamba-buy": gambaBuy(); break;
     case "gamba-odds": gambaOdds(); break;
     case "junk": junkSheet(); break;
+    case "steps-week": stepsSheet(); break;
     case "house-pay": housePay(d.id); break;
     case "house-pay-go": housePay(d.id, true); break;
     case "chapter": playChapter(Number(d.k)); break;

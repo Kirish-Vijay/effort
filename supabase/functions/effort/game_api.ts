@@ -108,6 +108,18 @@ async function debtFor(db: Any, id: string, day: string) {
   const { data } = await db.from("step_adjust").select("steps").eq("player_id", id).eq("day", day);
   return (data ?? []).reduce((s: number, r: Any) => s + r.steps, 0);
 }
+// This week (Monday to Sunday) for one player: what the phone counted each day, and anything the game took off.
+async function stepWeek(db: Any, id: string, today: string) {
+  const from = mondayOf(today), to = addDays(from, 6);
+  const [st, adj] = await Promise.all([
+    db.from("daily_steps").select("day,steps").eq("player_id", id).gte("day", from).lte("day", to),
+    db.from("step_adjust").select("day,steps,reason").eq("player_id", id).gte("day", from).lte("day", to),
+  ]);
+  return daysFrom(from, to).map((day) => ({
+    day, raw: (st.data ?? []).find((r: Any) => r.day === day)?.steps ?? null,
+    cuts: (adj.data ?? []).filter((r: Any) => r.day === day).map((r: Any) => ({ steps: r.steps, why: r.reason })),
+  }));
+}
 async function scrollFor(db: Any, id: string, from: string, to: string) {
   const { data } = await db.from("daily_scroll").select("day,minutes,auto_minutes").eq("player_id", id).gte("day", from).lte("day", to);
   return Object.fromEntries((data ?? []).map((r: Any) => [r.day, r.minutes ?? r.auto_minutes ?? 0]));
@@ -363,10 +375,11 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (settled || squad) L = (await ledgerFor(db, [player.id]))[player.id];
       const today = localDate(now, tz);
       const tw = taxWindow(now, tz, test), rw = raidWindow(now, test);
-      const [{ data: fight }, debt, { data: scroll }] = await Promise.all([
+      const [{ data: fight }, debt, { data: scroll }, myWeek] = await Promise.all([
         db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", today).maybeSingle(),
         debtFor(db, player.id, today),
         db.from("daily_scroll").select("minutes,auto_minutes").eq("player_id", player.id).eq("day", today).maybeSingle(),
+        stepWeek(db, player.id, today),
       ]);
       const { data: raw } = await db.from("daily_steps").select("steps").eq("player_id", player.id).eq("day", today).maybeSingle();
       let squadOut = null, raid = null, lastRaid = null, hunt = null;
@@ -401,6 +414,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         wallet: L.wallet, xp: L.xp, inv: L.inv,
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
           scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, scrollLinked: scrollLinked(player) },
+        stepWeek: myWeek,
         fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now, den), hunt, chat: { latest: await chatLatest(db, squad) },
         features: Object.fromEntries(Object.keys(G.FEATURES).map((f) => [f, G.featureOn(f, gameDay(squad, now))])), gameDay: gameDay(squad, now),
         ledger: L.rows.slice(0, 25).map((r: Any) => ({ kind: r.kind, ref: r.ref, amount: r.amount, note: r.note, at: r.at })),

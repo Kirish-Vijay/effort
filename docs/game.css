@@ -952,3 +952,26 @@ body.typing .chatview .ccomposer { padding-bottom: calc(env(safe-area-inset-bott
 .gift-text { margin: 0 0 14px; font: 400 21px/1.3 var(--display); color: var(--text); }
 .gift-card .gr-win { font: 400 30px/1.1 var(--display); color: var(--gold-hi); margin-bottom: 10px; }
 @keyframes fadein { from { opacity: 0; } }
+
+/* Steps this week: walked vs counted. The bar is what you walked; a hatched red cap is what the game took off. */
+.tilebtn { text-align: left; color: inherit; font: inherit; cursor: pointer; width: 100%; }
+.tilebtn .k .ic { margin-left: auto; opacity: .6; }
+.tilebtn:active { transform: translateY(1px); }
+s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-color: rgba(255,77,94,.8); }
+.cut-t { color: #ff9aa3; }
+.sw-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-bottom: 12px; }
+.sw-total b { font: 400 34px/1 var(--display); }
+.sw-total .cut-t { flex-basis: 100%; }
+.sw-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; height: 132px; padding: 10px 10px 0; border-radius: 14px; background: var(--inset); border: 2px solid var(--ink); box-shadow: inset 0 2px 4px rgba(0,0,0,.4); margin-bottom: 10px; }
+.sw-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
+.sw-col span { font: 700 11px/1 var(--ui); color: var(--text-3); padding: 6px 0 8px; }
+.sw-col.now span { color: var(--gold-hi); }
+.sw-bar { position: relative; width: 100%; max-width: 30px; border-radius: 7px 7px 3px 3px; background: linear-gradient(180deg, var(--gold-hi), var(--gold) 60%, var(--gold-lo)); border: 2px solid var(--ink); overflow: hidden; }
+.sw-col:not(.now) .sw-bar { background: linear-gradient(180deg, #e3cf96, #c9a457 60%, #a8823a); }
+.sw-col.later .sw-bar { visibility: hidden; }
+.sw-lost { position: absolute; left: 0; right: 0; top: 0; display: block; border-bottom: 2px solid var(--ink);
+  background: repeating-linear-gradient(135deg, var(--red) 0 4px, var(--red-lo) 4px 8px); }
+.sw-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.sw-row .num { font: 400 17px/1 var(--display); font-variant-numeric: tabular-nums; }
+.sw-row s.was { font-size: 13px; }
+.sw-why { flex-basis: 100%; display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: #ffb3b9; }

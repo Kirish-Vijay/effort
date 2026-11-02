@@ -166,3 +166,51 @@ game beats novelty.
 
 In-game captures of Candy Crush, Mario Wonder, Slay the Spire, Pikmin Bloom and Genshin were not taken (they need
 the games running). Techniques only were taken from all references: no art, text or logos are copied.
+
+---
+
+# Weekly steps breakdown (added 1 Nov 2026)
+
+## Outcome
+
+Anyone in the squad can open one sheet and see, day by day for Monday to Sunday, how many steps their phone
+counted and how many the game used. When the game takes steps off (today that's only raid paralysis, −2,500 the
+next day), the walked number and the counted number must both be visible and look different, with the reason in
+plain words, so nobody thinks the app lost their steps. Same people as above; same game UI, so this is about
+component and data display, not identity.
+
+## References
+
+1. **Pedometer++** ([App Store](https://apps.apple.com/us/app/pedometer/id712286167), [site](https://pedometer.app/)).
+   The cleanest weekly step chart in the category: one bar per day, colour carries meaning. Its reviews are the
+   real lesson: the top complaints are "steps go missing" and "how on earth did I lose almost 5000 steps", from
+   numbers that changed without a visible reason. Changed numbers must always explain themselves.
+2. **Garmin Connect weekly steps** ([Connect IQ Weekly Steps](https://apps.garmin.com/en-US/apps/37189374-e62f-4718-af78-528fbee66ab1),
+   [forum ask for a Mon–Sun view](https://forums.garmin.com/apps-software/mobile-apps-web/f/garmin-connect-mobile-ios/435987/weekly-step-count-total-view-please)).
+   Users explicitly want "week to date, Monday to Sunday" with a week total up top.
+3. **StepsApp** ([steps.app](https://steps.app/)). Weekly bar charts read at a glance; reviewers single out
+   "weekly report" and "visual weekly progress" as why they stay.
+4. **Monzo / bank statements** *(play knowledge)*. A changed transaction keeps the original visible, with an
+   adjustment line under it saying what changed and why, in a different colour.
+5. **Was/now pricing** *(play knowledge)*. A struck-through original next to the new number is the most widely
+   understood "this number was altered" signal there is.
+6. **Duolingo streak calendar** *(play knowledge)*. A day changed by a game mechanic (streak freeze) gets its own
+   icon and colour, never mistaken for an ordinary day.
+
+## Steal list
+
+| Decision | From | What we take | Why it suits this squad |
+|---|---|---|---|
+| Seven bars, Mon–Sun, today highlighted | Pedometer++, Garmin | One bar per day; week runs Monday to Sunday like the raid week | Matches the game's week (raid on Sunday) |
+| Lost steps drawn as a hatched red cap on the bar | Pedometer++ colour-carries-meaning + Duolingo freeze day | Bar height = what you walked; the solid part = what counted; the cut is a striped red segment on top | Raw vs counted readable without reading numbers |
+| Week total up top, "walked" under it only if different | Garmin, StepsApp | Big counted total; a small "Walked 52,300" line appears only when something was taken | No extra text on normal weeks (minimal copy rule) |
+| Day rows: struck-through walked number, counted number in red | Was/now pricing, Monzo | `~~10,412~~ 7,912` | Instantly says "altered", keeps the original |
+| Reason line under an altered row | Monzo | "⚡ Paralysed in the raid · −2,500" | Answers "where did my steps go?" (Pedometer++ reviews) |
+| Opened by tapping the Earned today tile | StepsApp (tap a number for history) | The tile showing today's steps is the entry point | Where people already look for steps |
+
+## Fonts and banned defaults
+
+Unchanged: the app's own Lilita One (display) and Rubik (UI), both SIL Open Font Licence. No new fonts, no
+gradients, no glows; the red is the app's existing `--red`, the hatch is the only new texture.
+
+Result screenshot: `effort-steps-week-mobile.jpg` (a test week with one paralysed day).
