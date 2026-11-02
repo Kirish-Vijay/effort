@@ -108,18 +108,19 @@ async function debtFor(db: Any, id: string, day: string) {
   const { data } = await db.from("step_adjust").select("steps").eq("player_id", id).eq("day", day);
   return (data ?? []).reduce((s: number, r: Any) => s + r.steps, 0);
 }
-// This week (Monday to Sunday) for one player: what the phone counted each day, and anything the game took off.
-async function stepWeek(db: Any, id: string, today: string) {
+// A week (Monday to Sunday) for each player: what the phone counted each day, and anything the game took off.
+async function stepWeeks(db: Any, ids: string[], today: string) {
   const from = mondayOf(today), to = addDays(from, 6);
   const [st, adj] = await Promise.all([
-    db.from("daily_steps").select("day,steps").eq("player_id", id).gte("day", from).lte("day", to),
-    db.from("step_adjust").select("day,steps,reason").eq("player_id", id).gte("day", from).lte("day", to),
+    db.from("daily_steps").select("player_id,day,steps").in("player_id", ids).gte("day", from).lte("day", to),
+    db.from("step_adjust").select("player_id,day,steps,reason").in("player_id", ids).gte("day", from).lte("day", to),
   ]);
-  return daysFrom(from, to).map((day) => ({
-    day, raw: (st.data ?? []).find((r: Any) => r.day === day)?.steps ?? null,
-    cuts: (adj.data ?? []).filter((r: Any) => r.day === day).map((r: Any) => ({ steps: r.steps, why: r.reason })),
-  }));
+  return Object.fromEntries(ids.map((id) => [id, daysFrom(from, to).map((day) => ({
+    day, raw: (st.data ?? []).find((r: Any) => r.player_id === id && r.day === day)?.steps ?? null,
+    cuts: (adj.data ?? []).filter((r: Any) => r.player_id === id && r.day === day).map((r: Any) => ({ steps: r.steps, why: r.reason })),
+  }))]));
 }
+const stepWeek = async (db: Any, id: string, today: string) => (await stepWeeks(db, [id], today))[id];
 async function scrollFor(db: Any, id: string, from: string, to: string) {
   const { data } = await db.from("daily_scroll").select("day,minutes,auto_minutes").eq("player_id", id).gte("day", from).lte("day", to);
   return Object.fromEntries((data ?? []).map((r: Any) => [r.day, r.minutes ?? r.auto_minutes ?? 0]));
@@ -386,14 +387,16 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const den = squad ? await denFor(db, squad) : null;
       if (squad) {
         await finishStale(db, squad, now);
-        const week = await weekRows(db, squad, mondayOf(localDate(now, SQUAD_TZ)), localDate(now, SQUAD_TZ));
-        const ledgers = await ledgerFor(db, squad.members.map((m: Any) => m.id));
+        const ids = squad.members.map((m: Any) => m.id);
+        const [week, ledgers, days] = await Promise.all([
+          weekRows(db, squad, mondayOf(localDate(now, SQUAD_TZ)), localDate(now, SQUAD_TZ)), ledgerFor(db, ids), stepWeeks(db, ids, localDate(now, SQUAD_TZ)),
+        ]);
         squadOut = {
           code: squad.group.code, name: squad.group.name, tier: squad.group.tier, test_until: squad.group.test_until, bosses: bossChoice(squad.group, gameDay(squad, now)), den,
           members: squad.members.map((m: Any) => {
             const w = week.find((x: Any) => x.id === m.id), Lm = ledgers[m.id];
             return { id: m.id, name: m.name, character: m.character, wear: m.cosmetics || {}, gear: cleanGear(m.gear, Lm.inv), pos: m.raid_pos, level: level(Lm),
-              weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, goalDays: w.goalDays, synced: m.steps_synced_at, joined_at: m.joined_at };
+              weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, goalDays: w.goalDays, synced: m.steps_synced_at, joined_at: m.joined_at, days: days[m.id] };
           }),
         };
         const [{ data: cur }, { data: last }] = await Promise.all([

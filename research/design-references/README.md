@@ -214,3 +214,42 @@ Unchanged: the app's own Lilita One (display) and Rubik (UI), both SIL Open Font
 gradients, no glows; the red is the app's existing `--red`, the hatch is the only new texture.
 
 Result screenshot: `effort-steps-week-mobile.jpg` (a test week with one paralysed day).
+
+---
+
+# Steps leaderboard and each person's week (added 2 Nov 2026)
+
+## Outcome
+
+One ranked list of the squad's steps for the week (or today), where tapping anyone opens their week: what they
+walked each day, what counted, anything taken off and why, plus the handful of numbers friends actually compare
+(rank, daily average, best day, raid power). It has to settle "who's actually walking?" in a glance and make
+trash talk in squad chat easy to back up.
+
+## References
+
+1. **Strava club leaderboard** *(play knowledge)*. Weekly, Monday-reset, ranked by distance; your own row is
+   highlighted; tapping an athlete opens their profile and recent activity.
+2. **Garmin Connect / Fitbit friends leaderboards** *(play knowledge; Fitbit's 7-day steps board)*. Steps are
+   ranked over a rolling or calendar week with a today/week switch; the number is the hero of each row.
+3. **Duolingo leagues** *(play knowledge)*. Rank numbers, a highlighted "you" row, and clearly coloured top and
+   bottom zones, which map straight onto Effort's Top walker / Dead weight.
+4. **Clash Royale clan member list** *(play knowledge)*. Tap a member for a profile card with a few stats in tiles,
+   in the same chunky game UI Effort already uses.
+5. **Pedometer++ / bank statement pattern** (from the board above). Changed numbers always carry the original and
+   the reason.
+
+## Steal list
+
+| Decision | From | What we take | Why |
+|---|---|---|---|
+| Week / Today switch on the leaderboard | Garmin, Fitbit | Two chips; rows re-rank | "Who's walked most today?" is the daily question; the week decides Sunday |
+| Rank number, crown for the top, red for the bottom | Duolingo, existing table | Keep Effort's Top walker / Dead weight colours | Already in the game; leaderboard just makes it the main event |
+| Steps as the biggest number in each row | Garmin, Strava | One large number, small label under it | The thing being compared should be the loudest |
+| A red "−2,500" tag on anyone who lost steps this week | Pedometer++ lesson, bank pattern | Shown on the row itself | Nobody wonders why someone's total looks low |
+| Tap a person for their week: tiles, bars, day rows | Clash Royale member card, Strava profile | Rank, daily average, best day, raid power, then the same week chart and rows as your own | Same component everywhere, so it reads the same for anyone |
+| "Walker and gear" button on their week | Existing profile sheet | Walker, class and gear stay one tap away | Keeps what the old tap did |
+
+Fonts and palette unchanged (Lilita One, Rubik; existing tokens).
+
+Result screenshots: `effort-leaderboard-mobile.jpg` (test squad, one player paralysed) and `effort-person-week-mobile.jpg` (tapping them).

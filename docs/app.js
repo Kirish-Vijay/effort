@@ -1030,20 +1030,25 @@ function startHunt() {
 // ---------- This week: the table everything hangs off ----------
 function weekPanel() {
   if (!squad()) return noSquadPanel();
-  const T = weekRows(), top = Math.max(1, ...T.rows.map((r) => r.weekSteps));
-  const today = (id) => squad().members.find((m) => m.id === id)?.todaySteps ?? 0;
+  const T = weekRows(), by = S.lbBy === "today" ? "today" : "week";
+  const todayOf = (id) => (id === me().id ? S.D.today.steps : squad().members.find((m) => m.id === id)?.todaySteps ?? 0);
+  const rows = T.rows.map((r) => ({ ...r, today: todayOf(r.id), lost: weekDays(r.id).reduce((a, d) => a + d.lost, 0) }));
+  if (by === "today") rows.sort((a, b) => b.today - a.today);
+  const val = (r) => (by === "today" ? r.today : r.weekSteps), top = Math.max(1, ...rows.map(val));
+  const avg = by === "today" ? rows.reduce((a, r) => a + r.today, 0) / Math.max(1, rows.length) : T.avg;
   return `<section class="panel" id="week-panel">
-      <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">This week</h2><span class="side chip">Avg ${fmt(T.avg)}</span></div>
-      <div class="wtable">${T.rows.map((r, i) => `<button class="wrow ${r.you ? "me" : ""} ${r.title || ""}" data-profile="${r.id}" aria-label="${esc(r.you ? "Your" : `${r.name}'s`)} profile">
-          <span class="wn">${r.title === "top" ? ic("crown") : i + 1}</span>
+      <div class="ptitle"><span class="ic-badge">${ic("trophy")}</span><h2 class="ol-sm">Steps leaderboard</h2><span class="side chip">Avg ${fmt(avg)}</span></div>
+      <div class="seg" style="margin-bottom:8px"><button data-act="lb-by" data-by="week" aria-pressed="${by === "week"}">This week</button><button data-act="lb-by" data-by="today" aria-pressed="${by === "today"}">Today</button></div>
+      <div class="wtable">${rows.map((r, i) => { const t = by === "week" ? r.title : null; return `<button class="wrow ${r.you ? "me" : ""} ${t || ""}" data-steps="${r.id}" aria-label="${esc(r.you ? "Your" : `${r.name}'s`)} week">
+          <span class="wn">${t === "top" ? ic("crown") : i + 1}</span>
           <span class="wface">${face(r.id, 36)}</span>
-          <span class="grow"><b>${esc(r.you ? "You" : r.name)}</b>${r.title === "top" ? '<span class="chip gold">Top walker</span>' : r.title === "last" ? '<span class="chip red">Dead weight</span>' : r.fresh ? '<span class="chip">New</span>' : ""}
-            <i class="wbar"><s style="width:${(r.weekSteps / top) * 100}%"></s></i>
+          <span class="grow" style="min-width:0"><b>${esc(r.you ? "You" : r.name)}</b>${t === "top" ? '<span class="chip gold">Top walker</span>' : t === "last" ? '<span class="chip red">Dead weight</span>' : by === "week" && r.fresh ? '<span class="chip">New</span>' : ""}
+            <i class="wbar"><s style="width:${(val(r) / top) * 100}%"></s></i>
             <small class="pw ${r.stride > 1 ? "up" : r.stride < 1 ? "down" : ""}">×${r.stride.toFixed(2)} raid power</small></span>
-          <span class="ws"><span><b class="num">${fmt(today(r.id))}</b><small>today</small></span><span><b class="num">${fmt(r.weekSteps)}</b><small>week</small></span></span>
-        </button>`).join("")}</div>
+          <span class="lbn"><b class="num">${fmt(val(r))}</b><small>${by === "today" ? "today" : "this week"}</small>${by === "week" && r.lost ? `<small class="cut-t">${ic("bolt")}−${fmt(r.lost)}</small>` : ""}</span>
+        </button>`; }).join("")}</div>
       <button class="invite-row" data-act="invite">${ic("share")}<span class="grow">Invite to ${esc(squad().name)}</span><span class="small muted">Code</span><b class="code-chip">${squad().code}</b></button>
-      <p class="tiny faint" style="margin:10px 0 0">Tap anyone to see their walker and stats. Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
+      <p class="tiny faint" style="margin:10px 0 0">Tap anyone for their week. Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
     </section>`;
 }
 function noSquadPanel() {
@@ -1382,16 +1387,32 @@ const pickJunk = () => {
   return j;
 };
 const junkDrawer = () => store.get(`junk:${me().id}`) || {};
-// This week's steps, Monday to Sunday: what you walked, and what counted after anything the game took off.
+// Anyone's week, Monday to Sunday: what they walked, anything the game took off (and why), and what counted.
+// Yours comes in your own time zone and live; squad-mates' come with the squad data.
 const CUT_WHY = { paralysed: "Paralysed in the raid" };
-function stepsSheet() {
-  const today = S.D.today.day;
-  const days = (S.D.stepWeek || []).map((d) => {
-    const raw = d.day === today ? S.D.today.rawSteps : d.raw ?? 0, cut = d.cuts.reduce((a, c) => a + c.steps, 0), lost = Math.min(cut, raw);
+function weekDays(id) {
+  const you = id === me().id, today = S.D.today.day;
+  const src = (you && S.D.stepWeek) || squad()?.members.find((m) => m.id === id)?.days || [];
+  return src.map((d) => {
+    const raw = you && d.day === today ? S.D.today.rawSteps : d.raw ?? 0, cut = d.cuts.reduce((a, c) => a + c.steps, 0), lost = Math.min(cut, raw);
     return { ...d, raw, cut, lost, counted: raw - lost, future: d.day > today };
   });
+}
+function stepsSheet(id = me().id) {
+  const you = id === me().id, x = you ? me() : squad()?.members.find((m) => m.id === id);
+  if (!x) return;
+  const today = S.D.today.day, days = weekDays(id);
   const sum = (k) => days.reduce((a, d) => a + d[k], 0), top = Math.max(1, ...days.map((d) => d.raw));
   const wd = (day) => new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" });
+  const walked = sum("raw"), counted = sum("counted"), past = days.filter((d) => !d.future);
+  const best = past.reduce((b, d) => (!b || d.counted > b.counted ? d : b), null);
+  const T = squad() ? weekRows() : null, row = T?.rows.find((r) => r.id === id);
+  const tiles = [
+    row && `<div class="tile gold"><div class="k">${ic("trophy")} Rank</div><div class="v">#${T.rows.indexOf(row) + 1}<small>of ${T.rows.length}</small></div></div>`,
+    `<div class="tile"><div class="k">${ic("steps")} Daily average</div><div class="v num">${fmt(counted / Math.max(1, past.length))}</div></div>`,
+    best?.counted ? `<div class="tile green"><div class="k">${ic("star")} Best day</div><div class="v num">${fmt(best.counted)}<small>${wd(best.day)}</small></div></div>` : "",
+    row && `<div class="tile cyan"><div class="k">${ic("bolt")} Raid power</div><div class="v">×${row.stride.toFixed(2)}</div></div>`,
+  ].filter(Boolean).join("");
   const bars = days.map((d) => `<div class="sw-col${d.day === today ? " now" : d.future ? " later" : ""}">
       <div class="sw-bar" style="height:${d.future ? 0 : Math.max(2, (d.raw / top) * 100)}%">${d.lost ? `<i class="sw-lost" style="height:${(d.lost / d.raw) * 100}%"></i>` : ""}</div>
       <span>${wd(d.day)[0]}</span></div>`).join("");
@@ -1399,11 +1420,12 @@ function stepsSheet() {
       <b class="grow">${wd(d.day)}${d.day === today ? " · today" : ""}</b>
       ${d.future ? `<span class="faint">–</span>` : d.cut ? `<s class="was">${fmt(d.raw)}</s><span class="cut-t num">${fmt(d.counted)}</span>` : `<span class="num">${fmt(d.counted)}</span>`}
       ${d.cuts.map((c) => `<div class="sw-why">${ic("bolt")} ${esc(CUT_WHY[c.why] || "Taken off")} · −${fmt(c.steps)}</div>`).join("")}</div>`).join("");
-  const walked = sum("raw"), counted = sum("counted");
-  openSheet(`${sheetHead("Steps this week")}
-    <div class="sw-total"><b class="num">${fmt(counted)}</b><span class="small muted">counted</span>${walked !== counted ? `<span class="small cut-t">Walked ${fmt(walked)} · −${fmt(walked - counted)}</span>` : ""}</div>
+  openSheet(`${sheetHead(you ? "Your steps" : `${esc(x.name)}'s steps`)}
+    <div class="sw-who">${face(id, 48)}<div class="sw-total"><b class="num">${fmt(counted)}</b><span class="small muted">this week</span>${walked !== counted ? `<span class="small cut-t">Walked ${fmt(walked)} · −${fmt(walked - counted)}</span>` : ""}</div></div>
+    <div class="tiles" style="margin-bottom:10px">${tiles}</div>
     <div class="sw-chart">${bars}</div>
-    <div class="sw-rows">${rows}</div>`);
+    <div class="sw-rows">${rows}</div>
+    ${squad() ? `<button class="btn block" style="margin-top:14px" data-profile="${id}">${ic("squad")} Walker and gear</button>` : ""}`);
 }
 function junkSheet() {
   const d = Object.entries(junkDrawer()).sort((a, b) => b[1] - a[1]);
@@ -3083,6 +3105,7 @@ document.addEventListener("click", async (e) => {
   if (d.shopslot) { S.shopSlot = d.shopslot; render(); return; }
   if (d.shopstyle) { S.shopStyle = d.shopstyle; render(); return; }
   if (d.profile) { profileSheet(d.profile); FX.play("tap"); return; }
+  if (d.steps) { stepsSheet(d.steps); FX.play("tap"); return; }
   if (d.item) { itemSheet(d.item, d.deal === "1"); FX.play("tap"); return; }
   if (d.skin) { skinSheet(d.skin); FX.play("tap"); return; }
   if (d.buy) { const item = G.itemById(d.buy); return shopAction("buy", { item: d.buy, deal: d.deal === "1" }, () => { FX.play("buy"); itemSheet(item.id, false); toast(`${item.name} equipped`); }); }
@@ -3188,6 +3211,7 @@ document.addEventListener("click", async (e) => {
     case "gamba-odds": gambaOdds(); break;
     case "junk": junkSheet(); break;
     case "steps-week": stepsSheet(); break;
+    case "lb-by": S.lbBy = t.dataset.by; render(); break;
     case "house-pay": housePay(d.id); break;
     case "house-pay-go": housePay(d.id, true); break;
     case "chapter": playChapter(Number(d.k)); break;
@@ -3207,7 +3231,7 @@ document.addEventListener("visibilitychange", () => {
     if (document.hidden) { v.ch.untrack(); v.host = false; }
     else { v.joinedAt = now(); v.ch.track({ at: v.joinedAt }); }
   }
-  if (!document.hidden && S.view === "main") { refresh(true); checkForUpdate(); checkAppUpdate(); if (needsAccount() || !S.auth) checkAuth(); }
+  if (!document.hidden && S.view === "main") { if (updateSafe()) { location.reload(); return; } refresh(true); checkForUpdate(true); checkAppUpdate(); if (needsAccount() || !S.auth) checkAuth(); }
 });
 
 // ---------- updates ----------
@@ -3215,9 +3239,9 @@ document.addEventListener("visibilitychange", () => {
 // back to the front and every few minutes, and reload into the new version when nothing's in progress.
 let releaseTag = null, updateReady = false;
 // A new version is on the site: load it the next time the game goes into the background (switching apps,
-// locking the phone), so it never reloads in front of you. Never during a fight or with a sheet open.
+// locking the phone), or straight away when it's just been reopened. Never during a fight or with a sheet open.
 const updateSafe = () => updateReady && ["main", "welcome"].includes(S.view) && !V.tax && !V.raid && $("#sheet").hidden;
-async function checkForUpdate() {
+async function checkForUpdate(reopened = false) {
   if (location.protocol !== "https:") return;
   try {
     const res = await fetch("app.js", { method: "HEAD", cache: "no-store" });
@@ -3225,6 +3249,7 @@ async function checkForUpdate() {
     if (!tag) return;
     if (!releaseTag) { releaseTag = tag; return; }
     if (tag !== releaseTag) updateReady = true;
+    if (reopened && updateSafe()) location.reload();
   } catch { /* offline: try again later */ }
 }
 setInterval(() => { if (!document.hidden) checkForUpdate(); }, 5 * 60000);

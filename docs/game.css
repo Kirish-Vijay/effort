@@ -975,3 +975,12 @@ s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-co
 .sw-row .num { font: 400 17px/1 var(--display); font-variant-numeric: tabular-nums; }
 .sw-row s.was { font-size: 13px; }
 .sw-why { flex-basis: 100%; display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: #ffb3b9; }
+
+/* Steps leaderboard: the number being compared is the biggest thing in each row. */
+.wrow .lbn { display: grid; gap: 3px; justify-items: end; text-align: right; }
+.wrow .lbn b { margin: 0; font-size: 19px; }
+.wrow .lbn small { font: 700 10px/1 var(--ui); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.wrow .lbn small.cut-t { display: inline-flex; align-items: center; gap: 2px; color: #ff9aa3; letter-spacing: 0; }
+.wrow .lbn .ic { width: 11px; height: 11px; }
+.sw-who { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.sw-who .sw-total { margin: 0; }
