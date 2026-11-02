@@ -37,6 +37,27 @@ async function shape(groupId: string, r: Any) {
 }
 const COLS = "id,player_id,iv,body,reply_to,created_at,edited_at,deleted";
 
+// Who a message mentions: @everyone is the whole squad, @Name is that squad-mate (the whole name, not the start of a
+// longer one). Never the sender.
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function mentioned(text: string, squad: Any, by: string): string[] {
+  const all = /@everyone\b/i.test(text);
+  return squad.members.filter((m: Any) => m.id !== by && (all || new RegExp(`@${escRe(m.name)}(?![\\p{L}\\p{N}])`, "iu").test(text))).map((m: Any) => m.id);
+}
+// Phones with browser notifications on get pinged straight away (the effort-push function sends them). The Android
+// app has no browser push; it asks for its mentions every 15 minutes instead (chat_pings).
+async function notifyMentions(db: Any, squad: Any, from: Any, text: string) {
+  const ids = mentioned(text, squad, from.id);
+  if (!ids.length) return;
+  const { data: cfg } = await db.from("app_config").select("value").eq("key", "cron_key").maybeSingle();
+  if (!cfg) return;
+  const all = /@everyone\b/i.test(text);
+  await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/effort-push/mention`, {
+    method: "POST", headers: { "content-type": "application/json", "x-cron-key": cfg.value },
+    body: JSON.stringify({ ids, title: all ? `${from.name} to everyone in ${squad.group.name}` : `${from.name} mentioned you`, body: text.slice(0, 180) }),
+  }).catch((e) => console.error("mention push failed", e));
+}
+
 export async function chatRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; player: Any; squad: Any }) {
   const { db, json, fail, player, squad } = ctx;
   if (!squad) return fail("Join a squad to chat");
@@ -74,6 +95,10 @@ export async function chatRoute(action: string, body: Any, ctx: { db: Any; json:
       const sealed = await seal(gid, text);
       const { data, error } = await db.from("chat_messages").insert({ group_id: gid, player_id: player.id, ...sealed, reply_to: reply }).select(COLS).single();
       if (error) throw error;
+      // Send the mention pings without making the sender wait for them.
+      const ping = notifyMentions(db, squad, player, text);
+      const rt = (globalThis as Any).EdgeRuntime;
+      if (rt?.waitUntil) rt.waitUntil(ping); else await ping;
       return json({ ok: true, message: await shape(gid, data) });
     }
     case "chat_edit": {
@@ -109,6 +134,20 @@ export async function chatRoute(action: string, body: Any, ctx: { db: Any; json:
         if (data.length < 500) break;
       }
       return json({ ok: true, results: out.slice(0, 50), scanned });
+    }
+    // The Effort app (Android) asks every 15 minutes for messages that mention you since it last looked. With no
+    // `after` it just learns where the chat is up to, so a first run doesn't dig up old mentions.
+    case "chat_pings": {
+      const after = Number(body.after) || 0;
+      const { data: top } = await db.from("chat_messages").select("id").eq("group_id", gid).order("id", { ascending: false }).limit(1);
+      const latest = top?.[0]?.id ?? 0;
+      if (after <= 0) return json({ ok: true, latest, pings: [] });
+      const { data } = await db.from("chat_messages").select(COLS).eq("group_id", gid).gt("id", after).eq("deleted", false)
+        .neq("player_id", player.id).order("id", { ascending: true }).limit(50);
+      const pings = (await list(data)).filter((m) => m.text && mentioned(m.text, squad, m.by).includes(player.id)).map((m) => ({
+        id: m.id, from: squad.members.find((x: Any) => x.id === m.by)?.name || "Someone", text: m.text.slice(0, 180), all: /@everyone\b/i.test(m.text),
+      }));
+      return json({ ok: true, latest: Math.max(latest, after), pings, squad: squad.group.name });
     }
     default:
       return null;

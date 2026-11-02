@@ -60,6 +60,10 @@ class MainActivity : ComponentActivity() {
             if (ok) live.start()
             pushStatus()
         }
+    // Asked once after signing in, so chat mentions can show (Android 13+ needs it); evening reminders stay off
+    // until they're turned on in the game.
+    private val askChatNotify: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { _: Boolean -> pushStatus() }
     private val askNotify: ActivityResultLauncher<String> =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok: Boolean ->
             if (ok) { Reminders.enable(this, true); Reminders.show(this, test = true) }
@@ -167,6 +171,14 @@ class MainActivity : ComponentActivity() {
         askMotion.launch(Manifest.permission.ACTIVITY_RECOGNITION)
     }
 
+    private fun askNotifyOnce() {
+        if (Build.VERSION.SDK_INT < 33 || Reminders.canNotify(this) || Sync.token(this) == null) return
+        val p = Sync.prefs(this)
+        if (p.getBoolean("askedNotify", false)) return
+        p.edit().putBoolean("askedNotify", true).apply()
+        askChatNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     private fun openOutside(u: Uri) {
         try { startActivity(Intent(Intent.ACTION_VIEW, u)) } catch (e: Exception) { /* nothing can open it */ }
     }
@@ -181,6 +193,7 @@ class MainActivity : ComponentActivity() {
             stepsOn = health == "ok" && Sync.stepsAllowed(this@MainActivity)
             pushStatus()
             askMotionOnce()
+            askNotifyOnce()
             if (Sync.token(this@MainActivity) == null || !(stepsOn || Sync.scrollAllowed(this@MainActivity))) return@launch
             Sync.schedule(this@MainActivity)
             lastError = try { Sync.run(this@MainActivity); null } catch (e: Exception) { e.message }

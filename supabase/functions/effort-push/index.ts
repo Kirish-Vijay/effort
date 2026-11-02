@@ -6,6 +6,7 @@
 //   POST /unsubscribe  {token, endpoint}  this phone doesn't
 //   POST /test         {token}            send yourself one now
 //   POST /tick         pg_cron calls this on the hour and half hour; it pings everyone whose local time is 5pm or 9pm
+//   POST /mention      {ids, title, body}  the effort function, when a chat message @mentions people (or @everyone)
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import webpush from "npm:web-push@3.6.7";
 import { rules } from "./rules.ts";
@@ -60,12 +61,12 @@ async function playerByToken(token: unknown) {
 }
 
 // Send one message to every phone a player has; phones that have gone away (404/410) are forgotten.
-async function sendTo(subs: Any[], msg: Any) {
+async function sendTo(subs: Any[], msg: Any, ttl = 15 * 60) {
   await keys();
   let sent = 0;
   await Promise.all(subs.map(async (s) => {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(msg), { TTL: 15 * 60, urgency: "high", topic: msg.tag });
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(msg), { TTL: ttl, urgency: "high", topic: msg.tag });
       sent++;
     } catch (e) {
       const code = (e as Any)?.statusCode;
@@ -187,6 +188,18 @@ Deno.serve(async (req) => {
           }
         }
         return json({ ok: true, due: count, sent });
+      }
+
+      // A chat mention: only the effort function calls this (it has the cron key). Kept for 6 hours, since a mention
+      // read late is still worth reading, unlike a Taxman reminder.
+      case "mention": {
+        const { data: cfg } = await db.from("app_config").select("value").eq("key", "cron_key").maybeSingle();
+        if (!cfg || req.headers.get("x-cron-key") !== cfg.value) return fail("Not allowed", 403);
+        const ids = (Array.isArray(body.ids) ? body.ids : []).filter((x: unknown) => typeof x === "string").slice(0, 200);
+        if (!ids.length) return json({ ok: true, sent: 0 });
+        const { data: subs } = await db.from("push_subs").select("endpoint,p256dh,auth").in("player_id", ids);
+        const sent = await sendTo(subs ?? [], { title: String(body.title ?? "").slice(0, 80), body: String(body.body ?? "").slice(0, 200), tag: "chat", url: APP }, 6 * 3600);
+        return json({ ok: true, sent });
       }
 
       default:

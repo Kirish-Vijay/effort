@@ -96,6 +96,7 @@ object Sync {
                 post("scroll_minutes", JSONObject().put("token", token).put("minutes", scrollMinutes(c, today.minusDays(1))).put("date", today.minusDays(1).toString()))
                 get("scroll?t=${URLEncoder.encode(token, "UTF-8")}&minutes=${scrollMinutes(c, today)}")
             }
+            try { chatPings(c, token) } catch (e: Unlinked) { throw e } catch (e: Exception) { /* next time */ }
         } catch (e: Unlinked) {
             setToken(c, null) // the account is gone: stop syncing until they sign in again
             throw e
@@ -140,6 +141,39 @@ object Sync {
         }
         openSince.values.forEach { total += end - it } // still open
         return (total / 60000).coerceIn(0, 1440)
+    }
+
+    // Squad chat messages that @mention this player (or @everyone) since the last look, as notifications. The app has
+    // no browser push, so it asks every 15 minutes with the background sync. The first time it only learns where the
+    // chat's up to, so it never digs up old mentions.
+    private suspend fun chatPings(c: Context, token: String) {
+        val seen = prefs(c).getLong("chatSeen", 0)
+        val r = postJson("chat_pings", JSONObject().put("token", token).put("after", seen))
+        val pings = r.optJSONArray("pings")
+        if (pings != null && Reminders.canNotify(c)) for (i in 0 until pings.length()) {
+            val p = pings.getJSONObject(i)
+            val title = if (p.optBoolean("all")) "${p.optString("from")} to everyone in ${r.optString("squad")}" else "${p.optString("from")} mentioned you"
+            Reminders.chat(c, p.optLong("id"), title, p.optString("text"))
+        }
+        prefs(c).edit().putLong("chatSeen", r.optLong("latest", seen)).apply()
+    }
+
+    private suspend fun postJson(path: String, body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        val conn = URL("$API/$path").openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = conn.responseCode
+            if (code == 401) throw Unlinked()
+            if (code !in 200..299) throw IllegalStateException("Effort's server said no ($code)")
+            JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private suspend fun post(path: String, body: JSONObject) = send(path) { conn ->

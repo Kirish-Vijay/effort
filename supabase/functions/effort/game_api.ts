@@ -13,7 +13,7 @@
 //   POST /wardrobe     buy or wear cosmetics (and wear skins from The House)
 //   POST /gamba        buy one of Winny's Gamba Buckets
 //   POST /hunt_finish  Wednesday's Midweek Hunt: report the fight, get your share
-//   POST /chat_list | /chat_around | /chat_send | /chat_edit | /chat_delete | /chat_search   squad chat (see chat.ts)
+//   POST /chat_list | /chat_around | /chat_send | /chat_edit | /chat_delete | /chat_search | /chat_pings   squad chat (see chat.ts)
 //   POST /squad_create make a squad and join it
 import { rules } from "./rules.ts";
 import { chatLatest, chatRoute } from "./chat.ts";
@@ -360,7 +360,7 @@ const LOBBY_STALE_MS = 20000;
 
 // ---------- the routes ----------
 const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim", "den_give", "wardrobe", "gamba", "hunt_finish",
-  "chat_list", "chat_around", "chat_send", "chat_edit", "chat_delete", "chat_search"]);
+  "chat_list", "chat_around", "chat_send", "chat_edit", "chat_delete", "chat_search", "chat_pings"]);
 export async function gameRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; playerByToken: Any }) {
   const { db, json, fail } = ctx;
   if (!GAME_ROUTES.has(action)) return null;

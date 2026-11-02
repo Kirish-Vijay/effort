@@ -93,6 +93,31 @@ object Reminders {
             .build()
         nm.notify(if (test) 2 else 1, n)
     }
+
+    // A squad chat message that mentions you. Its own channel, so people can quieten chat and keep the Taxman.
+    fun chat(c: Context, id: Long, title: String, text: String) {
+        if (!canNotify(c)) return
+        val nm = c.getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel("chat", "Chat mentions", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "When someone in your squad @mentions you or @everyone"
+        })
+        val open = PendingIntent.getActivity(
+            c, 4, Intent(c, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val n = NotificationCompat.Builder(c, "chat")
+            .setSmallIcon(R.drawable.ic_stat)
+            .setColor(0xFFFFC83D.toInt())
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(1000 + (id % 100000).toInt(), n)
+    }
 }
 
 // Fires at 5pm and 9pm (shows the ping and books the next), and after a restart or an update (rebooks them).
