@@ -7,7 +7,7 @@
 // Every number worth tuning lives here. The lab's Knobs panel edits a copy of this.
 const DEFAULT_RULES = {
   stepsPerEffort: 100,      // 100 steps = 1 Effort
-  effortsPerEndeavour: 100, // 100 Efforts = 1 Endeavour
+  effortsPerEndeavour: 100, // prices are rounded to this many Efforts
   dailyEffortCap: 300,      // 30k steps a day, max
   scrollFreeMin: 30,        // app time everyone gets before it counts (it's time in the apps, not just scrolling)
   scrollMinPer1kSteps: 8,   // plus this much more per 1,000 steps
@@ -131,10 +131,9 @@ const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 const effortsFromSteps = (steps) => clamp(Math.floor((Number(steps) || 0) / RULES.stepsPerEffort), 0, RULES.dailyEffortCap);
 function money(efforts, short) {
   const e = Math.round(Number(efforts) || 0), sign = e < 0 ? "−" : "";
-  const a = Math.abs(e), en = Math.floor(a / RULES.effortsPerEndeavour), ef = a % RULES.effortsPerEndeavour;
-  if (short) return `${sign}${en ? `${en}.${String(ef).padStart(2, "0")}` : `0.${String(ef).padStart(2, "0")}`}`;
-  if (!en) return `${sign}${ef} Effort${ef === 1 ? "" : "s"}`;
-  return `${sign}${en} Endeavour${en === 1 ? "" : "s"}${ef ? ` ${ef} Effort${ef === 1 ? "" : "s"}` : ""}`;
+  const a = Math.abs(e).toLocaleString("en-GB");
+  if (short) return `${sign}${a}`;
+  return `${sign}${a} Effort${Math.abs(e) === 1 ? "" : "s"}`;
 }
 const scrollBudget = (steps) => Math.min(RULES.scrollBudgetMax, RULES.scrollFreeMin + Math.floor((steps || 0) / 1000) * RULES.scrollMinPer1kSteps);
 // The minutes that count against you. linked: their apps report automatically (the Effort app on Android, the
@@ -288,7 +287,7 @@ function itemStats(item, up, st) {
   }
   return out;
 }
-// Prices are always whole Endeavours (multiples of 100 Efforts) so the shop never shows fractions.
+// Prices are always round hundreds of Efforts.
 const wholeE = (efforts) => Math.max(RULES.effortsPerEndeavour, Math.round(efforts / RULES.effortsPerEndeavour) * RULES.effortsPerEndeavour);
 // den: the squad's Den levels (the Workshop makes upgrades cheaper).
 const upgradeCost = (item, up, den) => wholeE(tierOf(item.tier).price * RULES.upgradeCostShare * (up + 1) * (1 - Math.min(0.2, denMods(den).upgrade || 0)));
@@ -1419,7 +1418,7 @@ const pounds = (p) => `£${(p / 100).toFixed(2)}`;
 // less than it costs: the House always wins (about 12p in every £1 here). Most buckets lose; a few win big.
 const GAMBA = {
   price: 200, perDay: 5,
-  // Past the daily 5, buckets for real money (paid buckets don't cost Endeavours). Capped each week.
+  // Past the daily 5, buckets for real money (paid buckets don't cost Efforts). Capped each week.
   packs: [{ id: "gamba-3", buckets: 3, pence: 99 }, { id: "gamba-10", buckets: 10, pence: 299 }],
   weeklyPence: 1000,
   // [chance, payout in Efforts, label, rarity colour the reveal climbs to]

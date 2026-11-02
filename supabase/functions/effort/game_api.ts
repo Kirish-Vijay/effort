@@ -121,6 +121,13 @@ async function stepWeeks(db: Any, ids: string[], today: string) {
   }))]));
 }
 const stepWeek = async (db: Any, id: string, today: string) => (await stepWeeks(db, [id], today))[id];
+// All-time steps for each player (the step_totals SQL function, so it's never cut short by a row limit).
+async function allTime(db: Any, ids: string[]) {
+  const { data } = await db.rpc("step_totals", { p_ids: ids });
+  const out: Record<string, Any> = Object.fromEntries(ids.map((id) => [id, { steps: 0, days: 0, best: 0, bestDay: null }]));
+  for (const r of data ?? []) out[r.player_id] = { steps: Number(r.total) || 0, days: r.days || 0, best: r.best || 0, bestDay: r.best_day };
+  return out;
+}
 async function scrollFor(db: Any, id: string, from: string, to: string) {
   const { data } = await db.from("daily_scroll").select("day,minutes,auto_minutes").eq("player_id", id).gte("day", from).lte("day", to);
   return Object.fromEntries((data ?? []).map((r: Any) => [r.day, r.minutes ?? r.auto_minutes ?? 0]));
@@ -294,7 +301,7 @@ async function denFor(db: Any, squad: Any) {
   const levels = Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, G.denLevel(v)]));
   return { totals, levels };
 }
-// Wardrobe pieces bought with Endeavours, plus skins bought for real money (granted by the effort-house webhook).
+// Wardrobe pieces bought with Efforts, plus skins bought for real money (granted by the effort-house webhook).
 const ownedCosmetics = (L: Any) => L.rows.filter((r: Any) => r.kind === "cosmetic" || r.kind === "skin").map((r: Any) => r.ref);
 
 // ---------- the season ----------
@@ -376,11 +383,12 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (settled || squad) L = (await ledgerFor(db, [player.id]))[player.id];
       const today = localDate(now, tz);
       const tw = taxWindow(now, tz, test), rw = raidWindow(now, test);
-      const [{ data: fight }, debt, { data: scroll }, myWeek] = await Promise.all([
+      const [{ data: fight }, debt, { data: scroll }, myWeek, totals] = await Promise.all([
         db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", today).maybeSingle(),
         debtFor(db, player.id, today),
         db.from("daily_scroll").select("minutes,auto_minutes").eq("player_id", player.id).eq("day", today).maybeSingle(),
         stepWeek(db, player.id, today),
+        allTime(db, squad ? squad.members.map((m: Any) => m.id) : [player.id]),
       ]);
       const { data: raw } = await db.from("daily_steps").select("steps").eq("player_id", player.id).eq("day", today).maybeSingle();
       let squadOut = null, raid = null, lastRaid = null, hunt = null;
@@ -396,7 +404,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
           members: squad.members.map((m: Any) => {
             const w = week.find((x: Any) => x.id === m.id), Lm = ledgers[m.id];
             return { id: m.id, name: m.name, character: m.character, wear: m.cosmetics || {}, gear: cleanGear(m.gear, Lm.inv), pos: m.raid_pos, level: level(Lm),
-              weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, goalDays: w.goalDays, synced: m.steps_synced_at, joined_at: m.joined_at, days: days[m.id] };
+              weekSteps: w.weekSteps, todaySteps: w.todaySteps, fresh: w.fresh, goalDays: w.goalDays, synced: m.steps_synced_at, joined_at: m.joined_at, days: days[m.id], all: totals[m.id] };
           }),
         };
         const [{ data: cur }, { data: last }] = await Promise.all([
@@ -417,7 +425,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         wallet: L.wallet, xp: L.xp, inv: L.inv,
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
           scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, scrollLinked: scrollLinked(player) },
-        stepWeek: myWeek,
+        stepWeek: myWeek, allTime: totals[player.id],
         fight, windows: { tax: tw, raid: rw }, squad: squadOut, raid, lastRaid, season: await seasonState(db, player, squad, L, now, den), hunt, chat: { latest: await chatLatest(db, squad) },
         features: Object.fromEntries(Object.keys(G.FEATURES).map((f) => [f, G.featureOn(f, gameDay(squad, now))])), gameDay: gameDay(squad, now),
         ledger: L.rows.slice(0, 25).map((r: Any) => ({ kind: r.kind, ref: r.ref, amount: r.amount, note: r.note, at: r.at })),
@@ -564,7 +572,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const price = G.priceOf(item, deal);
       const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "buy", p_ref: item.id, p_amount: price, p_note: `Bought ${item.name}${deal ? " (deal)" : ""}` });
       if (error) throw error;
-      if (bal === -1) return fail("Not enough Endeavours");
+      if (bal === -1) return fail("Not enough Efforts");
       if (bal === -2) return fail("You already own that");
       await db.from("players").update({ gear: { ...cleanGear(player.gear, { ...L.inv, [item.id]: 0 }), [item.slot]: item.id } }).eq("id", player.id);
       return json({ ok: true, wallet: bal });
@@ -580,7 +588,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const cost = G.upgradeCost(item, up, (await denFor(db, squad)).levels);
       const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "upgrade", p_ref: `${item.id}:${up + 1}`, p_amount: cost, p_note: `Upgraded ${item.name} to +${up + 1}` });
       if (error) throw error;
-      if (bal === -1) return fail("Not enough Endeavours");
+      if (bal === -1) return fail("Not enough Efforts");
       if (bal === -2) return fail("Already upgraded");
       return json({ ok: true, wallet: bal });
     }
@@ -617,14 +625,14 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const room = G.DEN_ROOMS.find((r: Any) => r.id === body.room);
       if (!room) return fail("No such room");
       const amount = Math.floor(Number(body.amount));
-      if (!(amount >= 100 && amount <= 1000000)) return fail("Put in at least 1 Endeavour");
+      if (!(amount >= 100 && amount <= 1000000)) return fail("Put in at least 100 Efforts");
       await bankToday(db, player, squad, now);
       const den = await denFor(db, squad), next = G.denNext(den.totals[room.id]);
       if (!next) return fail(`The ${room.name} is already at level ${G.DEN_MAX}`);
       const give = Math.min(amount, next.need + (() => { let more = 0; for (let L = next.level + 1; L <= G.DEN_MAX; L++) more += G.denCost(L); return more; })());
       const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "den", p_ref: `${squad.group.id}:${room.id}:${now}`, p_amount: give, p_note: `Put ${give} into the ${room.name}` });
       if (error) throw error;
-      if (bal === -1) return fail("Not enough Endeavours");
+      if (bal === -1) return fail("Not enough Efforts");
       if (bal === -2) return fail("Try again");
       const after = await denFor(db, squad);
       return json({ ok: true, wallet: bal, den: after, gave: give, level: after.levels[room.id] });
@@ -643,7 +651,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         if (owned.includes(w.id)) return fail("You already have it");
         const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "cosmetic", p_ref: w.id, p_amount: w.price, p_note: `Bought ${w.name}` });
         if (error) throw error;
-        if (bal === -1) return fail("Not enough Endeavours");
+        if (bal === -1) return fail("Not enough Efforts");
         if (bal === -2) return fail("You already have it");
         return json({ ok: true, wallet: bal, owned: [...owned, w.id] });
       }
@@ -665,7 +673,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       await bankToday(db, player, squad, now);
       const day = localDate(now, tz), L = (await ledgerFor(db, [player.id]))[player.id];
       const today = L.rows.filter((r: Any) => r.kind === "gamba" && String(r.ref).startsWith(day + ":")).length;
-      // The day's 5 cost Endeavours; after that, only buckets bought with real money.
+      // The day's 5 cost Efforts; after that, only buckets bought with real money.
       const paid = today >= G.GAMBA.perDay;
       if (paid && gambaCredits(L) <= 0) return fail(`That's ${G.GAMBA.perDay} buckets today. More from The House, or back at midnight`);
       const ref = `${day}:${paid ? "p" : today + 1}:${crypto.randomUUID().slice(0, 8)}`;
@@ -676,7 +684,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       } else {
         const r = await db.rpc("spend", { p_player: player.id, p_kind: "gamba", p_ref: ref, p_amount: G.GAMBA.price, p_note: "Winny's Gamba Bucket" });
         if (r.error) throw r.error;
-        if (r.data === -1) return fail("Not enough Endeavours");
+        if (r.data === -1) return fail("Not enough Efforts");
         if (r.data === -2) return fail("Try again");
         bal = r.data;
       }

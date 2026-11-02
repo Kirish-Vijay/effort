@@ -253,3 +253,43 @@ trash talk in squad chat easy to back up.
 Fonts and palette unchanged (Lilita One, Rubik; existing tokens).
 
 Result screenshots: `effort-leaderboard-mobile.jpg` (test squad, one player paralysed) and `effort-person-week-mobile.jpg` (tapping them).
+
+---
+
+# App overhaul: steps first, one currency (added 2 Nov 2026)
+
+## Outcome
+
+Open the app and the first thing you see is steps: yours today, then everyone's, switchable between today, this
+week and all time, with anyone's profile one tap away. Everything else (fighting, the journey, the shop, chat,
+settings) has one obvious home and stays out of the way until you go there. One currency, Efforts, so nobody
+has to do conversions in their head.
+
+## References
+
+1. **Pedometer++** ([App Store](https://apps.apple.com/us/app/pedometer/id712286167)). The home screen is today's
+   step count, huge, and almost nothing else. Its reviews praise exactly that simplicity.
+2. **StepsApp** ([steps.app](https://steps.app/)). Daily / weekly / monthly views of the same number with a
+   switch, plus friends to compete with: "daily, weekly, and monthly history that keeps me accountable".
+3. **Strava** *(play knowledge)*. Your profile lives behind your avatar, not a tab; clubs have one leaderboard;
+   tapping an athlete opens their profile with this-week, year and all-time totals side by side.
+4. **Duolingo** *(play knowledge)*. Few tabs, each with one job; the league table is a first-class screen; a single
+   currency (gems) shown top right.
+5. **Clash Royale** *(play knowledge)*. Battle is its own tab; whatever's live gets a pulsing dot on the dock;
+   one primary currency in the header.
+
+## Steal list
+
+| Decision | From | What we take | Why |
+|---|---|---|---|
+| Home = Steps: today's count huge, week and all time under it | Pedometer++ | One hero number, two quieter ones | "People care about their steps above all" |
+| Leaderboard with Today / Week / All time | StepsApp, Strava | Same list, three time spans | Lets anyone settle any argument |
+| Profile behind your face in the header, not a dock tab | Strava, Duolingo | Header avatar opens Me | One fewer tab; settings out of the way |
+| Fight tab holds the Taxman, Hunt and raid | Clash Royale | Every fight in one place, live one first, dot on the dock | Fighting was split across Today and Raid |
+| One "what's on now" line on Steps | Clash Royale live dot | A single strip linking to Fight | Keeps urgency without a wall of cards |
+| One currency in the header | Duolingo, Clash Royale | Efforts only, coin icon | No Endeavour maths |
+| Profile: Today / This week / All time, then the week | Strava athlete page | Three totals across, then the existing week chart | Same component as before, plus all-time |
+
+Fonts and palette unchanged (Lilita One, Rubik; existing tokens).
+
+Result screenshots: `overhaul-steps-home.jpg`, `overhaul-fight.jpg`, `overhaul-profile.jpg`, `overhaul-money.jpg` (test squad).

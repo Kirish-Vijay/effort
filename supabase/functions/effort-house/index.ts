@@ -5,7 +5,7 @@
 // checkout.session.completed here we know who bought what, and we check they paid at least its price. The money
 // goes to whatever bank account the Stripe account pays out to; this only records it and hands the item over:
 // a skin is a ledger row of kind "skin", a pack is "gamba-credit" (ref "<session>:<buckets>"), both amount 0, so
-// neither touches anyone's Endeavours.
+// neither touches anyone's Efforts.
 //
 // Needs one secret: STRIPE_WEBHOOK_SECRET (the "whsec_..." signing secret of the webhook endpoint in Stripe).
 // Until it's set every request is refused, so nothing can be faked.
