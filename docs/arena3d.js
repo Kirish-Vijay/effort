@@ -81,7 +81,16 @@ function buildAlgorithm() {
   antenna.position.set(0, 5.35, 0); root.add(antenna);
   return { root, height: 5.4, parts: { body, armL, armR, legL, legR, antenna, screen }, drawFace };
 }
-// The Taxman: a tall grey suit with a top hat, monocle and a sack of your money.
+// The Taxman's nose: long, drooping, with a red bulb on the end. `face` is how far forward his face is.
+function bigNose(face, s = 1) {
+  const nose = new THREE.Group(), skin = toon(0xe8b08e), tip = toon(0xd9786a);
+  const bridge = outlined(new THREE.CapsuleGeometry(0.06, 0.36, 6, 12), skin); bridge.rotation.x = Math.PI / 2 - 0.6; bridge.position.set(0, -0.09, 0.16); nose.add(bridge);
+  const bulb = outlined(new THREE.SphereGeometry(0.095, 16, 12), tip); bulb.scale.set(1.1, 0.95, 1); bulb.position.set(0, -0.21, 0.32); nose.add(bulb);
+  for (const x of [-0.045, 0.045]) { const n = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), toon(0x5a2a24)); n.position.set(x, -0.28, 0.33); nose.add(n); }
+  nose.position.set(0.06, 0.24, face); nose.scale.setScalar(s);
+  return nose;
+}
+// The Taxman: a tall grey suit with a top hat, monocle, a very big nose and a sack of your money.
 function buildTaxman() {
   const root = new THREE.Group();
   const suit = toon(0x7d8a82), dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x332200 }), skin = toon(0xe9d8c4);
@@ -93,6 +102,7 @@ function buildTaxman() {
   const eye = (x) => { const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.0, 0.66); const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), dark); p.position.set(0, 0, 0.12); e.add(p); return e; };
   const eL = eye(-0.26), eR = eye(0.26); root.add(eL, eR);
   const mono = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 24), gold); mono.position.set(0.26, 4.0, 0.74); root.add(mono);
+  const nose = bigNose(0, 2.2); nose.position.set(0, 3.82, 0.62); root.add(nose);
   const tie = outlined(new THREE.ConeGeometry(0.18, 0.9, 4), red); tie.position.set(0, 2.9, 0.86); tie.rotation.x = Math.PI; root.add(tie);
   const armL = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armL.position.set(-1.25, 2.4, 0); armL.rotation.z = -0.35; root.add(armL);
   const armR = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armR.position.set(1.25, 2.4, 0); armR.rotation.z = 0.35; root.add(armR);
@@ -145,7 +155,7 @@ function prepareModel(gltf, spec) {
   if (spec.taxman) dressTaxman(obj);
   return { obj, mixer, clips, k };
 }
-// The Business Man model gets the Taxman's top hat, monocle and a sack of your money, pinned to his bones.
+// The Business Man model gets the Taxman's top hat, monocle, big nose and a sack of your money, pinned to his bones.
 function dressTaxman(obj) {
   const bones = [];
   obj.traverse((o) => { if (o.isBone) bones.push(o); });
@@ -168,7 +178,7 @@ function dressTaxman(obj) {
     hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
     const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.14, 0.32, 0.38);
     const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.24, 0.12, 0.36); chain.rotation.z = 0.4;
-    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain); inner.scale.setScalar(0.75); wrap.add(inner);
+    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain, bigNose(0.3, 2.4)); inner.scale.setScalar(0.75); wrap.add(inner);
     pin(head, wrap);
   }
   if (hand) {
@@ -1682,7 +1692,11 @@ class Arena {
     mu.uScale.value = this.vpH / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
     this.bossRing.material.opacity = 0.4 + Math.sin(this.t * 2) * 0.15;
     for (const f of this.fx) { f.t += dt; f.update?.(f, dt); }
-    this.fx = this.fx.filter((f) => { if (f.t >= f.life) { f.done?.(); freeObj(f.obj); freeObj(f.extra); return false; } return true; });
+    // Finish effects only after the list is rebuilt: a finish that starts a new effect (a crit's landing ring) would
+    // otherwise push it onto the old list and lose it, leaving it stuck on screen for the rest of the fight.
+    const ended = [];
+    this.fx = this.fx.filter((f) => (f.t >= f.life ? (ended.push(f), false) : true));
+    for (const f of ended) { f.done?.(); freeObj(f.obj); freeObj(f.extra); }
     this.sparks.time = this.dust.time = this.t;
     // Without bloom, stacked HDR sparks clip to white: run them a little cooler.
     this.sparks.mat.uniforms.uGain.value = this.post ? 1 : 0.62;
