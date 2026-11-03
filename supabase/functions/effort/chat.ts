@@ -136,11 +136,15 @@ export async function chatRoute(action: string, body: Any, ctx: { db: Any; json:
       return json({ ok: true, results: out.slice(0, 50), scanned });
     }
     // The Effort app (Android) asks every 15 minutes for messages that mention you since it last looked. With no
-    // `after` it just learns where the chat is up to, so a first run doesn't dig up old mentions.
+    // `after` it just learns where the chat is up to, so a first run doesn't dig up old mentions. That first answer
+    // is the newest id in any squad: ids only go up, so it's never 0 (which would mean "first look" again) even when
+    // this squad hasn't said anything yet, and the squad's next message is still after it.
     case "chat_pings": {
       const after = Number(body.after) || 0;
-      const { data: top } = await db.from("chat_messages").select("id").eq("group_id", gid).order("id", { ascending: false }).limit(1);
-      const latest = top?.[0]?.id ?? 0;
+      let top = db.from("chat_messages").select("id");
+      if (after > 0) top = top.eq("group_id", gid);
+      const { data: newest } = await top.order("id", { ascending: false }).limit(1);
+      const latest = newest?.[0]?.id ?? 0;
       if (after <= 0) return json({ ok: true, latest, pings: [] });
       const { data } = await db.from("chat_messages").select(COLS).eq("group_id", gid).gt("id", after).eq("deleted", false)
         .neq("player_id", player.id).order("id", { ascending: true }).limit(50);
