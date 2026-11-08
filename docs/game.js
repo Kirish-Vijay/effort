@@ -269,6 +269,9 @@ function statEffects(g) {
     luck: `${pct(e.crit)}% crits`,
   };
 }
+// How much of a stat bar a stat fills: a stat of 20 fills half, and it keeps climbing without ever filling, so a
+// bigger stat always draws a longer bar, and the same stat draws the same bar on everyone's screen.
+const statFill = (v) => Math.max(0, v || 0) / (Math.max(0, v || 0) + 20);
 function suggestedPosition(st) {
   return homeRow(classOf(st).id);
 }
@@ -1419,23 +1422,17 @@ const skinTier = (k) => SKIN_TIERS.find((t) => t.id === (k?.tier || k)) || null;
 const pounds = (p) => `£${(p / 100).toFixed(2)}`;
 
 // ---------- Winny's Gamba Bucket ----------
-// A bucket of Efforts for a price. Like a roulette wheel the odds are fixed and public, and on average it pays back
-// less than it costs: the House always wins (about 12p in every £1 here). Most buckets lose; a few win big.
+// A crate: every bucket drops one piece of gear. The odds are fixed and public, and on average what comes out sells
+// back to the shop for less than the bucket cost: the House always wins (about 14p in every £1 at best, more before
+// you've reached the top tiers). Most buckets are a common worth less than you paid; a few are something good.
 const GAMBA = {
   price: 200, perDay: 5,
   // Past the daily 5, buckets for real money (paid buckets don't cost Efforts). Capped each week.
   packs: [{ id: "gamba-3", buckets: 3, pence: 99 }, { id: "gamba-10", buckets: 10, pence: 299 }],
   weeklyPence: 1000,
-  // [chance, payout in Efforts, label, rarity colour the reveal climbs to]
-  prizes: [
-    [0.50, 0, "Junk", "dud"],
-    [0.20, 100, "Half back", "common"],
-    [0.15, 200, "Mimic!", "rare"],
-    [0.09, 400, "Double", "epic"],
-    [0.045, 800, "Quadruple", "legendary"],
-    [0.012, 2500, "Big bucket", "mythic"],
-    [0.003, 8000, "Winny's Jackpot", "jackpot"],
-  ],
+  // [gear tier, chance]. A tier you haven't reached yet drops as the best one you have, so the return only ever
+  // goes down from the full table. Later tiers join here when they're released (and the return is checked again).
+  odds: [["common", 0.85], ["rare", 0.12], ["epic", 0.024], ["legendary", 0.0045], ["mythic", 0.0012], ["relic", 0.0003]],
 };
 // Anything The House sells for money: a skin or a bucket pack. { id, kind, name, pence, link }
 function houseItem(id) {
@@ -1445,12 +1442,29 @@ function houseItem(id) {
   if (p) return { id, kind: "pack", name: `${p.buckets} Gamba Buckets`, pence: p.pence, buckets: p.buckets, link: HOUSE_LINKS[p.pence] || "" };
   return null;
 }
-const gambaReturn = () => GAMBA.prizes.reduce((s, [p, v]) => s + p * v, 0) / GAMBA.price;
-// u: a uniform 0–1 roll (the server's).
-function gambaRoll(u) {
-  let x = u;
-  for (let i = 0; i < GAMBA.prizes.length; i++) { x -= GAMBA.prizes[i][0]; if (x < 0) return i; }
-  return 0;
+// What gear out of a bucket counts as having cost you (the shop's buy-back is a share of it): its shop price.
+const crateValue = (item) => (item ? priceOf(item, false) : 0);
+// What a bucket can drop for one player: class gear for their class and the open market, no season sets.
+const cratePool = (tier, cls) => CAT().ITEMS.filter((i) => i.tier === tier && !i.season && (!i.cls || i.cls === cls));
+// Your odds: [{ tier, p, sells }], released tiers only, anything past your level folded into the best you've reached.
+function crateOdds(level = 1, day = "2000-01-01") {
+  const out = [];
+  for (const [id, p] of GAMBA.odds) {
+    const t = CAT().TIERS.find((x) => x.id === id);
+    if (t && tierOut(t, day) && (t.lvl <= level || !out.length)) out.push({ tier: id, p, sells: sellPrice(t.price) });
+    else if (out.length) out[out.length - 1].p += p;
+  }
+  return out;
+}
+// What a bucket gives back on average, as a share of its price (sold straight back to the shop).
+const gambaReturn = (level = 99, day = "2999-01-01") => crateOdds(level, day).reduce((s, o) => s + o.p * o.sells, 0) / GAMBA.price;
+// u, v: uniform 0–1 rolls (the server's): u picks the tier, v the piece. { tier, item }
+function gambaRoll(u, v = 0, { cls = null, level = 1, day = "2000-01-01" } = {}) {
+  const odds = crateOdds(level, day);
+  let x = u, tier = odds[0].tier;
+  for (const o of odds) { tier = o.tier; x -= o.p; if (x < 0) break; }
+  const pool = cratePool(tier, cls);
+  return { tier, item: pool[Math.min(pool.length - 1, Math.floor(v * pool.length))]?.id || null };
 }
 
 // ---------- events ----------
@@ -1540,13 +1554,13 @@ root.Game = {
   hash, rng, effortsFromSteps, money, scrollBudget, scrollCounted, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
   pace, weekTable,
-  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex,
+  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex, statFill,
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
-  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
+  DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, crateOdds, cratePool, crateValue, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
 })(typeof window !== "undefined" ? window : globalThis);

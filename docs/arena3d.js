@@ -81,16 +81,56 @@ function buildAlgorithm() {
   antenna.position.set(0, 5.35, 0); root.add(antenna);
   return { root, height: 5.4, parts: { body, armL, armR, legL, legR, antenna, screen }, drawFace };
 }
-// The Taxman's nose: long, drooping, with a red bulb on the end. `face` is how far forward his face is.
-function bigNose(face, s = 1) {
-  const nose = new THREE.Group(), skin = toon(0xe8b08e), tip = toon(0xd9786a);
-  const bridge = outlined(new THREE.CapsuleGeometry(0.06, 0.36, 6, 12), skin); bridge.rotation.x = Math.PI / 2 - 0.6; bridge.position.set(0, -0.09, 0.16); nose.add(bridge);
-  const bulb = outlined(new THREE.SphereGeometry(0.095, 16, 12), tip); bulb.scale.set(1.1, 0.95, 1); bulb.position.set(0, -0.21, 0.32); nose.add(bulb);
-  for (const x of [-0.045, 0.045]) { const n = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), toon(0x5a2a24)); n.position.set(x, -0.28, 0.33); nose.add(n); }
-  nose.position.set(0.06, 0.24, face); nose.scale.setScalar(s);
+// The Taxman's nose: very big but a real one, in his own skin (pass the face's material). No outline and no red bulb:
+// a bridge narrowing between the eyes, a slight hump, a rounded tip, wings either side and nostrils underneath. It
+// hangs from the top of the bridge (0,0,0): -y runs down the nose, +z out of the face. About 0.34 long at s = 1.
+function taxNose(skin, s = 1) {
+  const nose = new THREE.Group(), L = 0.34;
+  // The body of the nose: a sphere pushed into shape. t runs 0 at the bridge to 1 under the tip, where it meets the lip.
+  const geo = new THREE.SphereGeometry(1, 40, 32), p = geo.attributes.position, v = new THREE.Vector3();
+  const sm = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const t = (1 - v.y) / 2;
+    const width = 0.032 + 0.05 * Math.pow(t, 1.6) + 0.018 * sm(0.7, 0.92, t);
+    const out = (0.03 + 0.21 * sm(0, 0.84, t) + 0.012 * Math.exp(-(((t - 0.38) / 0.13) ** 2))) * (1 - 0.85 * sm(0.86, 1, t));
+    p.setXYZ(i, v.x * width, -t * L, v.z > 0 ? v.z * out : v.z * 0.02);
+  }
+  geo.computeVertexNormals();
+  const body = new THREE.Mesh(geo, skin); nose.add(body);
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.064, 24, 18), skin); tip.scale.set(1.1, 0.9, 0.85); tip.position.set(0, -0.8 * L, 0.168); nose.add(tip);
+  for (const x of [-1, 1]) {
+    const ala = new THREE.Mesh(new THREE.SphereGeometry(0.046, 20, 14), skin); ala.scale.set(0.7, 0.62, 1.3); ala.position.set(x * 0.056, -0.885 * L, 0.07); ala.rotation.y = x * 0.55; nose.add(ala);
+    // Nostrils: dark, flattened, tucked under the wings so they show from below and only just from the front.
+    const hole = new THREE.Mesh(new THREE.SphereGeometry(0.022, 14, 10), toon(0x4a2620)); hole.scale.set(1, 0.4, 1.7); hole.position.set(x * 0.032, -0.95 * L, 0.1); hole.rotation.y = -x * 0.35; nose.add(hole);
+  }
+  nose.scale.setScalar(s);
   return nose;
 }
-// The Taxman: a tall grey suit with a top hat, monocle, a very big nose and a sack of your money.
+// A sack of your money, gathered at the neck: the neck sits at (0,0,0) for a fist to close round, the sack hangs
+// down -y. Wrinkles bunch up towards the tie, a frill sticks out above it, and the £ is printed on the front.
+function moneySack(r = 0.44) {
+  const sack = new THREE.Group(), cloth = toon(0xd8a640), cord = toon(0x6b4420);
+  const prof = [[0, -2.25], [0.5, -2.2], [0.82, -1.98], [1, -1.62], [0.98, -1.2], [0.8, -0.82], [0.5, -0.5], [0.2, -0.25], [0.14, -0.08], [0.15, 0.08], [0.24, 0.24], [0.33, 0.36], [0.2, 0.4], [0, 0.36]]
+    .map(([x, y]) => new THREE.Vector2(x * r, y * r));
+  const geo = new THREE.LatheGeometry(prof, 36), p = geo.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const a = Math.atan2(v.z, v.x), y = v.y / r, near = Math.exp(-(((y + 0.35) / 0.45) ** 2)) + (y > 0.05 ? 0.8 : 0);
+    const k = 1 + 0.07 * near * Math.sin(a * 9 + y * 3) + 0.025 * Math.sin(a * 4 - y * 5);
+    p.setXYZ(i, v.x * k, v.y, v.z * k);
+  }
+  geo.computeVertexNormals();
+  sack.add(new THREE.Mesh(geo, cloth));
+  const tie = new THREE.Mesh(new THREE.TorusGeometry(0.165 * r, 0.05 * r, 8, 20), cord); tie.rotation.x = Math.PI / 2; tie.position.y = -0.17 * r; sack.add(tie);
+  const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
+  x.fillStyle = "#3d2a10"; x.font = "900 92px Georgia, serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("£", 64, 70);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(0.9 * r, 0.9 * r), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }));
+  label.position.set(0, -1.6 * r, 1.08 * r); sack.add(label);
+  return sack;
+}
+// The Taxman: a tall grey suit with a top hat, monocle, a very big nose and a sack of your money in his right hand.
 function buildTaxman() {
   const root = new THREE.Group();
   const suit = toon(0x7d8a82), dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x332200 }), skin = toon(0xe9d8c4);
@@ -99,15 +139,17 @@ function buildTaxman() {
   const brim = outlined(new THREE.CylinderGeometry(1.0, 1.0, 0.1, 28), dark); brim.position.y = 4.5; root.add(brim);
   const hat = outlined(new THREE.CylinderGeometry(0.62, 0.66, 1.1, 24), dark); hat.position.y = 5.05; root.add(hat);
   const band = new THREE.Mesh(new THREE.CylinderGeometry(0.665, 0.67, 0.18, 24), red); band.position.y = 4.65; root.add(band);
-  const eye = (x) => { const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.0, 0.66); const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), dark); p.position.set(0, 0, 0.12); e.add(p); return e; };
+  const eye = (x) => { const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.08, 0.64); const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), dark); p.position.set(0, 0, 0.12); e.add(p); return e; };
   const eL = eye(-0.26), eR = eye(0.26); root.add(eL, eR);
-  const mono = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 24), gold); mono.position.set(0.26, 4.0, 0.74); root.add(mono);
-  const nose = bigNose(0, 2.2); nose.position.set(0, 3.82, 0.62); root.add(nose);
+  const mono = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 24), gold); mono.position.set(0.26, 4.08, 0.74); root.add(mono);
+  // Same material as the head, set into the face just below the eyes.
+  const nose = taxNose(skin, 2.2); nose.position.set(0, 4.12, 0.68); nose.rotation.x = 0.15; root.add(nose);
   const tie = outlined(new THREE.ConeGeometry(0.18, 0.9, 4), red); tie.position.set(0, 2.9, 0.86); tie.rotation.x = Math.PI; root.add(tie);
   const armL = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armL.position.set(-1.25, 2.4, 0); armL.rotation.z = -0.35; root.add(armL);
   const armR = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armR.position.set(1.25, 2.4, 0); armR.rotation.z = 0.35; root.add(armR);
-  const bag = outlined(new THREE.SphereGeometry(0.7, 20, 16), gold); bag.position.set(1.9, 1.3, 0.3); bag.scale.set(1, 1.15, 1); root.add(bag);
-  const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.25, 0.3, 12), gold); knot.position.set(1.9, 2.15, 0.3); root.add(knot);
+  // His right fist at the end of the arm, closed round the sack's neck. The sack swings from there (see updateBoss).
+  const fist = outlined(new THREE.SphereGeometry(0.26, 16, 12), skin); fist.position.y = -1.0; fist.scale.set(1, 0.9, 1.05); armR.add(fist);
+  const bag = moneySack(0.62); bag.position.y = -1.02; armR.add(bag);
   const legL = outlined(new THREE.CapsuleGeometry(0.26, 0.6, 6, 12), dark); legL.position.set(-0.45, 0.55, 0); root.add(legL);
   const legR = outlined(new THREE.CapsuleGeometry(0.26, 0.6, 6, 12), dark); legR.position.set(0.45, 0.55, 0); root.add(legR);
   return { root, height: 5.6, parts: { body, head, hat, armL, armR, bag, legL, legR } };
@@ -143,6 +185,7 @@ function prepareModel(gltf, spec) {
     // Re-light the model with the same toon ramp as everything else, keeping its colours/textures.
     const paint = spec.paint?.[src.name];
     o.material = toon(paint ? new THREE.Color(paint) : src.color ? src.color.clone() : 0xffffff, { map: src.map || null, vertexColors: !!src.vertexColors, transparent: !!src.transparent, opacity: src.opacity ?? 1 });
+    o.material.name = src.name || ""; // so accessories can borrow a part's material (the Taxman's nose wears his skin)
     if (spec.tint) o.material.color.lerp(new THREE.Color(spec.tint), 0.35);
   });
   const mixer = new THREE.AnimationMixer(obj), clips = {};
@@ -152,21 +195,27 @@ function prepareModel(gltf, spec) {
     const clip = names.map((n) => byName.get(n.toLowerCase())).find(Boolean);
     if (clip) clips[role] = mixer.clipAction(clip);
   }
-  if (spec.taxman) dressTaxman(obj);
+  if (spec.taxman) dressTaxman(obj, byName.get("punch_right"));
   return { obj, mixer, clips, k };
 }
-// The Business Man model gets the Taxman's top hat, monocle, big nose and a sack of your money, pinned to his bones.
-function dressTaxman(obj) {
+// The Business Man model gets the Taxman's top hat, monocle and big nose (in the model's own skin), and his right hand
+// closes into a fist round the neck of a sack of your money. punch: the model's Punch_Right clip, which holds a fist
+// the whole way through; that pose is held on his fingers every frame. obj.userData.tick() keeps the sack in the fist
+// and hanging under it: call it after each mixer update.
+function dressTaxman(obj, punch) {
   const bones = [];
   obj.traverse((o) => { if (o.isBone) bones.push(o); });
   const find = (...res) => bones.find((b) => res.some((re) => re.test(b.name)));
   const head = find(/^head$/i, /head/i), hand = find(/fist.?r$/i, /hand.?r$/i, /wrist.?r$/i, /lowerarm.?r$/i);
-  // Bones carry their own scale and rotation; undo both so accessories are sized and oriented in arena units.
+  let skin = null;
+  obj.traverse((o) => { if (o.isMesh && /skin/i.test(o.material?.name || "")) skin = o.material; });
+  // Bones carry their own scale and rotation; undo both so accessories are sized in arena units and line up with the
+  // model (whichever way the model itself is turned).
   obj.updateMatrixWorld(true);
   const pin = (bone, group) => {
     const ws = bone.getWorldScale(new THREE.Vector3()).x;
     group.scale.setScalar(1 / ws);
-    group.quaternion.copy(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
+    group.quaternion.copy(bone.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(obj.getWorldQuaternion(new THREE.Quaternion())));
     bone.add(group);
   };
   if (head) {
@@ -176,24 +225,52 @@ function dressTaxman(obj) {
     const crown = outlined(new THREE.CylinderGeometry(0.38, 0.41, 0.7, 24), dark); crown.position.y = 0.38; hat.add(crown);
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.42, 0.12, 24), red); band.position.y = 0.1; hat.add(band);
     hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
-    const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.14, 0.32, 0.38);
-    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.24, 0.12, 0.36); chain.rotation.z = 0.4;
-    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain, bigNose(0.3, 2.4)); inner.scale.setScalar(0.75); wrap.add(inner);
+    const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.13, 0.37, 0.5);
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.22, 0.18, 0.47); chain.rotation.z = 0.4;
+    // The nose starts between his eyes and sits on the face, tipped down a touch.
+    const nose = taxNose(skin || toon(0xe8c4a0), 1.35); nose.position.set(0, 0.41, 0.47); nose.rotation.x = 0.12;
+    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain, nose); inner.scale.setScalar(0.75); wrap.add(inner);
     pin(head, wrap);
   }
-  if (hand) {
-    const gold = toon(0xf2b51d, { emissive: 0x221100 });
-    const bag = new THREE.Group();
-    const sack = outlined(new THREE.SphereGeometry(0.42, 20, 16), gold); sack.scale.set(1, 1.15, 1); sack.position.y = -0.5; bag.add(sack);
-    const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, 0.22, 12), gold); knot.position.y = -0.05; bag.add(knot);
-    const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
-    x.fillStyle = "#1f2a24"; x.font = "900 96px Arial"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("£", 64, 70);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), new THREE.MeshBasicMaterial({ map: t, transparent: true }));
-    label.position.set(0, -0.5, 0.43); bag.add(label);
-    const wrap = new THREE.Group(); wrap.add(bag);
-    pin(hand, wrap);
+  if (!hand) return;
+  const fist = [];
+  for (const tr of punch?.tracks || []) {
+    const dot = tr.name.lastIndexOf("."), b = bones.find((x) => x.name === tr.name.slice(0, dot));
+    if (b && tr.name.slice(dot + 1) === "quaternion" && /^(index|middle|ring|pinky|thumb)\d.?r$/i.test(b.name)) fist.push([b, new THREE.Quaternion().fromArray(tr.values, 0)]);
   }
+  const grip = bones.filter((b) => /^(index2|middle2|ring2|thumb2).?r$/i.test(b.name));
+  const R = 0.36, sack = moneySack(R), len = 2.25 * R;
+  hand.add(sack);
+  const at = new THREE.Vector3(), tmp = new THREE.Vector3(), out = new THREE.Vector3(), axis = new THREE.Vector3(), ws = new THREE.Vector3();
+  const face = new THREE.Quaternion(), hq = new THREE.Quaternion(), lay = new THREE.Quaternion(), sway = new THREE.Quaternion();
+  let last = null, ang = 0, vel = 0;
+  obj.userData.tick = (dt = 0) => {
+    for (const [b, q] of fist) b.quaternion.copy(q);
+    obj.updateWorldMatrix(true, true);
+    // The neck sits in the middle of the closed fingers.
+    at.set(0, 0, 0);
+    if (grip.length) { for (const b of grip) at.add(b.getWorldPosition(tmp)); at.divideScalar(grip.length); } else hand.getWorldPosition(at);
+    // A little swing when his hand moves (a damped pendulum, pushed by the hand's sideways speed).
+    obj.getWorldQuaternion(face);
+    if (last && dt > 0) {
+      const push = tmp.subVectors(at, last).applyQuaternion(face.clone().invert()).x / dt;
+      vel += (-ang * 60 - vel * 7 - push * 3) * dt; ang = Math.max(-0.7, Math.min(0.7, ang + vel * dt));
+    }
+    last = (last || new THREE.Vector3()).copy(at);
+    // Straight down in the world, label facing the way he faces. Near the floor (knocked down) it lies out flat,
+    // away from his body, instead of sinking through.
+    const ground = obj.parent ? obj.parent.getWorldPosition(tmp).y : 0, h = at.y - ground;
+    lay.identity();
+    if (h < len) {
+      out.subVectors(at, obj.getWorldPosition(tmp)).setY(0);
+      if (out.lengthSq() > 1e-6) { axis.crossVectors(new THREE.Vector3(0, 1, 0), out.normalize()).normalize(); lay.setFromAxisAngle(axis, -Math.acos(Math.max(0, h) / len)); }
+    }
+    sway.setFromAxisAngle(new THREE.Vector3(0, 0, 1), ang);
+    sack.position.copy(hand.worldToLocal(at.clone()));
+    sack.quaternion.copy(hand.getWorldQuaternion(hq).invert().multiply(lay).multiply(face).multiply(sway));
+    sack.scale.setScalar(1 / hand.getWorldScale(ws).x);
+  };
+  obj.userData.tick();
 }
 
 // ---------- menu portraits ----------
@@ -232,6 +309,7 @@ function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) 
         m.clips.idle?.play(); m.mixer.update(0.45);
         obj = m.obj; height = spec.height || 5.5;
         obj.rotation.y = (spec.rotY || 0) - 0.35;
+        obj.userData.tick?.();
         // Skinned meshes report bounds from an unposed skeleton, so frame from the size we normalised to.
         const hv = spec.hover || 0;
         known = new THREE.Box3(new THREE.Vector3(-height * 0.42, hv, -height * 0.3), new THREE.Vector3(height * 0.42, hv + height, height * 0.3));
@@ -939,7 +1017,7 @@ class Arena {
       const m = prepareModel(gltf, spec);
       const old = this.boss.holder, wasDead = this.boss.dead;
       this.scene.remove(old); freeObj(old);
-      this.boss = { mixer: m.mixer, clips: m.clips, hover: spec.hover || 0 };
+      this.boss = { mixer: m.mixer, clips: m.clips, hover: spec.hover || 0, tick: m.obj.userData.tick };
       place(m.obj, spec.height || 5.5);
       this.collectMats(m.obj);
       this.bossPlay("idle");
@@ -1713,6 +1791,7 @@ class Arena {
     const B = this.boss; if (!B || !B.holder) return;
     B.actT = (B.actT || 0) + dt;
     B.mixer?.update(dt);
+    B.tick?.(dt);
     const H = B.holder;
     const grow = B.grow || 1;
     // Built-in bosses are animated by hand; models use their clips plus these extras.
@@ -1786,7 +1865,7 @@ class Arena {
       if (parts.armL) parts.armL.rotation.z = -0.5 - Math.sin(this.t * 2.2) * 0.12 - (B.windup ? 0.8 : 0);
       if (parts.armR) parts.armR.rotation.z = 0.5 + Math.sin(this.t * 2.2) * 0.12 + (B.windup ? 0.8 : 0) + swing;
       if (parts.antenna) parts.antenna.userData.main.material.emissive.setRGB(0.4 + Math.sin(this.t * 6) * 0.3, 0.05, 0.05);
-      if (parts.bag) parts.bag.rotation.z = Math.sin(this.t * 3) * 0.12;
+      if (parts.bag) parts.bag.rotation.z = -(parts.armR?.rotation.z || 0) + Math.sin(this.t * 3) * 0.12; // hangs from the fist
       if (B.built.drawFace && (Math.floor(this.t * 4) !== B.lastFaceTick)) {
         B.lastFaceTick = Math.floor(this.t * 4);
         B.built.drawFace(B.windup || B.act.startsWith("atk") ? 1 : 0, Math.random() < 0.06);

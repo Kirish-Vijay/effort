@@ -11,7 +11,7 @@
 //   POST /season_claim claim a season reward: a story chapter, a track tier or a weekly bounty
 //   POST /den_give     put Efforts into a room of the squad's Den
 //   POST /wardrobe     buy or wear cosmetics (and wear skins from The House)
-//   POST /gamba        buy one of Winny's Gamba Buckets
+//   POST /gamba        open one of Winny's Gamba Buckets: a piece of gear for the bag
 //   POST /hunt_finish  Wednesday's Midweek Hunt: report the fight, get your share
 //   POST /chat_list | /chat_around | /chat_send | /chat_edit | /chat_delete | /chat_search | /chat_pings   squad chat (see chat.ts)
 //   POST /squad_create make a squad and join it
@@ -138,25 +138,30 @@ async function scrollFor(db: Any, id: string, from: string, to: string) {
 const avgOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 // Everything in the ledger for these players: wallet, XP and owned gear all come from it. Gear is bought ("buy",
-// ref "id"), upgraded ("upgrade", "id:3") and sold back ("sell", "id"). Buying it again after selling makes a new
-// copy, "id#2" ("id#2:3" for its upgrades), since a ledger ref can only be used once. paid[id] is what the copy you
-// own cost you, buying and upgrading: the shop's buy-back is a share of that.
+// ref "id") or comes out of a Gamba Bucket ("crate", same refs, amount 0), upgraded ("upgrade", "id:3") and sold
+// back ("sell", "id"). Getting it again after selling makes a new copy, "id#2" ("id#2:3" for its upgrades), since a
+// ledger ref can only be used once. paid[id] is what the copy you own cost you, buying and upgrading (a bucket's
+// gear counts as its shop price, Game.crateValue): the shop's buy-back is a share of that. won[id]: out of a bucket.
 const copyOf = (ref: string) => { const [id, n] = String(ref).split("#"); return { id, n: Number(n) || 1 }; };
 const copyRef = (id: string, n: number) => (n > 1 ? `${id}#${n}` : id);
 async function ledgerFor(db: Any, ids: string[]) {
   const { data } = await db.from("ledger").select("player_id,kind,ref,amount,xp,note,at").in("player_id", ids).order("at", { ascending: false }).limit(50000);
-  const out: Record<string, Any> = Object.fromEntries(ids.map((id) => [id, { wallet: 0, xp: 0, inv: {}, rows: [], copy: {}, paid: {}, sold: {} }]));
+  const out: Record<string, Any> = Object.fromEntries(ids.map((id) => [id, { wallet: 0, xp: 0, inv: {}, rows: [], copy: {}, paid: {}, sold: {}, won: {} }]));
   for (const r of data ?? []) {
     const L = out[r.player_id];
     L.wallet += r.amount; L.xp += r.xp; L.rows.push(r);
   }
   for (const L of Object.values(out)) {
     for (const r of [...L.rows].reverse()) {
-      if (r.kind === "buy") { const { id, n } = copyOf(r.ref); L.inv[id] = 0; L.copy[id] = n; L.paid[id] = -r.amount; }
+      if (r.kind === "buy" || r.kind === "crate") {
+        const { id, n } = copyOf(r.ref), won = r.kind === "crate";
+        L.inv[id] = 0; L.copy[id] = n; L.paid[id] = won ? G.crateValue(G.itemById(id)) : -r.amount;
+        if (won) L.won[id] = true; else delete L.won[id];
+      }
       else if (r.kind === "upgrade") {
         const [c, lv] = String(r.ref).split(":"), { id, n } = copyOf(c);
         if (id in L.inv && L.copy[id] === n) { L.inv[id] = Math.max(L.inv[id], Number(lv) || 0); L.paid[id] += -r.amount; }
-      } else if (r.kind === "sell") { const { id } = copyOf(r.ref); delete L.inv[id]; delete L.paid[id]; L.sold[id] = (L.sold[id] || 0) + 1; }
+      } else if (r.kind === "sell") { const { id } = copyOf(r.ref); delete L.inv[id]; delete L.paid[id]; delete L.won[id]; L.sold[id] = (L.sold[id] || 0) + 1; }
     }
   }
   return out;
@@ -441,7 +446,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         ok: true, now,
         me: { id: player.id, name: player.name, platform: player.platform, tz, character: player.character, wear: player.cosmetics || {}, owned: ownedCosmetics(L), gear: cleanGear(player.gear, L.inv), pos: player.raid_pos,
           created_at: player.created_at, steps_synced_at: player.steps_synced_at, steps_source: player.steps_source, scroll_synced_at: player.scroll_synced_at, scroll_source: player.scroll_source },
-        wallet: L.wallet, xp: L.xp, inv: L.inv, paid: L.paid,
+        wallet: L.wallet, xp: L.xp, inv: L.inv, paid: L.paid, won: Object.keys(L.won),
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
           scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, scrollLinked: scrollLinked(player) },
         stepWeek: myWeek, allTime: totals[player.id],
@@ -703,7 +708,8 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       return json({ ok: true, wear });
     }
 
-    // Winny's Gamba Bucket: pay, roll here (never on the phone), pay out. The odds are Game.GAMBA, public in the app.
+    // Winny's Gamba Bucket: pay, roll here (never on the phone), drop a piece of gear into the bag. The odds are
+    // Game.crateOdds, public in the app. One you already own goes straight back to the shop at its buy-back price.
     case "gamba": {
       await bankToday(db, player, squad, now);
       const day = localDate(now, tz), L = (await ledgerFor(db, [player.id]))[player.id];
@@ -723,13 +729,24 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         if (r.data === -2) return fail("Try again");
         bal = r.data;
       }
-      const u = crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
-      const k = G.gambaRoll(u), [, win, label] = G.GAMBA.prizes[k];
-      if (win > 0) {
-        const { error: e2 } = await db.from("ledger").insert({ player_id: player.id, kind: "gamba-win", ref, amount: win, xp: 0, note: `Gamba Bucket: ${label}` });
-        if (e2) throw e2;
+      const [u, v] = Array.from(crypto.getRandomValues(new Uint32Array(2)), (x) => x / 4294967296);
+      const { tier, item: id } = G.gambaRoll(u, v, { cls: G.classOf(statsOf(player)).id, level: level(L), day: localDate(now, SQUAD_TZ) });
+      const item = G.itemById(id), sells = G.sellPrice(G.crateValue(item));
+      let dupe = id in L.inv;
+      if (!dupe) {
+        const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "crate", ref: copyRef(id, (L.sold[id] || 0) + 1), amount: 0, xp: 0, note: `Gamba Bucket: ${item.name}` });
+        if (error?.code === "23505") dupe = true; // another bucket dropped the same piece a moment ago
+        else if (error) throw error;
       }
-      return json({ ok: true, prize: k, win, wallet: bal + win, left: Math.max(0, G.GAMBA.perDay - today - 1), credits: gambaCredits(L) - (paid ? 1 : 0), paid });
+      if (dupe) {
+        const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "gamba-win", ref, amount: sells, xp: 0, note: `Gamba Bucket: another ${item.name}, sold to the shop` });
+        if (error) throw error;
+      } else {
+        // Straight on if that slot's empty; never swaps out something you chose.
+        const gear = cleanGear(player.gear, L.inv);
+        if (!gear[item.slot]) await db.from("players").update({ gear: { ...gear, [item.slot]: id } }).eq("id", player.id);
+      }
+      return json({ ok: true, tier, item: id, dupe, sells, wallet: bal + (dupe ? sells : 0), left: Math.max(0, G.GAMBA.perDay - today - 1), credits: gambaCredits(L) - (paid ? 1 : 0), paid });
     }
 
     case "hunt_finish": {
