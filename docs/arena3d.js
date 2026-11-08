@@ -1491,7 +1491,7 @@ class Arena {
       this.moves.length = 0;
       this.hitStop(130, { flash: 0.45, color: 0xffffff, punch: 1 });
       this.slowmo = { t: 0, hold: 1.1, out: 0.7, scale: 0.3 };
-      this.camMove({ pos: [0, -0.3, -1.5], look: [0, 0.7, 0], fov: -5, inT: 0.6, dur: 3.2, outT: 0.9, tag: "ko", free: true });
+      this.camMove({ pos: [0, 0.5, -1.1], look: [0, 0.9, 0], fov: -4, inT: 0.6, dur: 3.2, outT: 0.9, tag: "ko", free: true });
       const at = this.bossPoint(0.5, 0);
       this.shockwave(at, 0xffffff, 9, 0.9, true); this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 14, 1.2);
       this.burst(at, 0xfff3a0, 70, 8); this.flare(at, 0xffffff, 9);
@@ -1499,7 +1499,7 @@ class Arena {
       if (this.mode === "tax") this.lootStart();
       else {
         this.dissolveAt = this.realT + 1.1;
-        setTimeout(() => { if (!this.disposed) { const p = this.bossPoint(0.45, 0); this.burst(p, this.look.ring.getHex(), 60, 7); this.shockwave(p, 0xffffff, 6, 0.8, true); this.shake(0.4); } }, 1100);
+        setTimeout(() => { if (!this.disposed) { const p = this.bossPoint(0.45, 0); this.burst(p, this.look.ring.getHex(), 30, 6); this.shockwave(p, this.look.ring.getHex(), 5, 0.7, true); this.shake(0.4); } }, 1100);
       }
     }
   }

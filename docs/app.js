@@ -2647,6 +2647,9 @@ async function hostFinish() {
 function raidOver(v, how) {
   if (!v || v.koAt) return;
   v.koAt = performance.now() - (how === "won" ? 0 : 1500);
+  const R = v.R; if (R && $("#r-hp")) setBar($("#r-hp"), R.boss.hp / R.boss.max, `${fmt(R.boss.hp)} / ${fmt(R.boss.max)}`);
+  const tele = $("#tele"); if (tele) { tele.className = "tele idle"; tele.querySelector(".tt").innerHTML = ""; tele.querySelector(".cd").style.width = "0"; }
+  $("#dg")?.classList.remove("hot");
   toastClear(); hint(null);
   for (const id of ["#trivia", "#veil"]) { const el = $(id); if (el) el.innerHTML = ""; }
   FX.music(false);
@@ -2755,14 +2758,14 @@ function raidIntro(v, R) {
   const mine = R.members.find((m) => m.id === v.my), ax = G.affixInfo(R.affix);
   const el = document.createElement("div");
   el.className = "bosscard";
-  el.innerHTML = `<small>${esc(R.boss.eventName || `Tier ${R.tier}`)}${R.boss.enraged ? " · Enraged" : ""}${ax ? ` · ${esc(ax.name)}` : ""}</small><b>${esc(R.boss.name)}</b>${mine ? `<em>Your steps ×${(mine.stride || 1).toFixed(2)}</em>` : ""}`;
+  el.innerHTML = `<small>${esc(R.boss.eventName || `Boss ${R.tier}`)}${R.boss.enraged ? " · Enraged" : ""}${ax ? ` · ${esc(ax.name)}` : ""}</small><b>${esc(R.boss.name)}</b>${mine ? `<em>Your steps ×${(mine.stride || 1).toFixed(2)}</em>` : ""}`;
   $("#arena").appendChild(el);
   v.intro = true;
   v.A?.intro(secs);
   FX.play("roar");
   setTimeout(() => {
-    v.intro = false; el.classList.add("out"); setTimeout(() => el.remove(), 400);
-    if (V.raid === v && !v.R?.over) { banner("Fight!"); FX.play("combo"); }
+    v.intro = false; el.classList.add("out");
+    setTimeout(() => { el.remove(); if (V.raid === v && !v.R?.over) { banner("Fight!"); FX.play("combo"); } }, 350);
   }, secs * 1000);
 }
 // Sound, shake and (for the person hit) a banner for each boss's signature move.

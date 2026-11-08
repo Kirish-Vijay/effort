@@ -1021,7 +1021,7 @@ s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-co
 .pf b { min-width: 0; font: 700 10.5px/1 var(--ui); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pf .st { display: grid; place-items: center; font-size: 10px; color: #fff; }
 .pf .st:empty { display: none; }
-.pf i { grid-column: 1 / -1; display: block; border-radius: 9px; background: rgba(255,255,255,.12); overflow: hidden; }
+.pf i { grid-column: 1 / -1; align-self: stretch; display: block; border-radius: 9px; background: rgba(255,255,255,.12); overflow: hidden; }
 .pf i s { display: block; height: 100%; width: 100%; transition: width .2s; }
 .pf .spb s { width: 0; background: linear-gradient(90deg, #6c5cff, #b693ff); }
 .pf.ready .spb s { background: linear-gradient(90deg, #ffb21e, #ffe58a); }
