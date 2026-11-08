@@ -54,8 +54,9 @@ const DEFAULT_RULES = {
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 4600000,      // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for
-                            // four or five tapping about 6 a second: 10 to 13 minutes of the 15)
+  raidHpBase: 6800000,      // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it. Tuned so
+                            // five tapping flat out (the 7/s cap) and dodging need 12 to 13 minutes of the 15: five times the
+                            // 2.5 minutes a squad took before the cap. Four, or slower tappers, often run out of time.
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
   noFrontDmg: 1.3,          // with nobody at the front, every hit lands this much harder
   lapHp: 2,                 // after the last boss the ladder loops: each lap has this much more health…
@@ -65,10 +66,12 @@ const DEFAULT_RULES = {
   stepHp: 1.05, stepDmg: 1.02, stepReward: 1.015, // (1: compounds instead; 0: the old ×2 laps)
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
-  raidBossDmg: 60,          // a Strike at level 1: about a fifth of a starter's health through armour (a third by phase 3), so dodge it
+  raidBossDmg: 72,          // a hit at level 1 (Screams, spores and fire take a share of this)
+  dodgeHit: 1.4,            // the moves you can dodge (Strikes, Stomps, Ooze, Vanish, Gust, Grab) hit this much harder: an undodged
+                            // Strike takes about 40% of a starter's health, so a squad that never dodges usually runs out of time
   raidIntro: 4,             // seconds of entrance before anyone can hit (the boss waits too)
   tapCap: 7,                // taps a second that count, for everyone (host or not): past this you're drumming, not walking
-  feastShare: 0.006,        // Feast: deal this share of the boss's health in 6s or it eats…
+  feastShare: 0.004,        // Feast: deal this share of the boss's health in 6s or it eats…
   feastHeal: 0.03,          // …and heals this share
   raidRewardPerMember: 70,  // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
@@ -93,12 +96,12 @@ const DEFAULT_RULES = {
   tapHeal: 0.0009,          // Second Wind: every tap heals you this share of your health (Brains makes it more)
   counterTaps: 1.2,         // Front, Counter: every hit you take, you hit back this many taps' worth (Guard adds more)
   backCrit: 0.12,           // Back, Sharpshooter: extra crit chance
-  interruptShare: 0.006,    // Interrupt: the squad deals this share of the boss's health during a wind-up to stagger it…
+  interruptShare: 0.004,    // Interrupt: the squad deals this share of the boss's health during a wind-up to stagger it…
   staggerMult: 0.5,         // …so it lands this hard (a Ground Slam is stopped outright)
   feebleMult: 0.35,         // SHHH: the next two attacks land this hard
   brewVuln: 0.2,            // Volatile Brew: the boss takes this much more for 10s
   prophecyCrit: 0.2,        // Pound-Shop Prophecy: extra crit chance for the squad
-  grabShare: 0.012,         // The Kraken's Grab: damage that frees someone, as a share of its health
+  grabShare: 0.008,         // The Kraken's Grab: damage that frees someone, as a share of its health
   stepsPerMile: 600,        // the journey map: the squad moves a mile for every 600 steps its average walker takes
   trackSteps: 30000,        // the season track: a tier for every 30,000 of your own steps…
   trackTiers: 20,           // …up to 20
@@ -545,36 +548,38 @@ function weekTable(members) {
 
 // The ladder: beat a boss and next Sunday you face the next one. After the last, it loops with
 // everything twice as tough (and twice as rich) each lap, so it never stops getting harder. hp/dmg/reward are multipliers; speed scales the gap between attacks.
-// dmg climbs gently: boss hits now take a real share of your health, and health grows slower than gear's damage.
+// hp and dmg are set by simulation (five squad-mates at the tap cap, dodging most moves, in that tier's gear), not by eye:
+// Rory's spores, Wisp's vanishing and Gale's gusts make them harder than their health suggests, and Grimm's club
+// (×1.3 on Strikes) and Ground Slam already hit like a truck, so its dmg sits low.
 // Each boss has its own signature move and its own rhythm: `pattern` is the pool it draws from in phases 1, 2 and 3.
 const BOSSES = [
   { id: "notification", name: "Brett", title: "A big fat round slime monster. Defeat it.", hp: 1, dmg: 1, speed: 1, reward: 1,
     sig: "ooze", style: "Slow and heavy. Slimes a whole row at a time",
     pattern: [["swipe", "swipe", "stomp", "stomp", "ooze"], ["swipe", "stomp", "stomp", "ooze", "scream", "feast"], ["swipe", "stomp", "ooze", "scream", "feast"]],
     attacks: { swipe: "Slap", stomp: "Belly Flop", scream: "Screech", feast: "Gorge", ooze: "Ooze" } },
-  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 1.07, dmg: 1.0, speed: 0.97, reward: 1.4,
+  { id: "autoplay", name: "Rory", title: "Orange creature that emerged from the swamp. Defeat it.", hp: 0.95, dmg: 0.9, speed: 0.97, reward: 1.4,
     sig: "spores", style: "Stampedes and clouds of spores that keep on hurting",
     pattern: [["swipe", "swipe", "stomp", "spores", "scream"], ["swipe", "stomp", "stomp", "spores", "spores", "feast"], ["stomp", "spores", "scream", "scream", "feast"]],
     attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Bellow", feast: "Gorge", spores: "Spore Cloud" } },
-  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.01, dmg: 1.08, speed: 0.94, reward: 1.9,
+  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 0.9, dmg: 1.0, speed: 0.94, reward: 1.9,
     sig: "vanish", style: "Fades out where you can't hit it, then picks off the weakest",
     pattern: [["swipe", "swipe", "scream", "vanish"], ["swipe", "scream", "vanish", "vanish", "feast"], ["swipe", "scream", "scream", "vanish", "feast"]],
     attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain", vanish: "Vanish" } },
-  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.16, dmg: 1.18, speed: 0.91, reward: 2.5,
+  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.0, dmg: 1.08, speed: 0.91, reward: 2.5,
     sig: "gust", style: "Fast, and blows the front row out of position",
     pattern: [["swipe", "swipe", "gust", "stomp", "scream"], ["swipe", "gust", "stomp", "scream", "feast", "gust"], ["swipe", "gust", "scream", "scream", "feast"]],
     attacks: { swipe: "Slice", stomp: "Downdraft", scream: "Howl", feast: "Siphon", gust: "Gust" } },
-  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.19, dmg: 1.28, speed: 0.88, reward: 3.2,
+  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.3, dmg: 1.22, speed: 0.88, reward: 3.2,
     sig: "grab", style: "Two tentacles hit at once, and it grabs people",
     swipeHits: 2, swipeMult: 0.65,
     pattern: [["swipe", "swipe", "grab", "stomp", "scream"], ["swipe", "swipe", "grab", "stomp", "feast"], ["swipe", "grab", "scream", "stomp", "feast", "grab"]],
     attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour", grab: "Grab" } },
-  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.66, dmg: 1.38, speed: 0.85, reward: 4,
+  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.35, dmg: 1.05, speed: 0.85, reward: 4,
     sig: "slam", style: "Slow, crushing club swings. Stop the Ground Slam or it flattens you",
     swipeMult: 1.3,
     pattern: [["swipe", "swipe", "stomp", "slam"], ["swipe", "stomp", "slam", "scream", "feast"], ["swipe", "slam", "slam", "scream", "feast"]],
     attacks: { swipe: "Club Swing", stomp: "Boot Stomp", scream: "War Cry", feast: "Feast", slam: "Ground Slam" } },
-  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.92, dmg: 1.5, speed: 0.82, reward: 5,
+  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.8, dmg: 1.38, speed: 0.82, reward: 5,
     sig: "breath", style: "Fire that keeps burning. Only a front row's raised shields cover the rows behind",
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
@@ -666,7 +671,8 @@ function makeMember(m, row) {
     cdUntil: 0, moveUntil: 0, dodgeUntil: 0, fullSince: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
-function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null } = {}) {
+// scale: the boss's health on top of everything else (the Midweek Hunt fights a smaller one).
+function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null, scale = 1 } = {}) {
   const r = rng(seed);
   const table = weekTable(members);
   const ms = members.map((m) => makeMember(m, table.rows.find((x) => x.id === m.id)));
@@ -674,7 +680,7 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   const lvl = 1;
   const def = bossFor(tier);
   // Shorter test raids get a proportionally smaller boss so the pacing feels the same.
-  const max = Math.round(RULES.raidHpBase * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1));
+  const max = Math.round(RULES.raidHpBase * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1) * scale);
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null, start: 0,
     // Short test raids pay proportionally less.
@@ -959,8 +965,8 @@ function bossAttack(R, echo = null) {
   if (N.cancel) { fx(R, { type: "blocked", attack: type, stopped: true }); say(R, `${name} never lands`, "good"); return; }
   let mult = (B.phase === 1 ? 1 : B.phase === 2 ? 1.25 : 1.5) * (N.staggered ? RULES.staggerMult : 1) * (echo ? 0.6 : 1);
   if (R.feeble > 0) { R.feeble--; mult *= RULES.feebleMult; }
-  // The big numbers sit on what you can dodge; the moves that catch everyone (Scream, spores, fire) stay light.
-  const base = RULES.raidBossDmg * mult;
+  // The big numbers sit on what you can dodge (hard); the moves that catch everyone (Scream, spores, fire) stay light.
+  const base = RULES.raidBossDmg * mult, hard = base * RULES.dodgeHit;
   const marked = (N.ids || []).map((id) => up.find((m) => m.id === id)).filter(Boolean);
   const who = (ms) => ms.map((m) => (m.you ? "you" : m.name)).join(" and ");
   const burn = (m, perSec, secs) => { if (m.alive) { m.dotBase = Math.max(R.t < m.dotUntil ? m.dotBase : 0, perSec); m.dotUntil = Math.max(m.dotUntil, R.t + secs); } };
@@ -968,14 +974,14 @@ function bossAttack(R, echo = null) {
     if (R.t < R.swarmUntil) { fx(R, { type: "attack", attack: "swipe", ids: [R.swarmBy] }); say(R, `The pigeons take the ${name}`, "good"); return; }
     const ts = (marked.length ? marked : [swipeTarget(R)].filter(Boolean)).filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: "swipe", ids: ts.map((m) => m.id) });
-    const ds = ts.map((m) => hit(R, m, base * (B.swipeMult || 1)));
+    const ds = ts.map((m) => hit(R, m, hard * (B.swipeMult || 1)));
     if (R.mods?.leech) { const healed = ds.some((d) => d > 0) ? Math.round(B.max * R.mods.leech) : 0; if (healed) { B.hp = Math.min(B.max, B.hp + healed); fx(R, { type: "leech", amt: healed }); } }
     if (ts.length) say(R, `${name} hits ${who(ts)} for ${ds.join(" and ")}`, "bad");
   } else if (type === "stomp" || type === "slam") {
     // Jump it: anyone who dodged after the warning is in the air when it lands.
     const ts = up.filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: type, ids: ts.map((m) => m.id) });
-    ts.forEach((m) => hit(R, m, base * (type === "slam" ? 0.9 : 0.4)));
+    ts.forEach((m) => hit(R, m, hard * (type === "slam" ? 0.9 : 0.4)));
     say(R, ts.length ? `${name} hits ${ts.length === up.length ? "everyone" : who(ts)}` : `Everyone jumps the ${name}`, ts.length ? "bad" : "good");
   } else if (type === "scream") {
     fx(R, { type: "attack", attack: "scream", ids: up.map((m) => m.id) });
@@ -993,7 +999,7 @@ function bossAttack(R, echo = null) {
     // Whoever dodged got away.
     const row = marked.filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: "ooze", ids: row.map((m) => m.id) });
-    row.forEach((m) => { hit(R, m, base * 0.35); if (m.alive) m.slimeUntil = R.t + 15; });
+    row.forEach((m) => { hit(R, m, hard * 0.35); if (m.alive) m.slimeUntil = R.t + 15; });
     say(R, row.length ? `${name} slimes ${who(row)}. Dodge or get healed` : `${name} misses`, row.length ? "bad" : "good");
   } else if (type === "spores") {
     fx(R, { type: "attack", attack: "spores", ids: up.map((m) => m.id) });
@@ -1003,18 +1009,18 @@ function bossAttack(R, echo = null) {
     const t = marked[0] || up.slice().sort((a, b) => a.hp / a.max - b.hp / b.max)[0];
     if (!t || dodged(R, t, N)) return;
     fx(R, { type: "attack", attack: "vanish", ids: [t.id] });
-    const d = hit(R, t, base * 1.4);
+    const d = hit(R, t, hard * 1.4);
     say(R, `${B.name} reappears behind ${t.you ? "you" : t.name} for ${d}`, "bad");
   } else if (type === "gust") {
     const row = marked.filter((m) => !dodged(R, m, N));
     fx(R, { type: "attack", attack: "gust", ids: row.map((m) => m.id) });
-    for (const m of row) { hit(R, m, base * 0.4); if (m.alive) { m.stunUntil = Math.max(m.stunUntil, R.t + 1.5); m.swing = 0; } }
+    for (const m of row) { hit(R, m, hard * 0.4); if (m.alive) { m.stunUntil = Math.max(m.stunUntil, R.t + 1.5); m.swing = 0; } }
     say(R, row.length ? `${name} knocks ${who(row)} flat` : `${name} hits nothing`, row.length ? "bad" : "good");
   } else if (type === "grab") {
     const t = marked[0] || swipeTarget(R);
     if (!t || dodged(R, t, N)) return;
     fx(R, { type: "attack", attack: "grab", ids: [t.id] });
-    hit(R, t, base * 0.3);
+    hit(R, t, hard * 0.3);
     if (t.alive && !R.grab) {
       const until = R.t + 10;
       R.grab = { id: t.id, need: Math.round(RULES.grabShare * B.max), dealt: 0, until };
@@ -1106,7 +1112,7 @@ function botAct(R, m) {
   if (R.t >= m.botNext) {
     // Bots tap at 3–5 taps a second, about what a person keeps up (the same for every class: people don't tap
     // faster because their ninja's quick).
-    const rate = m.tps ? m.tps * (0.85 + 0.3 * R.r()) : 3 + 2 * R.r(); // tps: a sim can play people who tap faster
+    const rate = m.tps ? Math.min(RULES.tapCap, m.tps * (0.85 + 0.3 * R.r())) : 3 + 2 * R.r(); // tps: a sim playing a person (capped like one)
     raidTap(R, m.id);
     m.botNext = Math.max(R.t - 0.1, m.botNext) + 1 / rate;
   }
@@ -1197,7 +1203,8 @@ function endRaid(R, how) {
   const n = R.members.length;
   const frac = 1 - R.boss.hp / R.boss.max;
   const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
-  const pool = (how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0) * (1 + (R.mods?.loot || 0));
+  // A loss still pays for the share of its health you took off it: a bit less if everyone ended up on the floor.
+  const pool = (how === "won" ? full : full * frac * (how === "timeout" ? 0.35 : 0.25)) * (1 + (R.mods?.loot || 0));
   // Your share: your damage to the boss × your stride, over the squad's. Gear loot perks add on top of the share.
   const weight = (m) => Math.max(0, m.dmg) * (m.stride || 1);
   const totalW = R.members.reduce((s, m) => s + weight(m), 0);
@@ -1498,7 +1505,8 @@ const baseTier = (t) => (isEventTier(t) ? Number(t) % 1000 : Number(t));
 // ---------- the Midweek Hunt ----------
 // Wednesdays, noon to 11pm UK: a five-minute fight against your squad's ladder boss, with your squad-mates' gear
 // fighting beside you as bots. Once a week; you keep your own share.
-const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5 };
+// hp: the Hunt's boss has this share of a Sunday boss's health per minute (you and three bots, who don't tap as hard).
+const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5, hp: 0.6 };
 
 // Miles along the route from the squad's daily average steps (each day only counts people who'd joined by then).
 const journeyMiles = (S, dailyAvgs, bonus = 0) => Math.min(S.miles[S.miles.length - 1], (dailyAvgs.reduce((a, x) => a + x, 0) / RULES.stepsPerMile) * (1 + bonus));

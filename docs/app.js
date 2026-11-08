@@ -1034,7 +1034,7 @@ function startHunt() {
   const H = S.D.hunt; if (!H?.open || H.done) return;
   FX.unlock();
   for (const m of H.roster) ANS[m.id] = { ...(m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id)), ...wearOf(m.wear) };
-  const R = G.raidCreate(H.roster, { seed: H.seed, tier: H.tier, minutes: H.minutes, affix: H.affix, den: H.den });
+  const R = G.raidCreate(H.roster, { seed: H.seed, tier: H.tier, minutes: H.minutes, affix: H.affix, den: H.den, scale: G.HUNT.hp });
   V.raid = {
     hunt: true, raid: { id: "hunt", goal: { affix: H.affix, den: H.den } }, roster: Object.fromEntries(H.roster.map((m) => [m.id, m])), my: me().id, R, host: true, A: null,
     present: Object.fromEntries(H.roster.map((m) => [m.id, 0])), heard: {}, tapBudget: {}, joinedAt: now(), out: { ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,

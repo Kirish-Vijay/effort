@@ -739,7 +739,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       if (st.done) return fail("You've hunted this week");
       const report: Record<string, Any> = Object.fromEntries((Array.isArray(body.members) ? body.members : []).filter((m: Any) => m && typeof m.id === "string").map((m: Any) => [m.id, m]));
       const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
-      const R = G.raidCreate(st.roster, { seed: st.seed, tier: st.tier, minutes: G.HUNT.minutes, affix: st.affix, den: den.levels });
+      const R = G.raidCreate(st.roster, { seed: st.seed, tier: st.tier, minutes: G.HUNT.minutes, affix: st.affix, den: den.levels, scale: G.HUNT.hp ?? 1 });
       const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
       fightReport(R, report, body);
       const dealt = R.members.reduce((a: number, m: Any) => a + m.dmg, 0);
