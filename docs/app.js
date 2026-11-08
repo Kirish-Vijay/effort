@@ -73,6 +73,7 @@ const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Math.round(n).toLocaleString("en-GB");
+const fmtShort = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}m` : n >= 1e4 ? `${Math.round(n / 1000)}k` : fmt(n));
 const mmss = (s) => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 // "4d 22h", "2h 14m", "3:12"
 function countdown(ms) {
@@ -147,6 +148,7 @@ function toast(msg) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => (t.hidden = true), 2800);
 }
+function toastClear() { clearTimeout(toast.timer); const t = $("#toast"); if (t) t.hidden = true; }
 async function copy(text, label = "Copied") {
   try { await navigator.clipboard.writeText(text); toast(label); }
   catch { prompt("Copy this", text); }
@@ -1035,7 +1037,7 @@ function startHunt() {
   const R = G.raidCreate(H.roster, { seed: H.seed, tier: H.tier, minutes: H.minutes, affix: H.affix, den: H.den });
   V.raid = {
     hunt: true, raid: { id: "hunt", goal: { affix: H.affix, den: H.den } }, roster: Object.fromEntries(H.roster.map((m) => [m.id, m])), my: me().id, R, host: true, A: null,
-    present: Object.fromEntries(H.roster.map((m) => [m.id, 0])), heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
+    present: Object.fromEntries(H.roster.map((m) => [m.id, 0])), heard: {}, tapBudget: {}, joinedAt: now(), out: { ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
     lastSent: 0, lastSave: Infinity, q: null, taps: 0, lvlBefore: level(), rosterKey: "", hostLast: performance.now(),
   };
   S.view = "raid";
@@ -2214,14 +2216,18 @@ function setBar(bar, frac, text) {
   const ghost = bar.querySelector(".ghost"); if (ghost) ghost.style.width = w;
   bar.querySelector("span").textContent = text;
 }
-let comboShown = 0;
+// "Max combo" shows once per streak: a streak only ends after two seconds without a combo (a squad-mate's combo
+// flickers as their taps arrive in batches, and used to fire the banner over and over).
+let comboShown = 0, comboPeak = 0, comboGone = 0;
 function paintCombo(combo, mult) {
   const el = $("#combo"); if (!el) return;
-  if (combo < 5) { el.innerHTML = ""; comboShown = 0; return; }
+  const t = performance.now();
+  if (combo < 5) { if (el.innerHTML) el.innerHTML = ""; comboShown = 0; comboGone ||= t; if (t - comboGone > 2000) comboPeak = 0; return; }
+  comboGone = 0;
   el.innerHTML = `<span class="ol">×${mult.toFixed(2)}</span><small>${combo} combo</small>`;
   el.classList.toggle("hot", combo >= 25);
-  for (const m of [10, 25, 50]) if (comboShown < m && combo >= m) { FX.play("combo"); el.classList.add("bump"); setTimeout(() => el.classList.remove("bump"), 120); if (m >= 25) banner(m >= 50 ? "Max combo" : "On fire"); }
-  comboShown = combo;
+  for (const m of [10, 25, 50]) if (comboShown < m && combo >= m && comboPeak < m) { FX.play("combo"); el.classList.add("bump"); setTimeout(() => el.classList.remove("bump"), 120); if (m >= 50) banner("Max combo"); }
+  comboShown = combo; comboPeak = Math.max(comboPeak, combo);
 }
 function stagePoint(e) {
   const st = $("#stage").getBoundingClientRect();
@@ -2474,8 +2480,8 @@ async function joinRaid() {
   for (const m of r.roster) ANS[m.id] = { ...(m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id)), ...wearOf(m.wear) };
   V.raid = {
     raid: r.raid, roster: Object.fromEntries(r.roster.map((m) => [m.id, m])), my: r.me, R: null, host: false, A: null,
-    present: {}, heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
-    lastSent: 0, lastSave: now(), q: null, taps: 0, lvlBefore: level(), rosterKey: "",
+    present: {}, heard: {}, tapBudget: {}, joinedAt: now(), out: { ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
+    lastSent: 0, lastSave: now(), q: null, taps: 0, tapSeq: null, tapSent: 0, lvlBefore: level(), rosterKey: "",
   };
   S.view = "raid";
   render();
@@ -2496,10 +2502,13 @@ function connectRaid() {
     });
 }
 // The host is whoever's been here longest and is still sending. Everyone works it out the same way.
-// Anyone ahead of you who has gone quiet for 4 seconds (a frozen or locked phone) is skipped.
+// Anyone ahead of you who has gone quiet for 4 seconds (a frozen or locked phone) is skipped. Nobody takes over from a
+// host who is still sending: a phone waking up used to grab the fight back and drag everyone to where it dozed off
+// (the boss's health jumped back up by hundreds of thousands).
 function elect() {
   const v = V.raid; if (!v || v.ended) return;
   const t = now(), patient = t - v.joinedAt < 4000;
+  if (!v.host && (t < (v.holdUntil || 0) || Object.keys(v.heard).some((id) => id !== v.my && id in v.present && t - v.heard[id] < 4000))) return;
   const ids = Object.keys(v.present).sort((a, b) => v.present[a] - v.present[b] || (a < b ? -1 : 1));
   const host = ids.find((id) => id === v.my || patient || t - (v.heard[id] || 0) < 4000);
   if (host === v.my && !v.host) becomeHost();
@@ -2510,15 +2519,17 @@ function becomeHost() {
   const v = V.raid;
   v.host = true;
   const started = Date.parse(v.raid.started_at), ends = Date.parse(v.raid.ends_at);
-  let R = v.R;
+  let R = v.R, fresh = false;
   if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
   if (!R) {
-    const here = Object.keys(v.present).filter((id) => v.roster[id]);
+    fresh = true;
     R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged, affix: v.raid.goal?.affix || null, den: v.raid.goal?.den || null });
     for (const m of R.members) m.away = !(m.id in v.present);
   }
   R.dur = (ends - started) / 1000;
   R.t = Math.max(R.t, (now() - started) / 1000);
+  // A brand-new fight starts with the entrance, however long the phones took to connect.
+  if (fresh) G.raidHold(R, G.RULES.raidIntro);
   v.R = R; v.hostLast = performance.now();
   syncMembers();
 }
@@ -2533,15 +2544,25 @@ function syncMembers() {
   for (const id of Object.keys(v.present)) if (v.roster[id] && !R.members.some((m) => m.id === id)) G.raidAddMember(R, fighter(id));
   for (const m of R.members) m.away = !(m.id in v.present);
 }
-// Nobody taps faster than about 15 times a second; anything beyond that from a squad-mate's phone is dropped.
-const TAPS_PER_SEC = 15;
+// Taps that count: G.RULES.tapCap a second for everyone, host or not (the host's own taps used to go straight in
+// uncapped, so a host drumming with three fingers out-hit the squad 4 to 1). slack: room for a burst, or for a
+// squad-mate's taps arriving in a batch.
+function tapGate(v, id, n, slack = 1) {
+  const cap = G.RULES.tapCap, t = performance.now(), b = (v.tapBudget[id] ??= { left: cap, at: t });
+  b.left = Math.min(cap * slack, b.left + ((t - b.at) / 1000) * cap); b.at = t;
+  const ok = Math.max(0, Math.min(Math.floor(b.left), n)); b.left -= ok;
+  return ok;
+}
+const dealtBy = (R) => (R ? R.members.reduce((s, m) => s + (m.dmg || 0), 0) : -1);
 function onInput(p) {
   const v = V.raid; if (!v?.host || !v.R || !p || !v.roster[p.id]) return;
-  const R = v.R, t = performance.now(), b = (v.tapBudget[p.id] ??= { left: TAPS_PER_SEC, at: t });
-  b.left = Math.min(TAPS_PER_SEC, b.left + ((t - b.at) / 1000) * TAPS_PER_SEC); b.at = t;
-  const taps = Math.min(Math.floor(b.left), Math.max(0, p.taps | 0));
-  b.left -= taps;
-  for (let i = 0; i < taps; i++) G.raidTap(R, p.id);
+  const R = v.R, m = R.members.find((x) => x.id === p.id);
+  // Taps come as a running total, so a message the network drops loses nothing: the next one carries them.
+  let n = Math.max(0, p.taps | 0);
+  if (p.n != null && m) { n = Math.max(0, (p.n | 0) - (m.sent || 0)); m.sent = Math.max(m.sent || 0, p.n | 0); }
+  const taps = tapGate(v, p.id, n, 2);
+  // They arrive in batches a few hundred ms apart: give the combo that long to survive.
+  for (let i = 0; i < taps; i++) G.raidTap(R, p.id, 0.6);
   if (p.ab) G.raidAbility(R, p.id);
   if (p.sp) G.raidSpecial(R, p.id);
   if (p.move) G.raidMove(R, p.id, p.move);
@@ -2549,21 +2570,27 @@ function onInput(p) {
 }
 function onSnapshot(p) {
   const v = V.raid; if (!v || v.ended || !p?.R) return;
+  // Damage dealt only ever goes up, so it says which of two versions of the fight is further on.
+  const theirs = dealtBy(p.R), mine = dealtBy(v.R), tol = (p.R.boss?.max || 0) * 0.002;
   if (v.host && p.host !== v.my) {
-    // Two hosts for a moment (we both joined at once): the one who's been here longer keeps it.
-    if ((v.present[p.host] ?? Infinity) <= (v.present[v.my] ?? Infinity)) v.host = false;
+    // Two hosts at once (a phone woke up, or we both joined together): whoever is further into the fight keeps it;
+    // if neither is, the one who's been here longer.
+    if (theirs > mine + tol || (theirs >= mine - tol && (v.present[p.host] ?? Infinity) <= (v.present[v.my] ?? Infinity))) v.host = false;
     else return;
-  }
+  } else if (v.R && theirs < mine - tol && now() - v.snapAt < 4000) return; // an older fight than ours: a stale host
   v.snapAt = now(); v.heard[p.host] = v.snapAt;
   const R = G.raidImport(p.R);
   const grew = !v.R || R.members.length !== v.R.members.length;
   v.R = R;
+  // Our running tap total carries on from what the host has counted (it starts there after a reload).
+  const meR = R.members.find((m) => m.id === v.my);
+  if (meR) { v.tapSeq = Math.max(v.tapSeq ?? 0, meR.sent || 0); v.tapSent = Math.max(v.tapSent || 0, meR.sent || 0); }
   for (const e of p.fx || []) { if (e.type === "tap" && e.id === v.my) continue; raidFx(e); }
   if (grew) render(); else paintRaid();
 }
 function onEnd(p) {
   const v = V.raid; if (!v || v.ended) return;
-  if (p?.result) showRaidResult(p.result, v);
+  if (p?.result) raidResultSoon(p.result, v);
 }
 function raidTick() {
   const v = V.raid; if (!v || v.ended) return;
@@ -2571,25 +2598,32 @@ function raidTick() {
   if (v.host && v.R) {
     const R = v.R, pn = performance.now();
     let dt = (pn - v.hostLast) / 1000; v.hostLast = pn;
+    // We've been asleep (locked phone, app in the background) and someone else has probably carried on: step back and
+    // listen for a few seconds before taking it up again, rather than dragging the squad back to where we dozed off.
+    if (dt > 2.5 && !v.hunt) { v.host = false; v.snapAt = t; v.holdUntil = t + 3000; return; }
     while (dt > 0 && !R.over) { G.raidStep(R, Math.min(0.25, dt)); dt -= 0.25; }
     const fx = R.fx.splice(0);
     for (const e of fx) raidFx(e);
-    v.fxOut.push(...fx.filter((e) => e.type !== "tap" || e.crit || e.swing || Math.random() < 0.5));
-    if (t - v.lastSent >= 150 || R.over) {
+    v.fxOut.push(...fx.filter((e) => e.type !== "tap" || e.crit || e.swing || Math.random() < 0.35));
+    // Five a second: with every phone's messages fanned out to every other phone, faster than this runs into the
+    // live connection's message limit, and dropped messages were losing squad-mates' taps.
+    if (t - v.lastSent >= 200 || R.over) {
       v.lastSent = t;
       v.ch?.send({ type: "broadcast", event: "st", payload: { host: v.my, R: G.raidExport(R), fx: v.fxOut.splice(0, 40) } });
       v.fxOut.length = 0;
     }
-    if (!v.hunt && t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) showRaidResult(r.result, v); }).catch(() => {}); }
+    if (!v.hunt && t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) raidResultSoon(r.result, v); }).catch(() => {}); }
     if (R.over) return hostFinish();
     if (rosterKey(R) !== v.rosterKey) return render();
   } else {
-    // Not the host: send what you did since the last message.
-    const o = v.out;
-    if ((o.taps || o.ab || o.sp || o.move || o.ans != null) && t - v.lastSent >= 120) {
-      v.lastSent = t;
-      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, ...o } });
-      v.out = { taps: 0, ab: false, sp: false, move: null, ans: null };
+    // Not the host: taps go as a running total about three times a second; a Dodge, special or answer straight away.
+    // An answer is re-sent until the host has it (a dropped message used to lose it).
+    const o = v.out, gap = t - v.lastSent, T = v.R?.trivia, ans = o.ans ?? (v.pendingAns != null && T?.per[v.my] && !T.per[v.my].ans ? v.pendingAns : null);
+    const act = o.ab || o.sp || o.move || o.ans != null;
+    if ((act && gap >= 100) || ((v.tapSeq || 0) > v.tapSent && gap >= 300) || (ans != null && gap >= 600)) {
+      v.lastSent = t; v.tapSent = v.tapSeq || 0;
+      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, n: v.tapSeq || 0, ab: o.ab, sp: o.sp, move: o.move, ans } });
+      v.out = { ab: false, sp: false, move: null, ans: null };
     }
     // The host has gone quiet: work out who takes over (maybe us, from the last snapshot).
     if (t - v.snapAt > 4000) elect();
@@ -2604,25 +2638,44 @@ async function hostFinish() {
   v.finishing = true;
   clearInterval(v.timer);
   const R = v.R;
-  if (v.A && R.result.how === "won") { v.A.bossKO(); banner("K.O.!", `${R.boss.name} is down`); FX.play("ko"); }
+  raidOver(v, R.result?.how);
   const result = await reportRaid(R);
   if (result) v.ch?.send({ type: "broadcast", event: "end", payload: { result } });
-  setTimeout(() => showRaidResult(result, v), R.result?.how === "won" ? 1600 : 200);
+  raidResultSoon(result, v);
 }
+// The fight's over: clear the fight's overlays and play the K.O. (or the loss) on every phone, host or not.
+function raidOver(v, how) {
+  if (!v || v.koAt) return;
+  v.koAt = performance.now() - (how === "won" ? 0 : 1500);
+  toastClear(); hint(null);
+  for (const id of ["#trivia", "#veil"]) { const el = $(id); if (el) el.innerHTML = ""; }
+  FX.music(false);
+  if (how === "won") { v.A?.bossKO(); banner("K.O.!", `${v.R?.boss.name || ""} is down`); FX.play("ko"); FX.shake($("#shake"), 14, 700); if (!v.A) { const [x, y] = bossXY(); FX.sparks(x, y, "#ffd166", 50, 900); } }
+  else banner(how === "wiped" ? "Wiped" : "Time's up");
+}
+// Results once the K.O. has played out (about 3 seconds after the boss went down).
+function raidResultSoon(result, v) {
+  if (v?.resultAt) return;
+  if (v) { v.resultAt = 1; if (!v.koAt) raidOver(v, result?.how); }
+  const wait = v?.koAt ? Math.max(0, v.koAt + 3000 - performance.now()) : 0;
+  setTimeout(() => showRaidResult(result, v), wait);
+}
+// How long the fight ran, from the entrance to the end (for taps a second).
+const fightSecs = (R) => Math.max(0, Math.round(Math.min(R.t, R.dur) - (R.start || 0)));
 async function reportRaid(R) {
   const v = V.raid; if (!v) return null;
   v.finishing = true;
   const res = R.result || { how: R.boss.hp <= 0 ? "won" : "timeout" };
   if (v.hunt) {
     try {
-      const r = await call("hunt_finish", { token: S.token, how: res.how, frac: 1 - R.boss.hp / R.boss.max, members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
+      const r = await call("hunt_finish", { token: S.token, how: res.how, frac: 1 - R.boss.hp / R.boss.max, secs: fightSecs(R), members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken, taps: m.taps || 0 })) });
       return { ...R.result, hunt: true, shares: R.result.shares.map((x) => ({ ...x, reward: x.id === v.my ? r.amount : 0, tax: 0, total: x.id === v.my ? r.amount : 0 })), settle: null };
     } catch (e) { toast(e.message); return { ...R.result, hunt: true, shares: [], settle: null }; }
   }
   try {
-    const r = await call("raid_finish", { token: S.token, raid_id: v.raid.id, how: res.how, frac: 1 - R.boss.hp / R.boss.max, paralysed: !!R.paralysed, deepDive: R.deepDive || 0,
-      members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
-    if (!v.host) showRaidResult(r.result, v);
+    const r = await call("raid_finish", { token: S.token, raid_id: v.raid.id, how: res.how, frac: 1 - R.boss.hp / R.boss.max, paralysed: !!R.paralysed, deepDive: R.deepDive || 0, secs: fightSecs(R),
+      members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken, taps: m.taps || 0 })) });
+    if (!v.host) raidResultSoon(r.result, v);
     return r.result;
   } catch (e) { toast(e.message); v.finishing = false; return null; }
 }
@@ -2632,9 +2685,12 @@ function leaveRaid() {
   clearInterval(v.timer);
   try { v.ch?.unsubscribe(); } catch { /* already gone */ }
   v.A?.dispose(); FX.destroy();
+  toastClear();
   V.raid = null;
 }
 function showRaidResult(result, v) {
+  if (v?.shown) return;
+  if (v) v.shown = true;
   const R = v?.R || null, lvlBefore = v?.lvlBefore ?? level();
   if (V.raid) leaveRaid();
   if (!result) { S.view = "main"; refresh(true).then(render); return; }
@@ -2663,11 +2719,10 @@ function renderRaid() {
     <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
     <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
     ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f" style="transform:scale(${G.stepScale(m.stride)})">${head2d(ANS[m.id])}</div>${esc(m.id === v.my ? "You" : m.name)}</div>`).join("")}</div>`}
-    <div class="foot"><div class="log" id="feed"></div>
+    <div class="foot">${partyFrames(R, v)}<div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
         <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
-        <div class="rside"><div class="sqsp" id="sqsp">${R.members.map((m) => `<span class="q" id="q-${m.id}"><i></i><b>${esc((m.id === v.my ? "You" : m.name).slice(0, 3))}</b></span>`).join("")}</div>
-          <button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div></div>
+        <div class="rside"><button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div></div>
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
   FX.init($("#arena"));
@@ -2675,19 +2730,40 @@ function renderRaid() {
   if (three) {
     v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m, i) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: i % 2 ? "mid" : "front", scale: G.stepScale(m.stride) })) });
     if (!v.A) return renderRaid();
-    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.id === v.my ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.id === v.my ? "You" : m.name)}<span class="pw ${m.stride >= 1.15 ? "hi" : m.stride <= 0.85 ? "lo" : ""}">×${(m.stride || 1).toFixed(2)}</span><span class="st"></span><i><s></s></i></div>`).join("");
+    // Over the heroes, just a small marker in each one's colour (their health lives in the party frames).
+    $("#plates").innerHTML = R.members.map((m) => `<div class="mk ${m.id === v.my ? "me" : ""}" id="np-${m.id}" style="--mc:${mateCol(m.id)}">${m.id === v.my ? "" : esc(initialOf(m.name))}</div>`).join("");
   }
   v.abRow = null; v.q = null;
-  if (!v.toasted) {
-    v.toasted = true;
-    const mine = R.members.find((m) => m.id === v.my) || v.roster[v.my];
-    setTimeout(() => toast(mine.title === "top" ? `Top walker this week: you hit ×${mine.stride.toFixed(2)}` : mine.title === "last" ? `Dead weight this week: ×${mine.stride.toFixed(2)} power, and the boss knows it` : `Your steps give you ×${mine.stride.toFixed(2)} power`), 900);
-    FX.play("roar"); setTimeout(() => banner(R.boss.name, R.boss.title), 150);
-    if (G.affixInfo(R.affix)) setTimeout(() => toast(`${G.affixInfo(R.affix).name}: ${G.affixInfo(R.affix).what}`), 3200);
-  }
+  if (!v.toasted) { v.toasted = true; raidIntro(v, R); }
   $("#arena").classList.toggle("fogged", G.affixList(R.affix).includes("fog"));
   $("#arena").classList.toggle("frosted", G.affixList(R.affix).includes("frost"));
   paintRaid();
+}
+// Everyone's colour and initial: the same on their party frame and on the marker over their hero.
+const mateCol = (id) => `hsl(${G.hash(String(id)) % 360} 75% 64%)`;
+const initialOf = (name) => (String(name || "?").trim()[0] || "?").toUpperCase();
+// The squad in a fixed row: initial, short name, health, special charge, and a mark when down.
+function partyFrames(R, v) {
+  return `<div class="party" id="party">${R.members.map((m) => `<div class="pf ${m.id === v.my ? "me" : ""}" id="pf-${m.id}" style="--mc:${mateCol(m.id)}">
+    <span class="av">${esc(initialOf(m.name))}</span><b>${esc(m.id === v.my ? "You" : m.name)}</b><span class="st"></span><i class="hpb"><s></s></i><i class="spb"><s></s></i></div>`).join("")}</div>`;
+}
+// The entrance: a name card while the camera finds the boss and it roars; taps unlock on "Fight!". It plays in full
+// at the start (the boss holds its first move meanwhile) and as a quick card for anyone arriving in the first seconds.
+function raidIntro(v, R) {
+  const left = (R.start || 0) - R.t, secs = left > 0.8 ? Math.min(5, left) : R.t - (R.start || 0) < 15 ? 1.6 : 0;
+  if (!secs || R.over) return;
+  const mine = R.members.find((m) => m.id === v.my), ax = G.affixInfo(R.affix);
+  const el = document.createElement("div");
+  el.className = "bosscard";
+  el.innerHTML = `<small>${esc(R.boss.eventName || `Tier ${R.tier}`)}${R.boss.enraged ? " · Enraged" : ""}${ax ? ` · ${esc(ax.name)}` : ""}</small><b>${esc(R.boss.name)}</b>${mine ? `<em>Your steps ×${(mine.stride || 1).toFixed(2)}</em>` : ""}`;
+  $("#arena").appendChild(el);
+  v.intro = true;
+  v.A?.intro(secs);
+  FX.play("roar");
+  setTimeout(() => {
+    v.intro = false; el.classList.add("out"); setTimeout(() => el.remove(), 400);
+    if (V.raid === v && !v.R?.over) { banner("Fight!"); FX.play("combo"); }
+  }, secs * 1000);
 }
 // Sound, shake and (for the person hit) a banner for each boss's signature move.
 const SIG_FX = { ooze: ["ooze", 6, "Slimed: half damage till you move or get healed"], spores: ["spores", 4, "Spores: healing clears them"], vanish: ["swipe", 9, ""],
@@ -2748,14 +2824,14 @@ function raidFx(e) {
     }
     case "hurt": {
       A?.hurt(e.id);
-      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${e.amt}`, { size: 22, color: "#ff6b78" });
+      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${fmt(e.amt)}`, { size: 22, color: "#ff6b78" });
       if (e.id === my) { FX.flash($("#arena")); FX.play("hurt"); FX.buzz(40); }
       break;
     }
     case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { size: 20, color: "#9af0ff" }); break; }
     case "shield": FX.play("shield"); A?.shield(e.ids, 6 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
     case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
-    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); break; }
+    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${fmt(e.amt)}`, { size: 22, color: "#7ee29d" }); break; }
     case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
     case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
     case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("Back up!"); break;
@@ -2767,7 +2843,7 @@ function raidFx(e) {
       if (S) {
         const [x, y] = mateXY(e.id);
         FX.number(x, y - 34, S.name, { size: 24, grad: ["#ffffff", SPECIAL_COL[e.cls] || "#ffd166"] });
-        if (e.id === my || ["lollipop", "librarian", "hedge", "pigeon"].includes(e.cls)) banner(S.name, e.id === my ? S.what : `${m.name}: ${S.what}`);
+        if (e.id === my || ["lollipop", "librarian", "hedge", "pigeon"].includes(e.cls)) banner(S.name, e.id === my ? "" : m.name);
         if (["bouncer", "mad", "pickpocket"].includes(e.cls) || e.roll === "crit") setTimeout(() => { FX.sparks(bx, by, SPECIAL_COL[e.cls] || "#ffd166", 30, 700); bossHurt(true); }, 380);
       }
       break;
@@ -2779,13 +2855,13 @@ function raidFx(e) {
       break;
     }
     case "blocked": A?.blocked(); FX.play("shield"); FX.number(bx, by + 10, e.stopped ? "Never landed" : "Blocked", { size: 26, grad: ["#ffffff", "#8fd8ff"] }); break;
-    case "pulse": { A?.pulse(e.by, e.id); if (e.id === my || e.by === my) FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${e.amt}`, { size: 16, color: "#7ee29d" }); break; }
+    case "pulse": { A?.pulse(e.by, e.id); if (e.id === my || e.by === my) FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${fmt(e.amt)}`, { size: 16, color: "#7ee29d" }); break; }
     case "release": { A?.release(e.id, e.freed); if (e.freed) { FX.play("release"); const [x, y] = mateXY(e.id); FX.number(x, y - 28, "Free!", { size: 22, grad: ["#ffffff", "#c9a6ff"] }); } break; }
     case "trivia": FX.play("warn"); break;
     case "answered": if (e.id !== my) FX.play(e.valid ? "tap" : "blocked"); break;
     case "triviaDone": FX.play(e.failed ? "wrong" : "right"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(true); } break;
     case "paralysed": FX.play("stun"); banner("Paralysed", `${fmt(G.RULES.paralysedSteps)} steps down tomorrow`); break;
-    case "end": FX.music(false); break;
+    case "end": raidOver(v, e.how); break;
   }
 }
 function paintRaid() {
@@ -2793,6 +2869,10 @@ function paintRaid() {
   const R = v.R, B = R.boss, mine = R.members.find((m) => m.id === v.my);
   const clock = $("#r-clock"); clock.textContent = mmss(R.dur - R.t); clock.parentElement.classList.toggle("low", R.dur - R.t <= 30);
   setBar($("#r-hp"), B.hp / B.max, `${fmt(B.hp)} / ${fmt(B.max)}`);
+  // Over: the K.O. has the screen now (no prompts, questions or tooltips over it).
+  if (v.koAt) return;
+  // The fight says it isn't winding up: make sure the 3D boss isn't still glowing from an event that never arrived.
+  if (v.A) { if (!(B.next && B.warned)) v.A.calm(); if (!B.hidden) v.A.unghost(); }
   const pct = Math.ceil((B.hp / B.max) * 10) / 10;
   if (!v.A && pct !== v.bossPct && $("#boss")) { v.bossPct = pct; $("#boss").innerHTML = Walker.boss(B.hp / B.max, false); }
   const tele = $("#tele"), tt = tele.querySelector(".tt"), cdbar = tele.querySelector(".cd");
@@ -2802,8 +2882,9 @@ function paintRaid() {
     tt.innerHTML = `${esc(B.attacks.grab || "Grab")}: ${esc(who?.id === v.my ? "you" : who?.name || "")}<small>${fmt(R.grab.dealt)} / ${fmt(R.grab.need)} to break free</small>`;
     cdbar.style.width = `${Math.max(0, (R.grab.until - R.t) / 10) * 100}%`;
   } else if (B.feast) {
-    tele.className = "tele feast";
-    tt.innerHTML = `${esc(B.attacks.feast)}<small>${fmt(B.feast.dealt)} / ${fmt(B.feast.need)} damage</small>`;
+    const done = B.feast.dealt >= B.feast.need;
+    tele.className = `tele feast ${done ? "done" : ""}`;
+    tt.innerHTML = `${esc(B.attacks.feast)}<small>${done ? "stopped" : `${fmt(B.feast.dealt)} / ${fmt(B.feast.need)} damage`}</small>`;
     cdbar.style.width = `${Math.max(0, (B.feast.until - R.t) / 6) * 100}%`;
   } else if (B.next && R.t >= B.next.warnAt) {
     const a = G.ATTACKS[B.next.type], total = B.next.at - B.next.warnAt;
@@ -2818,21 +2899,25 @@ function paintRaid() {
     cdbar.style.width = "0";
   }
   paintBuffs(R);
+  const C = R.combo && R.t <= R.combo.until ? R.combo : null;
   for (const m of R.members) {
-    const el = mateEl(m.id); if (!el) continue;
-    const f = m.hp / m.max;
-    el.classList.toggle("dead", !m.alive);
-    el.classList.toggle("away", !!m.away);
-    if (v.A) {
-      const pt = v.A.screenOf(m.id, 1.05);
-      if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1]}px) translate(-50%, -100%)`;
-      const bar = el.querySelector("s");
-      bar.style.width = `${f * 100}%`;
-      bar.style.background = f > 0.5 ? "var(--green)" : f > 0.25 ? "var(--gold)" : "var(--red)";
-      const st = m.away ? "eye" : !m.alive ? "skull" : R.grab?.id === m.id ? "lock" : R.t < m.stunUntil ? "bolt" : R.t < m.dotUntil ? "fire" : R.t < m.slimeUntil ? "warning" : R.t < m.shieldUntil ? "guard" : m.swing ? "bigSwing" : (m.sp || 0) >= G.RULES.spMax ? "star" : "";
-      const stEl = el.querySelector(".st");
-      if (stEl.dataset.s !== st) { stEl.dataset.s = st; stEl.innerHTML = st ? ic(st) : ""; }
+    const f = Math.max(0, Math.min(1, m.hp / m.max));
+    const el = mateEl(m.id);
+    if (el) {
+      el.classList.toggle("dead", !m.alive); el.classList.toggle("away", !!m.away);
+      if (v.A) { const pt = v.A.screenOf(m.id, 1.05); if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1]}px) translate(-50%, -100%)`; }
     }
+    const pf = $(`#pf-${m.id}`); if (!pf) continue;
+    pf.classList.toggle("dead", !m.alive); pf.classList.toggle("away", !!m.away);
+    pf.classList.toggle("low", m.alive && f <= 0.3);
+    pf.classList.toggle("ready", (m.sp || 0) >= G.RULES.spMax && m.alive);
+    pf.classList.toggle("in", !!C?.ids.includes(m.id));
+    const hp = pf.querySelector(".hpb s");
+    hp.style.width = `${f * 100}%`; hp.style.background = f > 0.5 ? "var(--green)" : f > 0.25 ? "var(--gold)" : "var(--red)";
+    pf.querySelector(".spb s").style.width = `${Math.min(1, (m.sp || 0) / G.RULES.spMax) * 100}%`;
+    const st = m.away ? "eye" : !m.alive ? "skull" : R.grab?.id === m.id ? "lock" : R.t < m.stunUntil ? "bolt" : R.t < m.dotUntil ? "fire" : R.t < m.slimeUntil ? "warning" : m.swing ? "bigSwing" : "";
+    const stEl = pf.querySelector(".st");
+    if (stEl.dataset.s !== st) { stEl.dataset.s = st; stEl.innerHTML = st ? ic(st) : ""; }
   }
   const ab = $("#ab");
   if (!mine) { ab.disabled = true; hint(`${ic("squad")} Joining the fight…`); }
@@ -2850,17 +2935,9 @@ function paintRaid() {
     sp.querySelector(".pct").textContent = chg < 1 ? `${Math.floor(chg * 100)}%` : "";
     const spReady = chg >= 1 && mine.alive && R.t >= mine.stunUntil && R.t >= mine.moveUntil;
     sp.disabled = !spReady; sp.classList.toggle("ready", spReady);
-    if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); toast(`${S.name} is ready: ${S.what}`); }
+    // Ready: the button lights up and chimes (no toast: it used to sit over the results screen).
+    if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); }
     if (!spReady) v.spToast = false;
-    // Everyone's special charge, and who's in the combo that's going.
-    const C = R.combo && R.t <= R.combo.until ? R.combo : null;
-    for (const m of R.members) {
-      const q = $(`#q-${m.id}`); if (!q) continue;
-      q.querySelector("i").style.width = `${Math.min(1, (m.sp || 0) / G.RULES.spMax) * 100}%`;
-      q.classList.toggle("full", (m.sp || 0) >= G.RULES.spMax && m.alive);
-      q.classList.toggle("in", !!C?.ids.includes(m.id));
-      q.classList.toggle("dead", !m.alive);
-    }
     const dg = $("#dg"), dcd = Math.max(0, mine.dodgeUntil - R.t), marked = B.warned && (B.next?.ids || []).includes(mine.id);
     dg.disabled = dcd > 0 || !mine.alive || R.t < mine.stunUntil;
     dg.querySelector("em").textContent = dcd > 0 ? Math.ceil(dcd) : "";
@@ -2919,18 +2996,19 @@ function paintTrivia() {
 }
 function raidTapEvent(e) {
   const v = V.raid; if (!v?.R) return;
-  const mine = v.R.members.find((m) => m.id === v.my);
-  if (!mine || !mine.alive || v.R.t < mine.stunUntil || v.R.t < mine.moveUntil || v.R.over) return;
+  const R = v.R, mine = R.members.find((m) => m.id === v.my);
+  if (!mine || !mine.alive || v.intro || R.t < (R.start || 0) || R.t < mine.stunUntil || R.t < mine.moveUntil || R.over) return;
+  if (!tapGate(v, "me", 1)) return; // past the cap: drumming, not tapping
   const [x, y] = FX.local(e.clientX, e.clientY);
   v.taps++;
   let hit;
-  if (v.host) { hit = G.raidTap(v.R, v.my); if (!hit) return; }
-  else if (v.R.boss.hidden) { v.out.taps++; hit = { dmg: 0, miss: true }; }
+  if (v.host) { hit = G.raidTap(R, v.my); if (!hit) return; }
+  else if (R.boss.hidden) { v.tapSeq = (v.tapSeq || 0) + 1; hit = { dmg: 0, miss: true }; }
   else {
     // The host decides the real hit; show a fair estimate straight away so tapping feels instant.
-    v.out.taps++;
+    v.tapSeq = (v.tapSeq || 0) + 1;
     const swing = mine.swing > 0;
-    hit = { dmg: (20 + mine.g.power * 4) * mine.stride * G.RULES.lineMult * (1 + mine.combo / (G.RULES.comboMax * 2)) * (swing ? 3 : 1), crit: false, swing };
+    hit = { dmg: G.tapBase(mine) * (1 + (mine.combo / G.RULES.comboMax) * mine.e.combo) * (swing ? 3 : 1), crit: false, swing };
   }
   if (hit.miss) { FX.number(x, y, "Miss", { size: 18, color: "#b9c8ff" }); FX.play("blocked"); return; }
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, color: hit.swing ? "#ff9f43" : "#ffd166" });
@@ -2951,7 +3029,7 @@ function raidAct(kind, val) {
     if (kind === "sp") v.out.sp = true;
     if (kind === "move") v.out.move = val;
     if (kind === "ans") {
-      v.out.ans = val; v.sentAns = true;
+      v.out.ans = val; v.pendingAns = val; v.sentAns = true;
       // Check it here too, so you see straight away whether it counts.
       const p = v.R.trivia?.per[v.my];
       if (p) { v.localAns = { text: val, ...p.q.check(val) }; return v.localAns; }
@@ -2982,8 +3060,8 @@ function renderResult() {
     title = { won: "Victory", timeout: "Time up", wiped: "Defeat" }[out.how];
     sub = `${esc(out.boss)} · ${Math.round(out.frac * 100)}% dealt`;
     body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed.</b><span class="small muted">Everyone who fought starts tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></section>` : ""}
-      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Steps</th><th>Damage</th><th>Loot</th><th>Tax</th></tr>
-        ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === my ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}${esc(s.id === my ? "You" : s.name)}</td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmt(s.dmg)}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
+      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Steps</th><th>Damage</th><th>Taps/s</th><th>Loot</th><th>Tax</th></tr>
+        ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === my ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}<span class="rn">${esc(s.id === my ? "You" : s.name)}</span></td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmtShort(s.dmg)}</td><td>${s.tps != null ? s.tps.toFixed(1) : "–"}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
         ${out.settle ? `<p class="small muted" style="margin:10px 0 0">${ic("coins")} Weekly settlement: ${esc(nm(out.settle.from))} (lowest walker) paid ${esc(nm(out.settle.to))} ${fmt(out.settle.amount)} Efforts.</p>` : ""}</section>
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
         ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}

@@ -22,10 +22,8 @@ const DEFAULT_RULES = {
   // Walking is the point. In the Sunday raid your steps this week, against the squad's average, decide how hard you hit.
   strideMin: 0.5,           // half the squad average or less: half damage
   strideMax: 1.6,           // the hardest walker hits up to 60% harder
-  stepsShare: 0.5,          // half of the raid's reward is split by steps walked, half by what you did in the fight
-  topLoot: 0.25,            // the week's top walker gets +25% on their share...
-  lastLoot: -0.25,          // ...the week's lowest walker gets 25% less...
-  slackerTax: 0.1,          // ...and pays 10% of their week's Efforts to the top walker
+  // Raid loot: your share of the pool is your damage × your stride, over the squad's (gear loot perks add on top).
+  slackerTax: 0.1,          // the week's lowest walker pays 10% of their week's Efforts to the top walker
   slackerAggro: 2.5,        // the boss goes for the lowest walker this many times as often
   windowHour: 18,           // the Taxman's in from 6pm...
   windowCloseHour: 23,      // ...till 11pm: start your fight any time in between (never on Sundays: no tax that day)
@@ -56,7 +54,8 @@ const DEFAULT_RULES = {
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 2560000,       // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for four)
+  raidHpBase: 4600000,      // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it (tuned for
+                            // four or five tapping about 6 a second: 10 to 13 minutes of the 15)
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
   noFrontDmg: 1.3,          // with nobody at the front, every hit lands this much harder
   lapHp: 2,                 // after the last boss the ladder loops: each lap has this much more health…
@@ -66,7 +65,11 @@ const DEFAULT_RULES = {
   stepHp: 1.05, stepDmg: 1.02, stepReward: 1.015, // (1: compounds instead; 0: the old ×2 laps)
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
-  raidBossDmg: 14,          // a swipe at level 1
+  raidBossDmg: 60,          // a Strike at level 1: about a fifth of a starter's health through armour (a third by phase 3), so dodge it
+  raidIntro: 4,             // seconds of entrance before anyone can hit (the boss waits too)
+  tapCap: 7,                // taps a second that count, for everyone (host or not): past this you're drumming, not walking
+  feastShare: 0.006,        // Feast: deal this share of the boss's health in 6s or it eats…
+  feastHeal: 0.03,          // …and heals this share
   raidRewardPerMember: 70,  // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
   raidGoalPerDay: 5000,     // the squad's weekly goal before Sunday: this many steps a day for each player…
@@ -87,7 +90,7 @@ const DEFAULT_RULES = {
   openingBonus: 0.4,        // hit harder while the boss winds up on someone else (it's looking the other way)
   formationBonus: 0.1,
   homeBonus: 1.12,          // your class's home row: hit this much harder there, and take this much less      // every row filled: the whole squad hits this much harder
-  tapHeal: 0.0012,          // Second Wind: every tap heals you this share of your health (Brains makes it more)
+  tapHeal: 0.0009,          // Second Wind: every tap heals you this share of your health (Brains makes it more)
   counterTaps: 1.2,         // Front, Counter: every hit you take, you hit back this many taps' worth (Guard adds more)
   backCrit: 0.12,           // Back, Sharpshooter: extra crit chance
   interruptShare: 0.006,    // Interrupt: the squad deals this share of the boss's health during a wind-up to stagger it…
@@ -542,6 +545,7 @@ function weekTable(members) {
 
 // The ladder: beat a boss and next Sunday you face the next one. After the last, it loops with
 // everything twice as tough (and twice as rich) each lap, so it never stops getting harder. hp/dmg/reward are multipliers; speed scales the gap between attacks.
+// dmg climbs gently: boss hits now take a real share of your health, and health grows slower than gear's damage.
 // Each boss has its own signature move and its own rhythm: `pattern` is the pool it draws from in phases 1, 2 and 3.
 const BOSSES = [
   { id: "notification", name: "Brett", title: "A big fat round slime monster. Defeat it.", hp: 1, dmg: 1, speed: 1, reward: 1,
@@ -552,25 +556,25 @@ const BOSSES = [
     sig: "spores", style: "Stampedes and clouds of spores that keep on hurting",
     pattern: [["swipe", "swipe", "stomp", "spores", "scream"], ["swipe", "stomp", "stomp", "spores", "spores", "feast"], ["stomp", "spores", "scream", "scream", "feast"]],
     attacks: { swipe: "Chomp", stomp: "Stampede", scream: "Bellow", feast: "Gorge", spores: "Spore Cloud" } },
-  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.01, dmg: 1.15, speed: 0.94, reward: 1.9,
+  { id: "leftonread", name: "Wisp", title: "Cold, quiet, always behind you", hp: 1.01, dmg: 1.08, speed: 0.94, reward: 1.9,
     sig: "vanish", style: "Fades out where you can't hit it, then picks off the weakest",
     pattern: [["swipe", "swipe", "scream", "vanish"], ["swipe", "scream", "vanish", "vanish", "feast"], ["swipe", "scream", "scream", "vanish", "feast"]],
     attacks: { swipe: "Chill Touch", stomp: "Phase Slam", scream: "Wail", feast: "Drain", vanish: "Vanish" } },
-  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.16, dmg: 1.3, speed: 0.91, reward: 2.5,
+  { id: "scroll", name: "Gale", title: "Never stops spinning", hp: 1.16, dmg: 1.18, speed: 0.91, reward: 2.5,
     sig: "gust", style: "Fast, and blows the front row out of position",
     pattern: [["swipe", "swipe", "gust", "stomp", "scream"], ["swipe", "gust", "stomp", "scream", "feast", "gust"], ["swipe", "gust", "scream", "scream", "feast"]],
     attacks: { swipe: "Slice", stomp: "Downdraft", scream: "Howl", feast: "Siphon", gust: "Gust" } },
-  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.19, dmg: 1.45, speed: 0.88, reward: 3.2,
+  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.19, dmg: 1.28, speed: 0.88, reward: 3.2,
     sig: "grab", style: "Two tentacles hit at once, and it grabs people",
     swipeHits: 2, swipeMult: 0.65,
     pattern: [["swipe", "swipe", "grab", "stomp", "scream"], ["swipe", "swipe", "grab", "stomp", "feast"], ["swipe", "grab", "scream", "stomp", "feast", "grab"]],
     attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour", grab: "Grab" } },
-  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.66, dmg: 1.6, speed: 0.85, reward: 4,
+  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.66, dmg: 1.38, speed: 0.85, reward: 4,
     sig: "slam", style: "Slow, crushing club swings. Stop the Ground Slam or it flattens you",
     swipeMult: 1.3,
     pattern: [["swipe", "swipe", "stomp", "slam"], ["swipe", "stomp", "slam", "scream", "feast"], ["swipe", "slam", "slam", "scream", "feast"]],
     attacks: { swipe: "Club Swing", stomp: "Boot Stomp", scream: "War Cry", feast: "Feast", slam: "Ground Slam" } },
-  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.92, dmg: 1.9, speed: 0.82, reward: 5,
+  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.92, dmg: 1.5, speed: 0.82, reward: 5,
     sig: "breath", style: "Fire that keeps burning. Only a front row's raised shields cover the rows behind",
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
@@ -658,7 +662,7 @@ function makeMember(m, row) {
   const e = edges(g), maxHp = e.hp;
   const cls = classOf(m.stats || {}).id, best = "mid", pos = "mid";
   return { ...m, g, e, perks, gearPts: points, cls, best, atk: e.attack, weekSteps: m.weekSteps ?? row?.weekSteps ?? 0, stride: m.stride ?? row?.stride ?? 1, title: m.title !== undefined ? m.title : row?.title ?? null,
-    pos, home: pos, hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0, sp: 0, specials: 0,
+    pos, home: pos, hp: maxHp, max: maxHp, alive: true, away: false, dmg: 0, healed: 0, taken: 0, taps: 0, sent: 0, sp: 0, specials: 0,
     cdUntil: 0, moveUntil: 0, dodgeUntil: 0, fullSince: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
@@ -672,7 +676,7 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   // Shorter test raids get a proportionally smaller boss so the pacing feels the same.
   const max = Math.round(RULES.raidHpBase * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1));
   const R = {
-    seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null,
+    seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null, start: 0,
     // Short test raids pay proportionally less.
     sizeDmg: 1, timeShare: Math.min(1, minutes / 15),
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
@@ -682,6 +686,14 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   };
   for (const m of R.members) m.perks.spCharge = (m.perks.spCharge || 0) + (R.mods.spCharge || 0);
   scheduleAttack(R);
+  raidHold(R, RULES.raidIntro);
+  return R;
+}
+// The entrance: nobody can hit and the boss holds its first move until `secs` from now.
+function raidHold(R, secs) {
+  const d = Math.max(0, R.t + secs - (R.start || 0));
+  R.start = R.t + secs;
+  const N = R.boss.next; if (N && d) { N.at += d; N.warnAt += d; }
   return R;
 }
 // cut: the middle row can stagger it (half damage). stop: staggering it stops it outright. tele: extra warning time.
@@ -743,7 +755,7 @@ function targetsOf(R, type) {
   return [];
 }
 const alive = (R) => R.members.filter((m) => m.alive && !m.away);
-const canAct = (R, m) => m.alive && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
+const canAct = (R, m) => m.alive && R.t >= (R.start || 0) && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
 // `you: true` marks the person playing on this screen, so the log reads "You raise" not "You raises".
 const nm = (m) => (m.you ? "You" : m.name);
 const vb = (m, them, you) => (m.you ? you : them);
@@ -784,8 +796,9 @@ function dmgBoss(R, m, dmg) {
 }
 // Heal someone and clear slime, spores and burns off them (not a Kraken's grip).
 function mend(R, by, who, amt) {
-  const heal = Math.max(0, Math.min(who.max - who.hp, Math.round(amt * (1 + (R.mods?.heal || 0)))));
-  who.hp += heal; if (by) by.healed += heal;
+  // Health creeps up in fractions between taps: round the heal so it never shows as a long decimal.
+  const heal = Math.max(0, Math.round(Math.min(who.max - who.hp, amt * (1 + (R.mods?.heal || 0)))));
+  who.hp = Math.min(who.max, who.hp + heal); if (by) by.healed += heal;
   who.slimeUntil = 0;
   if (R.grab?.id !== who.id) who.dotUntil = 0;
   return heal;
@@ -793,11 +806,13 @@ function mend(R, by, who, amt) {
 // The most hurt teammate, counting slime and spores as being a bit more hurt.
 const mostHurt = (R) => alive(R).sort((a, b) => (a.hp / a.max - (R.t < a.slimeUntil || R.t < a.dotUntil ? 0.15 : 0)) - (b.hp / b.max - (R.t < b.slimeUntil || R.t < b.dotUntil ? 0.15 : 0)))[0];
 
-function raidTap(R, id) {
+// grace: extra seconds a combo survives, for taps that arrive in batches over the network.
+function raidTap(R, id, grace = 0) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m)) return null;
   const B = R.boss, joy = R.t < m.joyUntil;
-  m.combo = joy || R.t - m.lastTap <= m.e.comboMs / 1000 ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
+  m.taps = (m.taps || 0) + 1;
+  m.combo = joy || R.t - m.lastTap <= m.e.comboMs / 1000 + grace ? Math.min(RULES.comboMax, m.combo + 1 + (m.perks.combo || 0)) : 0;
   m.lastTap = R.t;
   charge(m, RULES.spPerTap);
   // Second Wind: hitting keeps you going.
@@ -944,6 +959,7 @@ function bossAttack(R, echo = null) {
   if (N.cancel) { fx(R, { type: "blocked", attack: type, stopped: true }); say(R, `${name} never lands`, "good"); return; }
   let mult = (B.phase === 1 ? 1 : B.phase === 2 ? 1.25 : 1.5) * (N.staggered ? RULES.staggerMult : 1) * (echo ? 0.6 : 1);
   if (R.feeble > 0) { R.feeble--; mult *= RULES.feebleMult; }
+  // The big numbers sit on what you can dodge; the moves that catch everyone (Scream, spores, fire) stay light.
   const base = RULES.raidBossDmg * mult;
   const marked = (N.ids || []).map((id) => up.find((m) => m.id === id)).filter(Boolean);
   const who = (ms) => ms.map((m) => (m.you ? "you" : m.name)).join(" and ");
@@ -956,15 +972,20 @@ function bossAttack(R, echo = null) {
     if (R.mods?.leech) { const healed = ds.some((d) => d > 0) ? Math.round(B.max * R.mods.leech) : 0; if (healed) { B.hp = Math.min(B.max, B.hp + healed); fx(R, { type: "leech", amt: healed }); } }
     if (ts.length) say(R, `${name} hits ${who(ts)} for ${ds.join(" and ")}`, "bad");
   } else if (type === "stomp" || type === "slam") {
-    fx(R, { type: "attack", attack: type, ids: up.map((m) => m.id) });
-    up.forEach((m) => hit(R, m, base * (type === "slam" ? 0.9 : 0.4)));
-    say(R, `${name} hits everyone`, "bad");
+    // Jump it: anyone who dodged after the warning is in the air when it lands.
+    const ts = up.filter((m) => !dodged(R, m, N));
+    fx(R, { type: "attack", attack: type, ids: ts.map((m) => m.id) });
+    ts.forEach((m) => hit(R, m, base * (type === "slam" ? 0.9 : 0.4)));
+    say(R, ts.length ? `${name} hits ${ts.length === up.length ? "everyone" : who(ts)}` : `Everyone jumps the ${name}`, ts.length ? "bad" : "good");
   } else if (type === "scream") {
     fx(R, { type: "attack", attack: "scream", ids: up.map((m) => m.id) });
-    up.forEach((m) => { hit(R, m, base * 0.45); m.sp = Math.max(0, (m.sp || 0) * (1 - RULES.roarDrain)); });
+    up.forEach((m) => { hit(R, m, base * 0.25); m.sp = Math.max(0, (m.sp || 0) * (1 - RULES.roarDrain)); });
     say(R, `${name} hits everyone and drains your specials`, "bad");
   } else if (type === "feast") {
-    const need = Math.round(RULES.raidSquadSize * 1100 * R.lvl * B.dmg * (mult < 1 ? mult : 1));
+    // A share of its health, so the bar to beat grows with the boss (a flat number was 40× too easy by Brett), and a bit
+    // more or less for a bigger or smaller squad.
+    const here = R.members.filter((m) => !m.away).length, size = Math.min(1.25, Math.max(0.5, here / RULES.raidSquadSize));
+    const need = Math.round(RULES.feastShare * B.max * size * (mult < 1 ? mult : 1));
     B.feast = { until: R.t + 6, need, dealt: 0 };
     fx(R, { type: "attack", attack: "feast", ids: [] });
     say(R, `${name}. Deal ${need.toLocaleString("en-GB")} damage in 6s or it heals`, "warn");
@@ -976,13 +997,13 @@ function bossAttack(R, echo = null) {
     say(R, row.length ? `${name} slimes ${who(row)}. Dodge or get healed` : `${name} misses`, row.length ? "bad" : "good");
   } else if (type === "spores") {
     fx(R, { type: "attack", attack: "spores", ids: up.map((m) => m.id) });
-    up.forEach((m) => { hit(R, m, base * 0.15); burn(m, base * 0.12, 8); });
+    up.forEach((m) => { hit(R, m, base * 0.08); burn(m, base * 0.05, 8); });
     say(R, `${name}. Everyone's choking`, "bad");
   } else if (type === "vanish") {
     const t = marked[0] || up.slice().sort((a, b) => a.hp / a.max - b.hp / b.max)[0];
     if (!t || dodged(R, t, N)) return;
     fx(R, { type: "attack", attack: "vanish", ids: [t.id] });
-    const d = hit(R, t, base * 1.8);
+    const d = hit(R, t, base * 1.4);
     say(R, `${B.name} reappears behind ${t.you ? "you" : t.name} for ${d}`, "bad");
   } else if (type === "gust") {
     const row = marked.filter((m) => !dodged(R, m, N));
@@ -998,12 +1019,12 @@ function bossAttack(R, echo = null) {
       const until = R.t + 10;
       R.grab = { id: t.id, need: Math.round(RULES.grabShare * B.max), dealt: 0, until };
       t.stunUntil = Math.max(t.stunUntil, until); t.swing = 0;
-      burn(t, base * 0.2, 10);
+      burn(t, base * 0.1, 10);
       say(R, `${name}! ${t.you ? "You're" : `${t.name}'s`} caught. Deal ${R.grab.need.toLocaleString("en-GB")} to break free`, "warn");
     }
   } else if (type === "breath") {
     fx(R, { type: "attack", attack: "breath", ids: up.map((m) => m.id) });
-    up.forEach((m) => { hit(R, m, base * 0.6); burn(m, base * 0.08, 6); });
+    up.forEach((m) => { hit(R, m, base * 0.35); burn(m, base * 0.05, 6); });
     say(R, `${name} burns everyone`, "bad");
   }
 }
@@ -1080,12 +1101,14 @@ function botWantsSpecial(R, m) {
 }
 function botAct(R, m) {
   if (!canAct(R, m)) return;
+  // A sim playing a person (tps set) stops tapping to type their trivia answer, like a person has to.
+  if (m.tps && R.trivia?.per[m.id] && !R.trivia.per[m.id].ans) return;
   if (R.t >= m.botNext) {
     // Bots tap at 3–5 taps a second, about what a person keeps up (the same for every class: people don't tap
     // faster because their ninja's quick).
-    const rate = 3 + 2 * R.r();
+    const rate = m.tps ? m.tps * (0.85 + 0.3 * R.r()) : 3 + 2 * R.r(); // tps: a sim can play people who tap faster
     raidTap(R, m.id);
-    m.botNext = R.t + 1 / rate;
+    m.botNext = Math.max(R.t - 0.1, m.botNext) + 1 / rate;
   }
   // Specials: join a combo that's going, or go when a squad-mate's nearly ready too, or stop waiting after a while.
   if (m.sp < RULES.spMax) m.fullSince = 0;
@@ -1097,14 +1120,14 @@ function botAct(R, m) {
   }
   const B = R.boss, warned = B.next && B.warned;
   // Marked for a single-target hit: sometimes step out of the way, like a person watching the warnings would.
-  if (warned && ["swipe", "vanish", "grab", "ooze", "gust"].includes(B.next.type) && (B.next.ids || []).includes(m.id) && !m.dodgeTry) {
+  if (warned && ["swipe", "vanish", "grab", "ooze", "gust", "stomp", "slam"].includes(B.next.type) && (B.next.ids || []).includes(m.id) && !m.dodgeTry) {
     m.dodgeTry = true;
-    if (R.r() < 0.35 && raidDodge(R, m.id)) return;
+    if (R.r() < (m.dodgeP ?? 0.35) && raidDodge(R, m.id)) return;
   }
   if (!warned) m.dodgeTry = false;
   if (R.t >= m.cdUntil) {
     // Save the Big Swing for a wind-up the squad can stagger.
-    const want = warned && ATTACKS[B.next.type]?.cut ? R.r() < 0.3 : R.r() < 0.004;
+    const want = B.feast || (warned && ATTACKS[B.next.type]?.cut) ? R.r() < 0.3 : R.r() < 0.004;
     if (want) raidAbility(R, m.id);
   }
 }
@@ -1117,14 +1140,15 @@ function raidStep(R, dt) {
   const phase = B.hp / B.max > 0.6 ? 1 : B.hp / B.max > 0.3 ? 2 : 3;
   if (phase !== B.phase) { B.phase = phase; fx(R, { type: "phase", phase }); say(R, phase === 2 ? "Phase 2: it hits harder and faster" : "Phase 3: it's enraged", "warn"); }
   if (B.feast && R.t >= B.feast.until) {
-    if (B.feast.dealt < B.feast.need) { const heal = Math.round(B.max * 0.03); B.hp = Math.min(B.max, B.hp + heal); fx(R, { type: "feastEnd", healed: heal }); say(R, `It ate well. Healed ${heal.toLocaleString("en-GB")}`, "bad"); }
+    if (B.feast.dealt < B.feast.need) { const heal = Math.round(B.max * RULES.feastHeal); B.hp = Math.min(B.max, B.hp + heal); fx(R, { type: "feastEnd", healed: heal }); say(R, `It ate well. Healed ${heal.toLocaleString("en-GB")}`, "bad"); }
     else { fx(R, { type: "feastEnd", healed: 0 }); say(R, "Feast interrupted", "good"); }
     B.feast = null;
   }
   if (B.next && !B.warned && R.t >= B.next.warnAt) {
     B.warned = true; B.next.ids = targetsOf(R, B.next.type);
     B.next.row = R.members.find((m) => m.id === B.next.ids[0])?.pos || null;
-    if (B.next.type === "vanish") B.hidden = true;
+    // It won't vanish mid-Feast (you'd have no way to stop it eating).
+    if (B.next.type === "vanish" && !B.feast) B.hidden = true;
     fx(R, { type: "windup", attack: B.next.type, ids: B.next.ids });
   }
   if (B.next && R.t >= B.next.at) {
@@ -1174,21 +1198,22 @@ function endRaid(R, how) {
   const frac = 1 - R.boss.hp / R.boss.max;
   const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
   const pool = (how === "won" ? full : how === "timeout" ? full * frac * 0.35 : 0) * (1 + (R.mods?.loot || 0));
-  // Split: half by steps walked this week, half by what you did in the fight (damage, healing, hits taken).
-  const work = (m) => m.dmg + m.healed * 200 + m.taken * 100;
-  const totalWork = R.members.reduce((s, m) => s + work(m), 0) || 1;
-  const totalSteps = R.members.reduce((s, m) => s + m.weekSteps, 0);
-  const stepPart = (m) => (totalSteps > 0 ? m.weekSteps / totalSteps : 1 / n);
-  const titleLoot = (m) => (m.title === "top" ? RULES.topLoot : m.title === "last" ? RULES.lastLoot : 0);
+  // Your share: your damage to the boss × your stride, over the squad's. Gear loot perks add on top of the share.
+  const weight = (m) => Math.max(0, m.dmg) * (m.stride || 1);
+  const totalW = R.members.reduce((s, m) => s + weight(m), 0);
+  const part = (m) => (totalW > 0 ? weight(m) / totalW : (m.stride || 1) / R.members.reduce((s, x) => s + (x.stride || 1), 0));
+  const secs = Math.max(1, Math.min(R.t, R.dur) - (R.start || 0));
   // Weekly settlement, win or lose: the lowest walker pays a cut of their week's Efforts to the top walker.
   const top = R.members.find((m) => m.title === "top"), last = R.members.find((m) => m.title === "last");
   const settle = top && last ? { from: last.id, to: top.id, amount: Math.round(RULES.slackerTax * last.weekSteps / RULES.stepsPerEffort) } : null;
   R.result = {
-    how, frac, pool: Math.round(pool), lvl: R.lvl, tier: R.tier, boss: R.boss.name, paralysed: R.paralysed, deepDive: R.deepDive, settle,
+    how, frac, pool: Math.round(pool), lvl: R.lvl, tier: R.tier, boss: R.boss.name, paralysed: R.paralysed, deepDive: R.deepDive, settle, secs: Math.round(secs),
     shares: R.members.map((m) => {
-      const reward = Math.round(pool * (RULES.stepsShare * stepPart(m) + (1 - RULES.stepsShare) * work(m) / totalWork) * Math.max(0, 1 + (m.perks.loot || 0) + titleLoot(m)));
+      const reward = Math.round(pool * part(m) * (1 + (m.perks.loot || 0)));
       const tax = settle ? (m.id === settle.to ? settle.amount : m.id === settle.from ? -settle.amount : 0) : 0;
-      return { id: m.id, name: m.name, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken, weekSteps: m.weekSteps, stride: m.stride, title: m.title, reward, tax, total: reward + tax };
+      const taps = Math.round(m.taps || 0);
+      return { id: m.id, name: m.name, dmg: Math.round(m.dmg), healed: Math.round(m.healed), taken: Math.round(m.taken), taps, tps: Math.round((taps / secs) * 10) / 10,
+        weekSteps: m.weekSteps, stride: m.stride, title: m.title, reward, tax, total: reward + tax };
     }),
   };
   fx(R, { type: "end", how });
@@ -1544,7 +1569,7 @@ root.Game = {
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
-  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
+  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidHold, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
   DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,

@@ -1012,7 +1012,38 @@ s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-co
 /* Narrow phones: the dock labels tighten up rather than crowd. */
 @media (max-width: 360px) { .dock { padding-left: 6px; padding-right: 6px; } .dock .inner { gap: 2px; } .dock button { letter-spacing: .02em; font-size: 10px; } }
 
-/* Raid: everyone's special charge (lit when full, ringed when in a combo) and the Dodge button. */
+/* Raid: the squad's party frames (a fixed row above the log: initial, name, health, special charge, down state),
+   the small marker over each hero, the boss's entrance card, and the Dodge button. */
+.party { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+.pf { --mc: #9fd0ff; position: relative; min-width: 0; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; grid-template-rows: 16px 6px 3px; column-gap: 4px; row-gap: 2px; align-items: center;
+  padding: 4px 5px 5px; border-radius: 10px; background: rgba(10,15,38,.78); border: 1.5px solid rgba(255,255,255,.12); transition: opacity .2s, border-color .2s, box-shadow .2s; }
+.pf .av { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--mc); color: var(--ink); font: 800 9.5px/1 var(--ui); }
+.pf b { min-width: 0; font: 700 10.5px/1 var(--ui); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf .st { display: grid; place-items: center; font-size: 10px; color: #fff; }
+.pf .st:empty { display: none; }
+.pf i { grid-column: 1 / -1; display: block; border-radius: 9px; background: rgba(255,255,255,.12); overflow: hidden; }
+.pf i s { display: block; height: 100%; width: 100%; transition: width .2s; }
+.pf .spb s { width: 0; background: linear-gradient(90deg, #6c5cff, #b693ff); }
+.pf.ready .spb s { background: linear-gradient(90deg, #ffb21e, #ffe58a); }
+.pf.me { border-color: var(--gold); }
+.pf.low { box-shadow: 0 0 0 1.5px var(--red) inset; }
+.pf.in { box-shadow: 0 0 0 1.5px #fff inset, 0 0 10px #ffd166; }
+.pf.dead { opacity: .5; } .pf.dead .av { background: #5b6170; } .pf.dead .st { color: #ff8b95; }
+.pf.away { opacity: .35; }
+.mk { --mc: #9fd0ff; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--mc); color: var(--ink);
+  border: 1.5px solid var(--ink); font: 800 9px/1 var(--ui); will-change: transform; pointer-events: none; }
+.mk.me { width: 0; height: 0; border-radius: 0; background: none; border: 7px solid transparent; border-top: 9px solid var(--gold); border-bottom: 0; filter: drop-shadow(0 1px 0 var(--ink)); }
+.mk.dead { opacity: .35; } .mk.away { display: none; }
+.bosscard { position: absolute; left: 0; right: 0; top: 30%; z-index: 21; display: grid; justify-items: center; gap: 6px; pointer-events: none; text-align: center; animation: cardin .5s cubic-bezier(.2,.8,.3,1.2) both; }
+.bosscard small { font: 700 11.5px/1 var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--gold-hi); text-shadow: 0 2px 4px #000; }
+.bosscard b { font: 400 54px/1 var(--display); color: #fff; text-shadow: 0 3px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink), 0 10px 18px rgba(0,0,0,.6); max-width: calc(100% - 32px); overflow-wrap: anywhere; }
+.bosscard em { font: 700 11px/1 var(--ui); font-style: normal; padding: 5px 9px; border-radius: 9px; background: rgba(10,15,38,.8); color: rgba(255,255,255,.85); }
+.bosscard.out { animation: cardout .35s ease-in both; }
+@keyframes cardin { from { opacity: 0; transform: scale(1.4); } }
+@keyframes cardout { to { opacity: 0; transform: translateY(-24px) scale(.9); } }
+.tele.feast.done { background: linear-gradient(180deg, #8fe3a8, #2f9d59); color: #08301a; }
+.rtable .rn { display: inline-block; max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+@media (max-width: 400px) { .rtable { font-size: 12px; } .rtable th, .rtable td { padding-left: 2px; padding-right: 2px; } }
 .rside { display: grid; gap: 6px; min-width: 0; }
 .sqsp { display: flex; gap: 4px; padding: 5px; border-radius: 14px; background: rgba(10,15,38,.7); border: 2px solid var(--ink); }
 .sqsp .q { position: relative; flex: 1; min-width: 0; height: 26px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.08); display: grid; place-items: center; }

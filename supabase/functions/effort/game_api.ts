@@ -741,9 +741,8 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
       const R = G.raidCreate(st.roster, { seed: st.seed, tier: st.tier, minutes: G.HUNT.minutes, affix: st.affix, den: den.levels });
       const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
-      for (const m of R.members) { const r = report[m.id] || {}; m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7); }
+      fightReport(R, report, body);
       const dealt = R.members.reduce((a: number, m: Any) => a + m.dmg, 0);
-      if (dealt > R.boss.max) for (const m of R.members) m.dmg *= R.boss.max / dealt;
       R.boss.hp = R.boss.max * (1 - (how === "won" ? 1 : Math.min(0.999, n(body.frac, 1), dealt / R.boss.max)));
       G.raidEnd(R, how);
       const mine = R.result.shares.find((x: Any) => x.id === player.id), amount = Math.max(0, mine?.reward ?? 0);
@@ -813,7 +812,8 @@ async function finishStale(db: Any, squad: Any, now: number) {
     const s = raid.snapshot;
     const body = s ? {
       how: s.over && s.result ? s.result.how : s.boss.hp <= 0 ? "won" : "timeout", frac: 1 - s.boss.hp / s.boss.max, paralysed: !!s.paralysed, deepDive: s.deepDive || 0,
-      members: s.members.map((m: Any) => ({ id: m.id, dmg: m.dmg, healed: m.healed, taken: m.taken })),
+      secs: Math.max(0, Math.min(s.t, s.dur) - (s.start || 0)),
+      members: s.members.map((m: Any) => ({ id: m.id, dmg: m.dmg, healed: m.healed, taken: m.taken, taps: m.taps || 0 })),
     } : { how: "timeout", members: [] };
     try {
       const result = await payRaid(db, squad, raid, body, now);
@@ -831,6 +831,22 @@ async function squadRaid(db: Any, squad: Any, id: unknown) {
   return data;
 }
 
+// What the host's phone says each fighter did, clamped: nobody deals more than the boss had, taps can't beat the tap
+// cap over the fight's length, and the fight can't run longer than its clock. The shares (damage × stride) and taps a
+// second come out of G.raidEnd from these.
+function fightReport(R: Any, report: Record<string, Any>, body: Any) {
+  const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
+  const secs = n(body.secs, R.dur);
+  R.t = (R.start || 0) + secs;
+  for (const m of R.members) {
+    const r = report[m.id] || {};
+    m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7);
+    m.taps = Math.round(n(r.taps, G.RULES.tapCap * 1.2 * secs + 20));
+  }
+  const dealt = R.members.reduce((s: number, m: Any) => s + m.dmg, 0);
+  if (dealt > R.boss.max) for (const m of R.members) m.dmg *= R.boss.max / dealt;
+}
+
 // The host's phone reports how the fight went; the server works out the pay itself from the squad's real
 // gear and steps (so the boss's level and everyone's share can't be fiddled), then pays everyone.
 async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
@@ -843,10 +859,8 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
   if (fighters.length) {
     const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged, affix: raid.goal?.affix || null, den: raid.goal?.den || null });
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
-    for (const m of R.members) { const r = report[m.id]; m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7); }
-    // Nobody can have dealt more than the boss had.
+    fightReport(R, report, body);
     const dealt = R.members.reduce((s: number, m: Any) => s + m.dmg, 0);
-    if (dealt > R.boss.max) for (const m of R.members) m.dmg *= R.boss.max / dealt;
     const frac = how === "won" ? 1 : Math.min(0.999, n(body.frac, 1), dealt / R.boss.max);
     R.boss.hp = R.boss.max * (1 - frac);
     R.paralysed = body.paralysed === true;

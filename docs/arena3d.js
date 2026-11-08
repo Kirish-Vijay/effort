@@ -1064,10 +1064,11 @@ class Arena {
     this.flashAmt = Math.max(this.flashAmt, amt * (CALM ? 0.5 : 1));
   }
   // A camera move: offsets for position, look target, FOV and roll, eased in, held, eased out. Tagged moves replace each other.
-  camMove({ pos = [0, 0, 0], look = [0, 0, 0], fov = 0, roll = 0, inT = 0.25, dur = 1, outT = 0.5, hold = false, tag = null } = {}) {
+  // free: the shot is about the boss, so don't pull back to keep the squad in frame (the intro, the K.O.).
+  camMove({ pos = [0, 0, 0], look = [0, 0, 0], fov = 0, roll = 0, inT = 0.25, dur = 1, outT = 0.5, hold = false, tag = null, free = false } = {}) {
     const k = CALM ? 0.35 : 1;
     if (tag) this.releaseCam(tag, true);
-    const m = { p: V3(...pos).multiplyScalar(k), l: V3(...look).multiplyScalar(k), fov: fov * k, roll: roll * k, inT, dur: Math.max(dur, inT + outT), outT, hold, tag, t: 0 };
+    const m = { p: V3(...pos).multiplyScalar(k), l: V3(...look).multiplyScalar(k), fov: fov * k, roll: roll * k, inT, dur: Math.max(dur, inT + outT), outT, hold, tag, free, t: 0 };
     this.moves.push(m); return m;
   }
   releaseCam(tag, quick = false) {
@@ -1122,7 +1123,7 @@ class Arena {
     }
     // Keep the squad on screen: scale the move back until everyone fits (or fits as well as the base framing does).
     let w = 1;
-    if (this.heroes.size && (off.p.lengthSq() > 1e-6 || off.l.lengthSq() > 1e-6 || Math.abs(off.fov) > 0.01)) {
+    if (this.heroes.size && !this.moves.some((m) => m.free) && (off.p.lengthSq() > 1e-6 || off.l.lengthSq() > 1e-6 || Math.abs(off.fov) > 0.01)) {
       this.placeCamera(off, 0); const allow = Math.max(0.86, this.squadSpread() + 0.01); // centres; leaves room for the walkers' own width
       for (w = 1; w > 0.05; w -= 0.35) { this.placeCamera(off, w); if (this.squadSpread() <= allow) break; }
       w = Math.max(0, w);
@@ -1146,14 +1147,16 @@ class Arena {
     // Mythic and House skins shoot (and land) in their own spark colour, a touch brighter on the strong ones.
     const sk = h.w.skinFx?.spark ? new THREE.Color(h.w.skinFx.spark).getHex() : null;
     const col = sk ?? (strong ? 0xff9f43 : h.m.you ? 0xffd166 : 0x9fd0ff);
-    this.projectile(from, to, col, strong ? 0.22 : 0.13, strong, () => {
-      if (sk != null && !strong) this.flare(to, sk, 1.4);
-      if (!strong) return;
+    // Teammates' shots are smaller than yours, so five people tapping at once still leave the boss in view.
+    const mine = !!h.m.you;
+    this.projectile(from, to, col, (strong ? 0.22 : 0.13) * (mine ? 1 : 0.7), strong, () => {
+      if (sk != null && !strong && mine) this.flare(to, sk, 1.2);
+      if (!strong || !this.impactOk(mine ? 0.12 : 0.3)) return;
       // Your own hits already got their hit-stop from bossHit; teammates' big ones get a lighter one on landing.
-      if (!h.m.you) this.hitStop(big ? 70 : 45, { punch: big ? 0.5 : 0.25, minor: true });
-      this.flare(to, sk ?? 0xffc37a, big ? 3.2 : 2.2);
-      if (sk != null) this.shockwave(to, sk, big ? 2.8 : 1.8, 0.35, true);
-    });
+      if (!mine) this.hitStop(big ? 70 : 45, { punch: big ? 0.5 : 0.25, minor: true });
+      this.flare(to, sk ?? 0xffc37a, (big ? 2.6 : 1.8) * (mine ? 1 : 0.7));
+      if (sk != null && mine) this.shockwave(to, sk, big ? 2.4 : 1.6, 0.3, true);
+    }, mine);
   }
   bossHit(crit) {
     const B = this.boss; if (!B) return;
@@ -1388,6 +1391,28 @@ class Arena {
     for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 4, r = 0.7;
       this.sparks.emit({ x: at.x + Math.cos(a) * r, y: 0.2 + (i / n) * 0.8, z: at.z + Math.sin(a) * r, vx: -Math.sin(a) * 1.2, vy: rnd(3, 5), vz: Math.cos(a) * 1.2, c, life: rnd(0.5, 0.8), size: rnd(0.08, 0.13), stretch: 0.05, drag: 1.2, shape: 1, core: 0.8, delay: i * 0.012 }); }
   }
+  // Back to rest: no wind-up glow, danger light, raise or fade. The app calls this whenever the fight says the boss
+  // isn't winding up, so a missed event (a dropped snapshot, a blocked attack) can't leave a glow on it.
+  calm() {
+    const B = this.boss; if (!B) return;
+    if (B.windup || B.raise || B.inhale || this.danger.intensity) { B.windup = 0; B.raise = 0; B.inhale = 0; this.danger.intensity = 0; this.releaseCam("area"); }
+  }
+  unghost() { if (this.boss) this.boss.ghost = false; }
+  // The entrance: start close on the boss, a roar, then pull back to the squad. Taps are locked by the app meanwhile.
+  intro(secs = 3.5) {
+    const B = this.boss; if (!B) return;
+    this.camMove({ pos: [0, -0.6, -4.2], look: [0, 0.9, -1.2], fov: -8, inT: 0.01, hold: true, outT: Math.min(1.4, secs * 0.4), tag: "intro", free: true });
+    setTimeout(() => {
+      if (this.disposed || this.boss?.dead) return;
+      const B2 = this.boss;
+      if (B2.mixer && B2.clips.roar) this.bossPlay("roar", { once: true }); else { B2.squash = 0.2; B2.act = "atk-scream"; B2.actT = 0; }
+      const at = this.bossPoint(0.5, 0);
+      this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 10, 1.1);
+      this.charge(at, this.look.ring.getHex(), 30, 4);
+      this.shake(0.45);
+    }, 450);
+    setTimeout(() => { if (!this.disposed) this.releaseCam("intro"); }, Math.max(600, (secs - 1.2) * 1000));
+  }
   // The middle row knocked it off balance.
   stagger(stopped) {
     const B = this.boss; if (!B) return;
@@ -1404,6 +1429,7 @@ class Arena {
   }
   // An attack that bounced off the whole squad.
   blocked() {
+    this.calm();
     for (const h of this.heroes.values()) if (!h.down) this.shockwave(this.chest(h, 1), 0x8fd8ff, 1.8 * h.w.group.scale.y, 0.6, true);
     this.shockwave(V3(0, 0.06, ROWS.front - 0.8), 0x8fd8ff, 7, 0.6);
     this.flare(V3(0, 1.2, ROWS.front - 0.8), 0xbfe8ff, 3);
@@ -1455,6 +1481,7 @@ class Arena {
   bossKO() {
     const B = this.boss; if (!B || B.dead) return;
     B.dead = true; B.act = "ko"; B.actT = 0;
+    B.windup = 0; B.raise = 0; B.inhale = 0; B.ghost = false; B.feastGlow = 0; B.flash = 0; this.danger.intensity = 0;
     if (B.mixer && B.clips.death) this.bossPlay("death", { once: true, then: null });
     this.shake(0.7);
     for (const h of this.heroes.values()) if (!h.down) h.w.play("cheer");
@@ -1463,13 +1490,17 @@ class Arena {
       this.koAt = this.realT;
       this.moves.length = 0;
       this.hitStop(130, { flash: 0.45, color: 0xffffff, punch: 1 });
-      this.slowmo = { t: 0, hold: 0.85, out: 0.6, scale: 0.3 };
-      this.camMove({ pos: [0, -0.3, -1.5], look: [0, 0.7, 0], fov: -5, inT: 0.6, dur: 3, outT: 0.9, tag: "ko" });
+      this.slowmo = { t: 0, hold: 1.1, out: 0.7, scale: 0.3 };
+      this.camMove({ pos: [0, -0.3, -1.5], look: [0, 0.7, 0], fov: -5, inT: 0.6, dur: 3.2, outT: 0.9, tag: "ko", free: true });
       const at = this.bossPoint(0.5, 0);
       this.shockwave(at, 0xffffff, 9, 0.9, true); this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 14, 1.2);
       this.burst(at, 0xfff3a0, 70, 8); this.flare(at, 0xffffff, 9);
       // The Taxman stays down so you can go through his pockets; a raid boss burns away.
-      if (this.mode === "tax") this.lootStart(); else this.dissolveAt = this.realT + 0.5;
+      if (this.mode === "tax") this.lootStart();
+      else {
+        this.dissolveAt = this.realT + 1.1;
+        setTimeout(() => { if (!this.disposed) { const p = this.bossPoint(0.45, 0); this.burst(p, this.look.ring.getHex(), 60, 7); this.shockwave(p, 0xffffff, 6, 0.8, true); this.shake(0.4); } }, 1100);
+      }
     }
   }
   // ---------- the Taxman's K.O.: rob him ----------
@@ -1526,8 +1557,13 @@ class Arena {
     const B = this.boss;
     return new THREE.Vector3(dx, (B?.height || 5) * heightFrac * (B?.holder?.scale.y || 1), this.bossZ + 0.8);
   }
+  // At most one big landing flash every `gap` seconds: stacked additive flares turn into a white blob over the boss.
+  impactOk(gap) {
+    if (this.realT - (this.lastImpact ?? -9) < gap) return false;
+    this.lastImpact = this.realT; return true;
+  }
   // A glowing shot on a curved path, leaving a continuous trail; bursts on landing.
-  projectile(from, to, color, size, big, onHit) {
+  projectile(from, to, color, size, big, onHit, mine = true) {
     const head = new THREE.Sprite(spriteMat(color, big ? 3.2 : 2.6)); head.geometry.userData.keep = true;
     const core = new THREE.Sprite(spriteMat(0xffffff, 2)); core.scale.setScalar(0.42); head.add(core);
     head.scale.setScalar(size * 5.5); head.position.copy(from); this.scene.add(head);
@@ -1547,8 +1583,9 @@ class Arena {
       },
       done: () => {
         this.scene.remove(head);
-        this.burst(to, color, big ? 22 : 10, big ? 5 : 3);
-        if (big) this.shockwave(to, color, 2.4, 0.35, true);
+        // Small landings throw sparks only; the slow glowing embers are kept for the big ones.
+        this.burst(to, color, big ? (mine ? 16 : 8) : mine ? 6 : 3, big ? 4.5 : 3, big && mine);
+        if (big && mine && this.impactOk(0.25)) this.shockwave(to, color, 2.2, 0.3, true);
         onHit?.();
       } });
   }
@@ -1558,14 +1595,14 @@ class Arena {
     this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 1.0), life: 0.3, size: size * 0.55, end: 1.8, shape: 0, core: 0.3 });
   }
   // Sparks that streak and fall, plus slower glowing embers.
-  burst(at, color, n, speed) {
+  burst(at, color, n, speed, embers = true) {
     n = Math.min(80, Math.round(n * this.fxScale));
     const c = hdr(color, 2.4), w = hdr(color, 0.9);
     for (let i = 0; i < n; i++) {
       this.sparks.emit({ x: at.x, y: at.y, z: at.z, vx: (Math.random() - 0.5) * speed * 1.3, vy: Math.random() * speed * 1.2, vz: (Math.random() - 0.2) * speed * 1.3,
         c, life: rnd(0.3, 0.6), size: rnd(0.06, 0.11), end: 0.3, grav: 9, drag: 1.2, stretch: 0.045, shape: 1, core: 0.8 });
     }
-    for (let i = 0; i < n / 5; i++) {
+    for (let i = 0; i < (embers ? n / 5 : 0); i++) {
       this.sparks.emit({ x: at.x, y: at.y, z: at.z, vx: (Math.random() - 0.5) * speed * 0.5, vy: Math.random() * speed * 0.5, vz: (Math.random() - 0.3) * speed * 0.5,
         c: w, life: rnd(0.5, 0.9), size: rnd(0.22, 0.4), end: 1.6, grav: -0.6, drag: 2, shape: 0, core: 0.2 });
     }

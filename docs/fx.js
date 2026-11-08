@@ -116,14 +116,29 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 function sparks(x, y, color = "#ffd166", n = 10, speed = 420) {
   for (let i = 0; i < n; i++) { const a = rnd(0, Math.PI * 2), s = rnd(speed * 0.4, speed); add({ kind: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 120, life: rnd(0.25, 0.5), size: rnd(2, 4), color, g: 700 }); }
 }
+// A tap: a quick slash and a few sparks (a crit gets a small flash). Kept light: at 6 taps a second anything bigger
+// piles up into a glow that hides the boss.
 function tapHit(x, y, { color = "#ffb703", crit = false, dmg = 0, kind = "hit" } = {}) {
-  add({ kind: "slash", x, y, angle: rnd(-0.9, 0.3), r: crit ? 70 : 46, width: crit ? 12 : 8, color, life: 0.28 });
-  sparks(x, y, crit ? "#ff7a3d" : color, crit ? 18 : 8, crit ? 620 : 420);
-  if (crit) { add({ kind: "glow", x, y, r: 90, color: "rgba(255,170,60,.55)", life: 0.25 }); for (let i = 0; i < 5; i++) add({ kind: "star", x, y, vx: rnd(-260, 260), vy: rnd(-420, -160), life: 0.7, size: rnd(6, 10), color: "#ffe066", spin: rnd(-8, 8), g: 900 }); }
-  if (dmg) number(x + rnd(-14, 14), y - 26, kind === "blocked" ? "BLOCKED" : fmtNum(dmg) + (crit ? "!" : ""), crit ? { size: 40, grad: ["#fff3a0", "#ff7a3d"] } : kind === "weak" ? { size: 34, grad: ["#c8f7ff", "#2bb3ff"] } : kind === "blocked" ? { size: 20, color: "#b8c4ff" } : { size: 26, color: "#fff" });
+  add({ kind: "slash", x, y, angle: rnd(-0.9, 0.3), r: crit ? 56 : 38, width: crit ? 9 : 6, color, life: 0.22 });
+  sparks(x, y, crit ? "#ff7a3d" : color, crit ? 9 : 4, crit ? 520 : 380);
+  if (crit) { add({ kind: "glow", x, y, r: 46, color: "rgba(255,170,60,.4)", life: 0.18 }); for (let i = 0; i < 2; i++) add({ kind: "star", x, y, vx: rnd(-220, 220), vy: rnd(-380, -160), life: 0.55, size: rnd(5, 8), color: "#ffe066", spin: rnd(-8, 8), g: 900 }); }
+  if (dmg) number(x, y - 26, kind === "blocked" ? "BLOCKED" : fmtNum(dmg) + (crit ? "!" : ""), { tap: true, ...(crit ? { size: 34, grad: ["#fff3a0", "#ff7a3d"] } : kind === "weak" ? { size: 30, grad: ["#c8f7ff", "#2bb3ff"] } : kind === "blocked" ? { size: 20, color: "#b8c4ff" } : { size: 22, color: "#fff" }) });
 }
-// Kept clear of the screen edges so long words like "BIG SWING!" stay readable.
-function number(x, y, text, o = {}) { const pad = Math.min(W / 2, String(text).length * 7 + 20); x = Math.max(pad, Math.min(W - pad, x)); add({ kind: "text", x, y, text, size: 26, color: "#fff", life: 0.75, rise: 110, drift: rnd(-60, 60), ...o }); }
+// Kept clear of the screen edges so long words like "BIG SWING!" stay readable. Numbers are always formatted.
+// tap: damage numbers from tapping take turns across a few lanes and only a handful show at once, so they fan out
+// instead of stacking into a column.
+const LANES = [-46, 30, -14, 54, 6, -60];
+let lane = 0;
+function number(x, y, text, o = {}) {
+  if (typeof text === "number") text = fmtNum(text);
+  if (o.tap) {
+    const live = parts.filter((p) => p.tap);
+    if (live.length >= 4) live.slice(0, live.length - 3).forEach((p) => (p.t = p.life));
+    x += LANES[lane++ % LANES.length]; o = { life: 0.6, rise: 80, drift: 0, ...o };
+  }
+  const pad = Math.min(W / 2, String(text).length * 7 + 20); x = Math.max(pad, Math.min(W - pad, x));
+  add({ kind: "text", x, y, text, size: 26, color: "#fff", life: 0.75, rise: 110, drift: rnd(-60, 60), ...o });
+}
 function fmtNum(n) { return n >= 1e4 ? (n / 1000).toFixed(1) + "k" : Math.max(1, Math.round(n)).toString(); }
 function ring(x, y, o = {}) { add({ kind: "ring", x, y, r0: 10, r1: 160, width: 10, color: "rgba(255,255,255,.9)", life: 0.6, ...o }); }
 function coins(x, y, n = 8, toX, toY) {
