@@ -28,7 +28,7 @@ const DEFAULT_RULES = {
   slackerTax: 0.1,          // ...and pays 10% of their week's Efforts to the top walker
   slackerAggro: 2.5,        // the boss goes for the lowest walker this many times as often
   windowHour: 18,           // the Taxman's in from 6pm...
-  windowCloseHour: 21,      // ...till 9pm: start your fight any time in between
+  windowCloseHour: 23,      // ...till 11pm: start your fight any time in between (never on Sundays: no tax that day)
   dailyWindowMin: 5,        // a Taxman fight lasts this long
   raidMin: 15,
   taxmanBaseHp: 35000,
@@ -111,6 +111,7 @@ const DEFAULT_RULES = {
   upgradeStep: 0.1,         // each upgrade adds 10% of an item's base stats
   upgradeCostShare: 0.1,    // upgrade n costs this share of the item's price × n
   dealDiscount: 0.3,
+  sellBack: 0.6,            // the shop buys gear back for this share of what it cost you (buying and upgrading)
 };
 let RULES = { ...DEFAULT_RULES };
 function setRules(r) { RULES = { ...DEFAULT_RULES, ...(r || {}) }; return RULES; }
@@ -327,8 +328,12 @@ function dealsFor(day, cls, level) {
   return out;
 }
 const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RULES.dealDiscount : 1));
+// What the shop pays for gear you sell back: a share of everything you spent on it.
+const sellPrice = (paid) => Math.max(0, Math.round((Number(paid) || 0) * RULES.sellBack));
+// The Taxman takes Sundays off: no fight, and no tax on Sunday's steps.
+const taxDayOff = (day) => new Date(day + "T12:00:00Z").getUTCDay() === 0;
 
-// ---------- 6pm to 9pm: the Taxman ----------
+// ---------- 6pm to 11pm (not Sundays): the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
 // (only the moving weak spot takes proper damage), and golden receipts fly past for bonus loot.
 function taxmanSetup({ steps = 0, scrollMin = 0, stats: st = {}, equipped = {}, inv = {}, level = 1, squadAvg = 0, den = null }) {
@@ -1536,7 +1541,7 @@ root.Game = {
   xpFor, levelOf, levelProgress,
   pace, weekTable,
   STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex,
-  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf,
+  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,

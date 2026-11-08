@@ -1,13 +1,13 @@
 // The live game: wallet, the evening Taxman, the Sunday raid, gear and the weekly table.
 // The rules are the same game.js the app and the lab run, kept in the database (see rules.ts).
 //   POST /game         everything the app needs, after settling any finished days
-//   POST /tax_start    open your Taxman fight (any time 6pm–9pm your time; a fight lasts 5 minutes)
+//   POST /tax_start    open your Taxman fight (any time 6pm–11pm your time, not Sundays; a fight lasts 5 minutes)
 //   POST /tax_finish   save the fight (checkpoints while it runs, then final: true)
-//   POST /raid_lobby   Sunday 6–9pm: join the lobby, pick the boss, say you're ready (it starts when 4+ are ready)
+//   POST /raid_lobby   Sunday 6–11pm: join the lobby, pick the boss, say you're ready (it starts when 4+ are ready)
 //   POST /raid_join    once it's started, join the fight; returns the roster
 //   POST /raid_sync    the host phone saves the fight so anyone can pick it up
 //   POST /raid_finish  pay out the raid, climb the ladder, settle the week
-//   POST /buy | /upgrade | /equip
+//   POST /buy | /upgrade | /sell | /equip
 //   POST /season_claim claim a season reward: a story chapter, a track tier or a weekly bounty
 //   POST /den_give     put Efforts into a room of the squad's Den
 //   POST /wardrobe     buy or wear cosmetics (and wear skins from The House)
@@ -63,17 +63,20 @@ function daysFrom(from: string, to: string) {
 const goodTz = (tz: unknown) => { try { new Intl.DateTimeFormat("en", { timeZone: String(tz) }); return String(tz); } catch { return SQUAD_TZ; } };
 
 // ---------- windows ----------
-// The Taxman's in from 6pm to 9pm; a fight can start any time in between and lasts five minutes.
-// An owner test window (groups.test_until) opens both fights now, for real, until it closes.
+// The Taxman's in from 6pm to 11pm; a fight can start any time in between and lasts five minutes. He takes Sundays
+// off (off: true): no fight, no tax. An owner test window (groups.test_until) opens both fights now, for real.
 function taxWindow(now: number, tz: string, test: number | null) {
-  const day = localDate(now, tz);
-  const opens = zoned(day, G.RULES.windowHour, 0, tz), closes = zoned(day, G.RULES.windowCloseHour ?? 21, 0, tz);
-  const next = now < closes ? opens : zoned(addDays(day, 1), G.RULES.windowHour, 0, tz);
-  if (test && test > now) return { day, opens: now, closes: test, next: now, open: true, test: true };
-  return { day, opens, closes, next, open: now >= opens && now < closes, test: false };
+  const day = localDate(now, tz), close = G.RULES.windowCloseHour ?? 23;
+  let opens = zoned(day, G.RULES.windowHour, 0, tz), closes = zoned(day, close, 0, tz);
+  let nextDay = now < closes ? day : addDays(day, 1);
+  if (G.taxDayOff(nextDay)) nextDay = addDays(nextDay, 1);
+  const next = zoned(nextDay, G.RULES.windowHour, 0, tz);
+  if (test && test > now) return { day, opens: now, closes: test, next: now, open: true, test: true, off: false };
+  if (G.taxDayOff(day)) return { day, opens: next, closes: zoned(nextDay, close, 0, tz), next, open: false, test: false, off: true };
+  return { day, opens, closes, next, open: now >= opens && now < closes, test: false, off: false };
 }
-// Sunday's lobby opens at 6pm and the raid has to start by 9pm; the fight itself is 15 minutes from then.
-const RAID_FROM = 18, RAID_UNTIL = 21;
+// Sunday's lobby opens at 6pm and the raid has to start by 11pm; the fight itself is 15 minutes from then.
+const RAID_FROM = 18, RAID_UNTIL = 23;
 function raidWindow(now: number, test: number | null) {
   const today = localDate(now, SQUAD_TZ);
   let sunday = addDays(today, (7 - dow(today)) % 7);
@@ -134,15 +137,27 @@ async function scrollFor(db: Any, id: string, from: string, to: string) {
 }
 const avgOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
-// Everything in the ledger for these players: wallet, XP and owned gear all come from it.
+// Everything in the ledger for these players: wallet, XP and owned gear all come from it. Gear is bought ("buy",
+// ref "id"), upgraded ("upgrade", "id:3") and sold back ("sell", "id"). Buying it again after selling makes a new
+// copy, "id#2" ("id#2:3" for its upgrades), since a ledger ref can only be used once. paid[id] is what the copy you
+// own cost you, buying and upgrading: the shop's buy-back is a share of that.
+const copyOf = (ref: string) => { const [id, n] = String(ref).split("#"); return { id, n: Number(n) || 1 }; };
+const copyRef = (id: string, n: number) => (n > 1 ? `${id}#${n}` : id);
 async function ledgerFor(db: Any, ids: string[]) {
   const { data } = await db.from("ledger").select("player_id,kind,ref,amount,xp,note,at").in("player_id", ids).order("at", { ascending: false }).limit(50000);
-  const out: Record<string, Any> = Object.fromEntries(ids.map((id) => [id, { wallet: 0, xp: 0, inv: {}, rows: [] }]));
+  const out: Record<string, Any> = Object.fromEntries(ids.map((id) => [id, { wallet: 0, xp: 0, inv: {}, rows: [], copy: {}, paid: {}, sold: {} }]));
   for (const r of data ?? []) {
     const L = out[r.player_id];
     L.wallet += r.amount; L.xp += r.xp; L.rows.push(r);
-    if (r.kind === "buy" && !(r.ref in L.inv)) L.inv[r.ref] = 0;
-    if (r.kind === "upgrade") { const [id, lv] = r.ref.split(":"); L.inv[id] = Math.max(L.inv[id] ?? 0, Number(lv) || 0); }
+  }
+  for (const L of Object.values(out)) {
+    for (const r of [...L.rows].reverse()) {
+      if (r.kind === "buy") { const { id, n } = copyOf(r.ref); L.inv[id] = 0; L.copy[id] = n; L.paid[id] = -r.amount; }
+      else if (r.kind === "upgrade") {
+        const [c, lv] = String(r.ref).split(":"), { id, n } = copyOf(c);
+        if (id in L.inv && L.copy[id] === n) { L.inv[id] = Math.max(L.inv[id], Number(lv) || 0); L.paid[id] += -r.amount; }
+      } else if (r.kind === "sell") { const { id } = copyOf(r.ref); delete L.inv[id]; delete L.paid[id]; L.sold[id] = (L.sold[id] || 0) + 1; }
+    }
   }
   return out;
 }
@@ -191,7 +206,8 @@ async function settleDays(db: Any, player: Any, squad: Any, L: Any, now: number)
     const s = steps[player.id][day] ?? 0, E = G.effortsFromSteps(s);
     const f = fightOn[day];
     let net, how;
-    if (f) { net = netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct)); how = Number(f.knocked) >= 1 ? "knocked him out" : `fought, ${Math.round(Number(f.rate) * (1 - Number(f.knocked)) * 100)}% tax`; }
+    if (G.taxDayOff(day)) { net = f ? Math.max(E, netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct))) : E; how = "Sunday, no tax"; }
+    else if (f) { net = netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct)); how = Number(f.knocked) >= 1 ? "knocked him out" : `fought, ${Math.round(Number(f.rate) * (1 - Number(f.knocked)) * 100)}% tax`; }
     else {
       const rate = G.taxRate(s, G.scrollCounted(s, scroll[day], scrollLinked(player)), avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
       net = E - Math.round(E * rate); how = `didn't fight, ${Math.round(rate * 100)}% tax`;
@@ -210,8 +226,10 @@ async function settleDays(db: Any, player: Any, squad: Any, L: Any, now: number)
 async function bankToday(db: Any, player: Any, squad: Any, now: number) {
   const tz = goodTz(player.tz), day = localDate(now, tz), w = taxWindow(now, tz, null);
   if (day < LAUNCH_DAY) return false;
+  const off = G.taxDayOff(day);
   const { data: f } = await db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", day).maybeSingle();
-  if (f ? !f.finished_at && now <= Date.parse(f.ends_at) + 90000 : now < w.closes) return false; // not settled yet
+  // Not settled yet (on a Sunday there's nothing to settle: it's paid in all day as it comes).
+  if (!off && (f ? !f.finished_at && now <= Date.parse(f.ends_at) + 90000 : now < w.closes)) return false;
   const ids = squad ? squad.members.map((m: Any) => m.id) : [player.id];
   const [steps, scroll, { data: row }] = await Promise.all([
     stepsFor(db, ids, day, day), scrollFor(db, player.id, day, day),
@@ -219,7 +237,8 @@ async function bankToday(db: Any, player: Any, squad: Any, now: number) {
   ]);
   const s = steps[player.id][day] ?? 0, E = G.effortsFromSteps(s);
   let net: number, note: string;
-  if (f) {
+  if (off) { net = f ? Math.max(E, netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct))) : E; note = "Sunday: the Taxman's off, no tax"; }
+  else if (f) {
     const knocked = Number(f.knocked), rate = Number(f.rate);
     net = netOf(E, rate, knocked, Number(f.steal_pct));
     note = knocked >= 1 ? `Knocked out the Taxman, stole ${Math.round(Number(f.steal_pct) * 100)}%` : `Fought the Taxman down to ${Math.round(rate * (1 - knocked) * 100)}% tax`;
@@ -359,7 +378,7 @@ function bossChoice(group: Any, day: string) {
 const LOBBY_STALE_MS = 20000;
 
 // ---------- the routes ----------
-const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "equip", "season_claim", "den_give", "wardrobe", "gamba", "hunt_finish",
+const GAME_ROUTES = new Set(["game", "tax_start", "tax_finish", "raid_lobby", "raid_join", "raid_sync", "raid_finish", "buy", "upgrade", "sell", "equip", "season_claim", "den_give", "wardrobe", "gamba", "hunt_finish",
   "chat_list", "chat_around", "chat_send", "chat_edit", "chat_delete", "chat_search", "chat_pings"]);
 export async function gameRoute(action: string, body: Any, ctx: { db: Any; json: Any; fail: Any; playerByToken: Any }) {
   const { db, json, fail } = ctx;
@@ -422,7 +441,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         ok: true, now,
         me: { id: player.id, name: player.name, platform: player.platform, tz, character: player.character, wear: player.cosmetics || {}, owned: ownedCosmetics(L), gear: cleanGear(player.gear, L.inv), pos: player.raid_pos,
           created_at: player.created_at, steps_synced_at: player.steps_synced_at, steps_source: player.steps_source, scroll_synced_at: player.scroll_synced_at, scroll_source: player.scroll_source },
-        wallet: L.wallet, xp: L.xp, inv: L.inv,
+        wallet: L.wallet, xp: L.xp, inv: L.inv, paid: L.paid,
         today: { day: today, rawSteps: raw?.steps ?? 0, debt, steps: Math.max(0, (raw?.steps ?? 0) - debt),
           scroll: scroll ? scroll.minutes ?? scroll.auto_minutes ?? null : null, scrollLinked: scrollLinked(player) },
         stepWeek: myWeek, allTime: totals[player.id],
@@ -436,11 +455,12 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
 
     case "tax_start": {
       const w = taxWindow(now, tz, test);
+      if (w.off) return fail("The Taxman takes Sundays off. No tax on today's steps");
       const { data: old } = await db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", w.day).maybeSingle();
       if (old?.finished_at) return fail("You've already fought the Taxman today");
       if (old && now < Date.parse(old.ends_at)) return json({ ok: true, fight: old, now, resumed: true, inputs: await taxInputs(db, player, squad, w.day) });
       if (old) return fail("Your fight's over for today");
-      if (!w.open) return fail(`The Taxman only takes visitors from ${G.RULES.windowHour - 12}pm to ${(G.RULES.windowCloseHour ?? 21) - 12}pm`);
+      if (!w.open) return fail(`The Taxman only takes visitors from ${G.RULES.windowHour - 12}pm to ${(G.RULES.windowCloseHour ?? 23) - 12}pm`);
       const inputs = await taxInputs(db, player, squad, w.day);
       const S = G.taxmanSetup(inputs);
       const row = { player_id: player.id, day: w.day, ends_at: new Date(now + G.RULES.dailyWindowMin * 60000).toISOString(),
@@ -484,7 +504,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         ({ data: raid } = await sel());
       }
       if (raid.status === "lobby") {
-        if (now >= w.closes) return fail("Too late: the raid had to start by 9pm");
+        if (now >= w.closes) return fail("Too late: the raid had to start by 11pm");
         const act = String(body.action || "poll");
         if (act === "leave") await db.from("raid_lobby").delete().eq("raid_id", raid.id).eq("player_id", player.id);
         else {
@@ -570,7 +590,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       // The shop is class gear and the open market: no season sets, no daily deals.
       if (item.season || !G.onSale(item, localDate(now, SQUAD_TZ))) return fail("That's not in the shop");
       const price = G.priceOf(item, false);
-      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "buy", p_ref: item.id, p_amount: price, p_note: `Bought ${item.name}` });
+      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "buy", p_ref: copyRef(item.id, (L.sold[item.id] || 0) + 1), p_amount: price, p_note: `Bought ${item.name}` });
       if (error) throw error;
       if (bal === -1) return fail("Not enough Efforts");
       if (bal === -2) return fail("You already own that");
@@ -586,11 +606,26 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const up = L.inv[item.id];
       if (up >= G.RULES.upgradeMax) return fail("Already maxed");
       const cost = G.upgradeCost(item, up, (await denFor(db, squad)).levels);
-      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "upgrade", p_ref: `${item.id}:${up + 1}`, p_amount: cost, p_note: `Upgraded ${item.name} to +${up + 1}` });
+      const { data: bal, error } = await db.rpc("spend", { p_player: player.id, p_kind: "upgrade", p_ref: `${copyRef(item.id, L.copy[item.id])}:${up + 1}`, p_amount: cost, p_note: `Upgraded ${item.name} to +${up + 1}` });
       if (error) throw error;
       if (bal === -1) return fail("Not enough Efforts");
       if (bal === -2) return fail("Already upgraded");
       return json({ ok: true, wallet: bal });
+    }
+
+    // Sell gear back to the shop for a share of what it cost you (Game.sellPrice). It comes off if you're wearing it.
+    case "sell": {
+      const L = (await ledgerFor(db, [player.id]))[player.id];
+      const item = G.itemById(body.item);
+      if (!item || !(item.id in L.inv)) return fail("You don't own that");
+      const amount = G.sellPrice(L.paid[item.id]);
+      if (amount <= 0) return fail("The shop won't buy that one");
+      const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "sell", ref: copyRef(item.id, L.copy[item.id]), amount, xp: 0,
+        note: `Sold ${item.name}${L.inv[item.id] ? ` +${L.inv[item.id]}` : ""} to the shop` });
+      if (error) return fail(error.code === "23505" ? "Already sold" : "Couldn't sell that");
+      const gear = cleanGear(player.gear, L.inv);
+      if (gear[item.slot] === item.id) { delete gear[item.slot]; await db.from("players").update({ gear }).eq("id", player.id); }
+      return json({ ok: true, amount, wallet: L.wallet + amount });
     }
 
     case "season_claim": {

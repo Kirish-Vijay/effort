@@ -214,7 +214,7 @@ async function load() {
   S.D = D;
   ANS[D.me.id] = answersOf(D.me);
   nat("setToken", S.token);
-  if (D.fight?.finished_at) nat("taxDone", D.today.day);
+  if (D.fight?.finished_at || (D.windows.tax.off && ["done", "live", "settling"].includes(D.raid?.status))) nat("taxDone", D.today.day);
   if (D.squad) setTimeout(chatPrefetch, 800);
   for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
   return D;
@@ -267,6 +267,7 @@ const weekRows = () => G.weekTable((squad()?.members || []).map((m) => ({ id: m.
 const ledgerFor = (kind, ref) => S.D.ledger.find((r) => r.kind === kind && r.ref === ref);
 function taxState() {
   const w = S.D.windows.tax, f = S.D.fight, t = now();
+  if (w.off) return "off";
   if (f?.finished_at) return "done";
   if (f && t < Date.parse(f.ends_at)) return "live";
   if (f) return "done";
@@ -303,7 +304,7 @@ const head2d = (answers) => Walker.svg(answers, { crop: "head", mood: "fresh" })
 const face = (id, size = 52) => `<div class="face has-fallback" style="width:${size}px;height:${size}px"><span class="fb">${head2d(ANS[id])}</span>${portraitImg("walker", id, { w: size * 2, h: size * 2, frame: "head" })}</div>`;
 
 // ---------- notifications ----------
-// A ping at 5pm before the Taxman's in (and the raid lobby on Sunday), and one at 9pm if you missed him. The server sends it;
+// A ping at 5pm before the Taxman's in (the raid lobby on Sunday), and one at 9pm if you haven't fought him. The server sends it;
 // this phone just has to sign up. iPhones only allow it once Effort is on the Home Screen.
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 async function callPush(action, body) {
@@ -340,7 +341,7 @@ async function enablePush() {
     await callPush("subscribe", { token: S.token, sub: sub.toJSON() });
     store.set("pushSynced", S.D?.today.day || "");
     S.push = "on"; render(); FX.play("levelup");
-    toast("Pings at 5pm, and 9pm if you miss him");
+    toast("Pings at 5pm, and 9pm if you haven't fought him");
   } catch (e) { toast(`Couldn't turn them on: ${e.message}`); }
 }
 async function disablePush() {
@@ -449,6 +450,7 @@ function pendingToday() {
     return { n: net - paid, taxed: true, rate: Number(f.rate) * (1 - k), steal: Number(f.steal_pct) || 0 };
   }
   if (st === "missed") return { n: E - Math.round(E * T.taxRate) - paid, taxed: true, rate: T.taxRate, steal: 0 };
+  if (st === "off") return { n: E - paid, taxed: true, rate: 0, steal: 0 };
   return { n: E, taxed: false, rate: T.taxRate };
 }
 function walletHtml() {
@@ -1081,15 +1083,17 @@ function syncChip() {
   return `<span class="chip ${fresh ? "green" : "gold"}">${ic("steps")} Synced ${ago(m.steps_synced_at)}</span>${m.platform === "ios" ? `<a class="chip cyan" href="shortcuts://run-shortcut?name=${encodeURIComponent("Effort Steps")}">${ic("refresh")} Sync now</a>` : /^android-(app|hc)$/.test(m.steps_source || "") ? `<a class="chip cyan" href="${stepsAppLink(S.token)}">${ic("refresh")} Sync now</a>` : ""}`;
 }
 function dayTiles() {
-  const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll;
+  const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll, off = taxState() === "off";
   return `<div class="tiles">
       <button class="tile gold tilebtn" data-act="steps-week"><div class="k">${ic("coin")} Earned today ${ic("arrowRight")}</div><div class="v">${effortTag(T.efforts)}<small>${S.D.today.debt ? `<s class="was">${fmt(S.D.today.rawSteps)}</s> <span class="cut-t">${fmt(S.D.today.steps)}</span>` : fmt(S.D.today.steps)} steps</small></div></button>
-      <div class="tile red"><div class="k">${ic("warning")} At stake</div><div class="v">${Math.round(T.taxRate * 100)}%<small>${stake} Efforts</small></div></div>
-      <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(T.hp)}</div></div>
+      ${off ? `<div class="tile green"><div class="k">${ic("check")} Tax today</div><div class="v">0%<small>Sunday</small></div></div>
+      <div class="tile"><div class="k">${ic("clock")} Taxman</div><div class="v">Off<small>Back Monday 6pm</small></div></div>`
+      : `<div class="tile red"><div class="k">${ic("warning")} At stake</div><div class="v">${Math.round(T.taxRate * 100)}%<small>${stake} Efforts</small></div></div>
+      <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(T.hp)}</div></div>`}
       <div class="tile cyan"><div class="k">${ic("phone")} App time</div><div class="v">${S.D.today.scrollLinked ? sc ?? 0 : "Not linked"}<small>${S.D.today.scrollLinked ? `/ ${G.scrollBudget(S.D.today.steps)} min allowed` : `counts as ${G.RULES.unlinkedOverMin} min over`}</small></div></div>
     </div>
     <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">
-      ${T.pace > 0 ? `<span class="chip green">${ic("steps")} Ahead of the squad · −${Math.round(G.RULES.paceTax * 100)}% tax</span>` : T.pace < 0 ? `<span class="chip red">${ic("steps")} Behind the squad · +${Math.round(G.RULES.paceTax * 100)}% tax</span>` : squad()?.members.length > 1 ? `<span class="chip">${ic("steps")} Level with the squad</span>` : ""}
+      ${off ? "" : T.pace > 0 ? `<span class="chip green">${ic("steps")} Ahead of the squad · −${Math.round(G.RULES.paceTax * 100)}% tax</span>` : T.pace < 0 ? `<span class="chip red">${ic("steps")} Behind the squad · +${Math.round(G.RULES.paceTax * 100)}% tax</span>` : squad()?.members.length > 1 ? `<span class="chip">${ic("steps")} Level with the squad</span>` : ""}
       ${S.D.today.debt ? `<button class="chip red" data-act="steps-week">${ic("bolt")} Paralysed: −${fmt(S.D.today.debt)} steps today</button>` : ""}
       ${syncChip()}
     </div>`;
@@ -1108,9 +1112,13 @@ function taxHero() {
     line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : k >= 0.05 ? `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.` : `He took the full ${Math.round(Number(f.rate) * 100)}%.`;
     btn = `<div class="rline total" style="margin-top:12px"><span>Banked today</span><span class="rv">${paid ? signedEfforts(paid.amount + Math.max(0, pendingToday().n)) : "–"}</span></div>
       <p class="tiny faint" style="margin:6px 0 0">This covers all of today's steps, so keep walking.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
+  } else if (st === "off") {
+    chip = `<span class="chip cyan">${ic("star")} Sunday · day off</span>`;
+    line = "He takes Sundays off. No tax on today's steps: they go straight in.";
+    btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Back <span data-count="${w.next}">${countdown(w.next - now())}</span></button>`;
   } else if (st === "soon") {
-    chip = `<span class="chip gold">${ic("clock")} Tonight · 6pm to 9pm</span>`;
-    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Fight him any time from 6 to 9pm.`;
+    chip = `<span class="chip gold">${ic("clock")} Tonight · 6pm to 11pm</span>`;
+    line = `Wants ${Math.round(T.taxRate * 100)}% of today's Efforts. Fight him any time from 6 to 11pm.`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>${NATIVE ? (S.native?.reminders ? "" : `<button class="btn xs block" style="margin-top:10px" data-act="native-reminders-on">${ic("bell")} Ping me when he's in</button>`) : S.push === "off" ? `<button class="btn xs block" style="margin-top:10px" data-act="push-on">${ic("bell")} Ping me when he's in</button>` : ""}`;
   } else {
     chip = `<span class="chip red">${ic("warning")} Missed tonight</span>`;
@@ -1165,8 +1173,9 @@ function stepsHero() {
 // What's on right now, in one line; the fights themselves are on the Fight tab.
 function nowStrip() {
   const tx = taxState(), rs = raidState(), H = S.D.hunt, pct = Math.round(taxSetup().taxRate * 100);
-  const [txt, hot] = rs === "live" ? ["The raid's on", 1] : rs === "open" ? ["Raid lobby's open till 9pm", 1]
-    : ["open", "live"].includes(tx) ? [`The Taxman's in till 9pm · wants ${pct}%`, 1] : H?.open && !H.done ? ["Midweek Hunt's on till 11pm", 1]
+  const [txt, hot] = rs === "live" ? ["The raid's on", 1] : rs === "open" ? ["Raid lobby's open till 11pm", 1]
+    : ["open", "live"].includes(tx) ? [`The Taxman's in till 11pm · wants ${pct}%`, 1] : H?.open && !H.done ? ["Midweek Hunt's on till 11pm", 1]
+    : tx === "off" ? (rs === "soon" ? ["No Taxman today · raid lobby at 6pm", 0] : ["No Taxman on Sundays · no tax today", 0])
     : tx === "soon" ? [`Taxman at 6pm · wants ${pct}%`, 0] : tx === "done" ? ["Taxman done for today", 0] : ["Taxman's gone for today", 0];
   return `<button class="panel nowstrip ${hot ? "hot" : ""}" data-tab="raid">${ic(hot ? "sword" : "clock")}<span class="grow">${txt}</span>${ic("arrowRight")}</button>`;
 }
@@ -1176,7 +1185,7 @@ function howDay() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort, up to ${G.RULES.dailyEffortCap} a day. Gear costs Efforts.</span></div></div>
         <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: five minutes to fight</b><span>He takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it. Knock him out to keep it all, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: five minutes to fight</b><span>Not on Sundays: he's off, and there's no tax. Other days he takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it. Knock him out to keep it all, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra.</span></div></div>
         <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>When he Audits you only the moving target takes damage. Golden receipts knock 3% off his health.</span></div></div>
       </div>
     </details>`;
@@ -1239,7 +1248,7 @@ function raidHero() {
     chip = `<span class="chip">${ic("check")} This week's raid is done</span>`;
     btn = `<button class="btn blue block" style="margin-top:14px" data-act="raid-result">${ic("chest")} ${r.how === "won" ? "Won" : r.how === "wiped" ? "Wiped" : "Out of time"} · see results</button>`;
   } else {
-    chip = `<span class="chip red">${ic("raid")} Sunday · 6–9pm</span>`;
+    chip = `<span class="chip red">${ic("raid")} Sunday · 6–11pm</span>`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>`;
   }
   return `<section class="panel hero">
@@ -1253,7 +1262,7 @@ function raidHero() {
           <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(P))}<small>squad</small></div></div>
           <div class="tile ${mine.stride > 1 ? "green" : mine.stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${mine.stride.toFixed(2)}<small>from steps</small></div></div>
         </div>${btn}
-        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–9pm. When ${G.RULES.raidSquadSize} or more of you are in the lobby and ready, the 15-minute fight starts.</p>
+        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–11pm. When ${G.RULES.raidSquadSize} or more of you are in the lobby and ready, the 15-minute fight starts.</p>
       </div>
     </section>`;
 }
@@ -1298,7 +1307,7 @@ function howRaids() {
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
         <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
         <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear wins it</b><span>The boss is the same however many turn up. Tougher bosses need better gear.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>The lobby</b><span>Sunday 6–9pm. ${G.RULES.raidSquadSize} or more of you, everyone ready. One raid a week.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>The lobby</b><span>Sunday 6–11pm. ${G.RULES.raidSquadSize} or more of you, everyone ready. One raid a week.</span></div></div>
       </div>
     </details>`;
 }
@@ -1620,6 +1629,7 @@ function itemSheet(id, deal) {
   const inv = S.D.inv, t = G.tierOf(item.tier), up = inv[id] || 0, own = id in inv, on = me().gear[item.slot] === id, wallet = S.D.wallet;
   const locked = !own && t.lvl > level(), price = G.priceOf(item, deal), cls = item.cls ? I.CLASSES.find((c) => c.id === item.cls) : null;
   const st = G.itemStats(item, up, myStats()), next = G.itemStats(item, up + 1, myStats()), cost = G.upgradeCost(item, up, S.D.squad?.den?.levels), maxed = up >= G.RULES.upgradeMax;
+  const sellFor = own ? G.sellPrice(S.D.paid?.[id]) : 0;
   openSheet(`<div class="row spread" style="margin-bottom:10px"><span class="chip" style="background:color-mix(in srgb, ${t.color} 30%, transparent);border-color:${t.color};color:#fff">${t.label}${cls ? ` · ${esc(cls.name)}` : " · Any class"} · ${esc(item.slot)}</span><button class="iconbtn" data-act="close-sheet" aria-label="Close">${ic("close")}</button></div>
     <div class="bigart"><div class="art">${itemArt(item)}</div>${up ? `<span class="upb">+${up}</span>` : ""}</div>
     <h2 class="ol-sm">${esc(item.name)}</h2>
@@ -1634,6 +1644,8 @@ function itemSheet(id, deal) {
         : `${on ? `<button class="btn" data-unequip="${item.slot}">Take off</button>` : `<button class="btn blue" data-equip="${id}">Equip</button>`}
            ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
     </div>
+    ${own && sellFor ? `<button class="btn sm block" style="margin-top:10px" data-sell="${id}">Sell to the shop ${priceTag(sellFor)}</button>
+      <p class="tiny faint" style="text-align:center;margin:6px 0 0">${Math.round(G.RULES.sellBack * 100)}% of the ${fmt(S.D.paid[id])} you spent on it${up ? ", upgrades included" : ""}.</p>` : ""}
     ${!own && !locked && wallet < price ? `<p class="small muted" style="text-align:center;margin:10px 0 0">You need ${fmt(price - wallet)} more Efforts. Walk.</p>` : ""}`, { rc: t.color });
 }
 // Everything you own for one slot, to swap in (the raid lobby and the shop's loadout use it).
@@ -1683,7 +1695,7 @@ function tabMe() {
     ${wardrobePanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("bell")}</span><h2 class="ol-sm">Reminders</h2></div>
-      <p class="small muted" style="margin:0 0 10px">A ping at 5pm, and at 9pm if you miss the Taxman.</p>
+      <p class="small muted" style="margin:0 0 10px">A ping at 5pm, and at 9pm if you haven't fought the Taxman.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -1717,7 +1729,7 @@ function reminderButtons() {
   const gcal = (text, start, mins, rule) => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(text)}&dates=${gstamp(start)}/${gstamp(start + mins * 60000)}&ctz=Europe/London&recur=${encodeURIComponent("RRULE:" + rule)}&details=${encodeURIComponent(APP_URL)}`;
   const taxAt = w.tax.test ? w.tax.next : w.tax.opens > now() ? w.tax.opens : w.tax.next;
   return `<a class="btn sm block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
-    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman (6–9pm)", taxAt, 180, "FREQ=DAILY")}">Google: 6pm daily</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–9pm)", w.raid.test ? w.raid.closes : w.raid.opens, 180, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
+    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman (6–11pm)", taxAt, 300, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA")}">Google: 6pm, not Sundays</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–11pm)", w.raid.test ? w.raid.closes : w.raid.opens, 300, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
 }
 
 // ---------- sheets ----------
@@ -1831,7 +1843,7 @@ function walletSheet() {
   const P = pendingToday(), w = S.D.wallet + (P.taxed ? P.n : 0), R = G.RULES;
   openSheet(`${sheetHead("Your money")}
     <div class="money">
-      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut each day unless you beat him.</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : fmt(w)}</b></div>
+      <div class="mrow"><span class="mic">${coin(44)}</span><div class="grow"><b>Efforts</b><span>Every ${fmt(R.stepsPerEffort)} steps you walk is 1 Effort, up to ${R.dailyEffortCap} a day. The Taxman takes a cut each day unless you beat him, except Sundays.</span></div><b class="num">${w < 0 ? "−" + fmt(-w) : fmt(w)}</b></div>
     </div>
     ${P.taxed ? `<div class="pendrow">${coin(22)}<span><b>Today's walking goes straight in</b> ${P.steal ? `with the ${Math.round(P.steal * 100)}% you stole on top` : P.rate > 0 ? `after the Taxman's ${Math.round(P.rate * 100)}%` : "with no tax"}. That covers all of today's steps.</span></div>`
       : P.n ? `<div class="pendrow">${coin(22)}<span><b>+${fmt(P.n)} Effort${P.n === 1 ? "" : "s"} from today's walking</b> so far. Once you've faced the Taxman they go straight in, after his cut.</span></div>` : ""}
@@ -2037,12 +2049,12 @@ function viewWelcome() {
   const inv = S.invite;
   $("#app").innerHTML = `<section class="welcome">
     <div class="wl-hero"><div class="wl-bosses">${portraitImg("boss", "taxman", { w: 260, h: 280, cls: "b1" })}${portraitImg("boss", "autoplay", { w: 220, h: 240, cls: "b2" })}</div>
-      <div class="logo ol">EFFORT</div><p class="tag">Out-walk your mates. Fight the Taxman every evening. Raid together on Sunday.</p></div>
+      <div class="logo ol">EFFORT</div><p class="tag">Out-walk your mates. Fight the Taxman in the evenings. Raid together on Sunday.</p></div>
     ${inv ? `<div class="panel invite"><span class="chip gold">${ic("squad")} You're invited</span><h3 class="ol-sm disp">${esc(inv.name)}</h3><p class="small muted">${inv.members} ${inv.members === 1 ? "player" : "players"} already walking.</p></div>` : ""}
     <section class="panel">
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Your steps are money</b><span>Every 100 steps is an Effort. Walk more than the squad and you hit harder, earn more and get taxed less.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 9pm: the Taxman</b><span>Five minutes, once a day. Beat him or he takes his cut.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: the Taxman</b><span>Five minutes, once a day, Monday to Saturday. Beat him or he takes his cut.</span></div></div>
         <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Fifteen minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
       </div>
     </section>
@@ -2122,7 +2134,7 @@ function viewSetup() {
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss the Taxman</h1>
-      <p class="muted">The Taxman's in from 6 to 9pm, and the raid's Sunday 6 to 9pm. We'll ping you at 5, and at 9 if you miss him.</p>
+      <p class="muted">The Taxman's in from 6 to 11pm (not Sundays), and the raid's Sunday 6 to 11pm. We'll ping you at 5, and at 9 if you haven't fought him.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -2221,7 +2233,7 @@ function hint(text) {
   h.classList.remove("gone"); h.innerHTML = text;
 }
 
-// ---------- 6pm to 9pm: the Taxman ----------
+// ---------- 6pm to 11pm (not Sundays): the Taxman ----------
 async function startTax() {
   FX.unlock();
   if (S.busy) return;
@@ -2408,7 +2420,7 @@ function closeLobby(leave) {
 }
 function viewLobby() {
   const L = V.lobby, d = L?.data;
-  const head = `<div class="quiz-top"><button class="iconbtn" data-act="lobby-leave" aria-label="Leave the lobby">${ic("chevronLeft")}</button><span class="grow"></span><span class="chip">${ic("clock")} Start by 9pm</span></div>`;
+  const head = `<div class="quiz-top"><button class="iconbtn" data-act="lobby-leave" aria-label="Leave the lobby">${ic("chevronLeft")}</button><span class="grow"></span><span class="chip">${ic("clock")} Start by 11pm</span></div>`;
   if (!d) { $("#app").innerHTML = `<section class="onboard">${head}<div class="boot" style="min-height:40dvh"><p class="muted">Joining the lobby…</p></div></section>`; return; }
   const members = squad().members, here = d.lobby.filter((x) => x.here), mine = here.find((x) => x.id === me().id);
   const ready = here.filter((x) => x.ready).length, need = Math.max(0, d.min - here.length);
@@ -3160,6 +3172,11 @@ document.addEventListener("click", async (e) => {
   if (d.skin) { skinSheet(d.skin); FX.play("tap"); return; }
   if (d.buy) { const item = G.itemById(d.buy); return shopAction("buy", { item: d.buy, deal: d.deal === "1" }, () => { FX.play("buy"); itemSheet(item.id, false); toast(`${item.name} equipped`); }); }
   if (d.upgrade) return shopAction("upgrade", { item: d.upgrade }, () => { FX.play("levelup"); itemSheet(d.upgrade, false); });
+  if (d.sell) {
+    const it = G.itemById(d.sell), amount = G.sellPrice(S.D.paid?.[d.sell]);
+    if (!it || !confirm(`Sell ${it.name}${S.D.inv[it.id] ? ` +${S.D.inv[it.id]}` : ""} to the shop for ${fmt(amount)} Efforts? Buying it again costs full price.`)) return;
+    return shopAction("sell", { item: it.id }, () => { closeSheet(); FX.play("coin"); toast(`Sold ${it.name} · +${fmt(amount)} Efforts`); });
+  }
   if (d.equip) { const it = G.itemById(d.equip); return shopAction("equip", { slot: it.slot, item: it.id }, () => { FX.play("buy"); itemSheet(it.id, false); }); }
   if (d.unequip) return shopAction("equip", { slot: d.unequip, item: null }, closeSheet);
   if (d.move && V.raid) { raidAct("move", d.move); FX.play("tap"); return; }

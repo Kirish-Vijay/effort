@@ -98,7 +98,7 @@ const BOSS_LORE = {
   kraken: "The Kraken: lives at the bottom of the Lowmost Deep, where it's always three in the morning.",
   algorithm: "Grimm: the Algorithm. Redraws the Misrendered Realm and decides what everyone sees. Wants the Long Count switched off.",
   dragon: "Vex: sleeps in the Gilded Void on a hoard of every hour ever lost to the glow. She counts them.",
-  taxman: "The Taxman: collects the Stillness's rent from 6 to 9pm. Beat him and keep your Efforts.",
+  taxman: "The Taxman: collects the Stillness's rent from 6 to 11pm, every day but Sunday. Beat him and keep your Efforts.",
 };
 const EVENT_LORE = {
   newyear: "Rez: made of every midnight promise. The Stillness loves a plan to start tomorrow.",

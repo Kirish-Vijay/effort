@@ -22,12 +22,12 @@ END:STANDARD
 END:VTIMEZONE
 BEGIN:VEVENT
 UID:effort-taxman@effort-game.vercel.app
-DTSTAMP:20261027T000000Z
-DTSTART;TZID=Europe/London:20261029T180000
-DTEND;TZID=Europe/London:20261029T210000
-RRULE:FREQ=DAILY
+DTSTAMP:20261108T000000Z
+DTSTART;TZID=Europe/London:20261109T180000
+DTEND;TZID=Europe/London:20261109T230000
+RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA
 SUMMARY:Effort: fight the Taxman
-DESCRIPTION:He's in from 6pm to 9pm. Five minutes to beat him. https://effort-game.vercel.app/
+DESCRIPTION:He's in from 6pm to 11pm\, Monday to Saturday. Five minutes to beat him. https://effort-game.vercel.app/
 URL:https://effort-game.vercel.app/
 BEGIN:VALARM
 ACTION:DISPLAY
@@ -37,12 +37,12 @@ END:VALARM
 END:VEVENT
 BEGIN:VEVENT
 UID:effort-raid@effort-game.vercel.app
-DTSTAMP:20261027T000000Z
+DTSTAMP:20261108T000000Z
 DTSTART;TZID=Europe/London:20261101T180000
-DTEND;TZID=Europe/London:20261101T210000
+DTEND;TZID=Europe/London:20261101T230000
 RRULE:FREQ=WEEKLY;BYDAY=SU
 SUMMARY:Effort: squad raid lobby
-DESCRIPTION:Lobby open 6–9pm. 4 or more\, everyone ready\, then 15 minutes. https://effort-game.vercel.app/
+DESCRIPTION:Lobby open 6–11pm. 4 or more\, everyone ready\, then 15 minutes. https://effort-game.vercel.app/
 URL:https://effort-game.vercel.app/
 BEGIN:VALARM
 ACTION:DISPLAY
@@ -51,7 +51,7 @@ TRIGGER:-PT10M
 END:VALARM
 BEGIN:VALARM
 ACTION:DISPLAY
-DESCRIPTION:The raid lobby's open till 9pm
+DESCRIPTION:The raid lobby's open till 11pm
 TRIGGER:PT0M
 END:VALARM
 END:VEVENT
