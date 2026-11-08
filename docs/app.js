@@ -1194,14 +1194,16 @@ function howDay() {
 }
 
 // ---------- Raid ----------
-// Each stat with what it does for you right now (gear included). Your class's two stats are marked.
+// Each stat with what it does for you right now (gear included). Your class's two stats are marked. Bars use
+// Game.statFill, which never fills, so a bigger stat is always a longer bar (and the same length on anyone's screen).
+const pctFill = (v) => `${(G.statFill(v) * 100).toFixed(1)}%`;
+const gearFill = (base, all) => `${((G.statFill(all) - G.statFill(base)) * 100).toFixed(1)}%`;
 function statRows(st, gear = me().gear, inv = S.D.inv) {
   const { g } = G.loadout(st, gear, inv), fx = G.statEffects(g), mine = G.classOf(st).stats;
-  const max = Math.max(10, ...Object.values(g));
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
     return `<div class="stat fx${mine.includes(s.id) ? " cl" : ""}" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
+      <div class="bar"><i class="base" style="--sc:${col};width:${pctFill(st[s.id])}"></i><i class="gear" style="width:${gearFill(st[s.id], g[s.id])}"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
   }).join("");
 }
 // What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
@@ -1374,25 +1376,28 @@ function tabShop() {
 }
 
 // ---------- Winny's Gamba Bucket ----------
-// Bought with Efforts only (never real money, and nothing in it can be cashed out). The server rolls; the bucket
-// then plays that result out over three taps, climbing the rarity ladder no higher than what you actually won.
-const GAMBA_RANK = { dud: 0, common: 1, rare: 2, epic: 3, legendary: 4, mythic: 5, jackpot: 6 };
+// A crate: every bucket drops a piece of gear. Efforts buy the day's five, House packs buy more, and nothing in it can
+// be cashed out. The server rolls (Game.gambaRoll); the reel here only plays out what it picked.
 const GAMBA_COL = { dud: "#5b6584", common: "#9aa6c4", rare: "#3d9bff", epic: "#a86bff", legendary: "#ffb21e", mythic: "#ff4d6a", jackpot: "#ffc83d" };
+const tierCol = (t) => G.tierOf(t).color;
 const bucketArt = (rar = "dud") => `<svg class="bucket-svg" viewBox="0 0 120 120" aria-hidden="true">
   <path d="M30 34 Q60 4 90 34" fill="none" stroke="#0a0f26" stroke-width="7" stroke-linecap="round"/><path d="M30 34 Q60 4 90 34" fill="none" stroke="#c9cfe6" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M22 40 L98 40 L88 108 Q60 116 32 108 Z" fill="${GAMBA_COL[rar]}" stroke="#0a0f26" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M22 40 L98 40 L88 108 Q60 116 32 108 Z" fill="${GAMBA_COL[rar] || rar}" stroke="#0a0f26" stroke-width="5" stroke-linejoin="round"/>
   <path d="M28 50 L92 50" stroke="rgba(255,255,255,.35)" stroke-width="4"/><path d="M33 96 Q60 103 87 96" stroke="rgba(0,0,0,.22)" stroke-width="5" fill="none"/>
   <ellipse cx="60" cy="40" rx="38" ry="7" fill="#1b2350" stroke="#0a0f26" stroke-width="5"/>
   <circle cx="45" cy="37" r="5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/><circle cx="62" cy="35" r="5" fill="#ffe58a" stroke="#0a0f26" stroke-width="2"/><circle cx="76" cy="38" r="4.5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/>
   <text x="60" y="84" text-anchor="middle" font-family="Lilita One, sans-serif" font-size="30" fill="#fff" stroke="#0a0f26" stroke-width="5" paint-order="stroke">W</text></svg>`;
+const myCrateOdds = () => G.crateOdds(level(), S.D.today.day);
 function gambaPanel() {
   const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0, junk = junkDrawer();
   const pack = (pk) => { const it = G.houseItem(pk.id), over = week + pk.pence > Gm.weeklyPence;
     return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}>${pk.buckets} buckets · ${G.pounds(pk.pence)}</button>`; };
+  const odds = myCrateOdds();
   return `<section class="panel gamba">
       <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
       <div class="bucket-stage">${bucketArt("legendary")}</div>
-      ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Buy a bucket ${priceTag(Gm.price)}</button>`
+      <button class="oddsbar" data-act="gamba-odds" aria-label="Odds">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</button>
+      ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Open a bucket ${priceTag(Gm.price)}</button>`
         : credits ? `<button class="btn gold xl block" data-act="gamba-buy">Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
       <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "Back at midnight"}${credits && left ? ` · ${credits} bought waiting` : ""}${Object.keys(junk).length ? ` · <button class="linkbtn" data-act="junk">Junk drawer (${Object.values(junk).reduce((a, b) => a + b, 0)})</button>` : ""}</p>
       <div class="gamba-more">
@@ -1402,12 +1407,13 @@ function gambaPanel() {
       </div>
     </section>`;
 }
+// Your odds (tiers past your level count as your best), what each sells back for, and the average back.
 function gambaOdds() {
-  const Gm = G.GAMBA, pc = (p) => `${(p * 100).toFixed(1)}%`;
+  const Gm = G.GAMBA, odds = myCrateOdds(), pc = (p) => `${(p * 100).toFixed(p < 0.01 ? 2 : 1)}%`;
   openSheet(`${sheetHead("The odds")}
-    <div class="oddsbar">${Gm.prizes.map(([p, , , r]) => `<i style="flex:${p};background:${GAMBA_COL[r]}"></i>`).join("")}</div>
-    <div class="oddsrows">${Gm.prizes.map(([p, v, l, r]) => `<div class="oddsrow"><span class="dot" style="background:${GAMBA_COL[r]}"></span><b class="grow">${esc(l)}</b><span class="muted">${v ? `${fmt(v)} Efforts` : "Something useless"}</span><span class="pc">${pc(p)}</span></div>`).join("")}</div>
-    <p class="small muted" style="margin:12px 0 0">${fmt(Gm.price)} Efforts a bucket. Winnings can't be cashed out.</p>`);
+    <div class="oddsbar">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</div>
+    <div class="oddsrows">${odds.map((o) => `<div class="oddsrow"><span class="dot" style="background:${tierCol(o.tier)}"></span><b class="grow">${esc(G.tierOf(o.tier).label)}</b><span class="muted">sells ${coin(14)}${fmt(o.sells)}</span><span class="pc">${pc(o.p)}</span></div>`).join("")}</div>
+    <p class="small muted" style="margin:12px 0 0">${fmt(Gm.price)} Efforts a bucket. Back on average: ${coin(14)}${fmt(Math.round(G.gambaReturn(level(), S.D.today.day) * Gm.price))}. One you already own goes straight back to the shop.</p>`);
 }
 async function gambaBuy() {
   if (S.busy) return; S.busy = true;
@@ -1419,14 +1425,7 @@ async function gambaBuy() {
   FX.play("buy");
   gambaReveal(r);
 }
-// Nothing comes out of a bucket empty-handed: the worst you get is something useless for the junk drawer.
-const JUNK = ["A soggy chip", "One left sock", "Winny's IOU (void)", "A receipt for a receipt", "Half a bus ticket", "A rubber duck that doesn't squeak",
-  "A pigeon feather", "A bent spoon", "A pebble shaped like Brett", "Tangled headphones", "The lid of a different bucket", "An expired coupon for buckets"];
-const pickJunk = () => {
-  const j = JUNK[Math.floor(Math.random() * JUNK.length)], drawer = junkDrawer();
-  drawer[j] = (drawer[j] || 0) + 1; store.set(`junk:${me().id}`, drawer);
-  return j;
-};
+// Old buckets paid out junk to a drawer on this phone; it's still there to look at.
 const junkDrawer = () => store.get(`junk:${me().id}`) || {};
 // Anyone's week, Monday to Sunday: what they walked, anything the game took off (and why), and what counted.
 // Yours comes in your own time zone and live; squad-mates' come with the squad data.
@@ -1478,59 +1477,94 @@ function junkSheet() {
 }
 // What happened in the bucket, one line each.
 const TALES = {
-  dud: ["Winny shakes the bucket. That's all that falls out.", "Nothing in here but this. Winny calls it a collectible.", "Winny swears it was full when he left it."],
-  common: ["Half of it was chocolate coins. You keep the real half.", "A pigeon got to it first. It left you half."],
-  rare: ["The bucket was a mimic. It snapped, you yanked, and you got away with every Effort you put in.", "It bit. You bit back. You escape with exactly what you paid."],
-  epic: ["The bucket had a false bottom. Winny looks the other way while you pocket double.", "A second purse was wedged underneath. Double."],
-  legendary: ["Two false bottoms. Winny is furious.", "The Taxman hid his float in this one. Four times what you paid."],
-  mythic: ["You tip it out and it keeps coming.", "It's heavier than it looks. Much heavier."],
-  jackpot: ["Winny's own savings were in this one. He's not talking to you."],
+  common: ["Winny tips the bucket. This rolls out, wrapped in chip paper.", "Under the chocolate coins, this. Winny calls it vintage.", "A pigeon was sitting on it. It wants it back.", "Winny swears this was the good bucket."],
+  rare: ["The bucket was a mimic. You wrestled this out of its mouth.", "A false bottom, and this underneath it."],
+  epic: ["Winny goes quiet. He didn't know that was in there.", "Wrapped in a betting slip that actually won."],
+  legendary: ["The Taxman hid this in a bucket to dodge himself.", "Winny tries to swap buckets with you. Too late."],
+  mythic: ["The bucket hums. Winny takes a step back.", "It's heavier than the bucket. Physics is sulking."],
+  relic: ["Winny's grandad's. He's not talking to you.", "The bucket was only ever a lid for this."],
+  dupe: ["You've already got one. Winny buys it off you on the spot.", "Another one. Winny pays up and drops it back in a bucket."],
 };
-const bucketTale = (rar) => { const t = TALES[rar] || TALES.dud; return t[Math.floor(Math.random() * t.length)]; };
-// Three taps, then the flood of colour and the prize. Rarities only ever climb to what was really won.
+const bucketTale = (key) => { const t = TALES[key] || TALES.common; return t[Math.floor(Math.random() * t.length)]; };
+// The reel, like a CS:GO case: filler drawn at your real odds, the won piece near the end.
+const REEL_N = 46, REEL_AT = 40;
+function reelCards(won) {
+  const odds = myCrateOdds(), cls = myClass().id;
+  const tier = () => { let x = Math.random(); for (const o of odds) { x -= o.p; if (x < 0) return o.tier; } return odds[0].tier; };
+  return Array.from({ length: REEL_N }, (_, i) => {
+    if (i === REEL_AT) return won;
+    const pool = G.cratePool(tier(), cls);
+    return pool[Math.floor(Math.random() * pool.length)] || won;
+  });
+}
+// The reel spins past the centre line, slows, and stops somewhere inside the won card (never dead centre, so it
+// reads as a spin, not a slide); the screen floods with its tier colour, then the card. Tap to skip the spin.
 function gambaReveal(r) {
-  const [, win, label, rar] = G.GAMBA.prizes[r.prize], top = GAMBA_RANK[rar], names = Object.keys(GAMBA_RANK);
+  const it = G.itemById(r.item), t = G.tierOf(r.tier), rank = I.TIERS.findIndex((x) => x.id === r.tier);
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, cards = reelCards(it);
   const el = document.createElement("div");
-  el.className = "gamba-reveal"; el.style.setProperty("--rc", GAMBA_COL.dud);
-  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-taps">3 taps</span></div>
-    <button class="gr-bucket" aria-label="Tap the bucket">${bucketArt("dud")}</button><p class="gr-hint">Tap the bucket</p><div class="gr-prize" hidden></div>`;
+  el.className = "gamba-reveal crate reeling"; el.style.setProperty("--rc", GAMBA_COL.dud);
+  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-taps">Tap to skip</span></div>
+    <div class="gr-tip">${bucketArt("legendary")}</div>
+    <div class="reel"><div class="reel-track">${cards.map((c) => `<div class="rcard" style="--tc:${tierCol(c.tier)}"><div class="art">${itemArt(c)}</div></div>`).join("")}</div><i class="reel-mark" aria-hidden="true"></i></div>
+    <div class="gr-prize" hidden></div>`;
   document.body.appendChild(el);
   FX.init(el);
-  let taps = 0, done = false;
-  const bucket = el.querySelector(".gr-bucket");
-  const finish = () => {
-    done = true; el.style.setProperty("--rc", GAMBA_COL[rar]); el.classList.add("flood", rar);
-    const [x, y] = FX.centre(bucket);
-    setTimeout(() => {
-      el.querySelector(".gr-hint").hidden = true; bucket.hidden = true;
-      const P = el.querySelector(".gr-prize"); P.hidden = false;
-      const junk = win ? null : pickJunk(), tale = bucketTale(rar);
-      P.innerHTML = `<div class="gr-card"><span class="gr-rar">${esc(rar === "jackpot" ? "Jackpot" : rar === "dud" ? "Junk" : rar)}</span><h2 class="ol disp">${esc(label)}</h2>
-        <div class="gr-win">${win ? `+${fmt(win)} Efforts` : esc(junk)}</div><p class="small muted">${esc(tale)}</p>
-        <button class="btn gold block" data-act="gamba-close">${win ? "Collect" : "Keep it"}</button></div>`;
-      if (win) { FX.coins(x, y, Math.min(60, 6 + top * 9)); FX.play("coin"); }
-      if (top >= 5) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); } else if (top >= 3) { FX.shake(el, 10, 400); FX.buzz(40); }
-    }, 600);
+  const reel = el.querySelector(".reel"), track = el.querySelector(".reel-track"), kids = track.children;
+  const step = kids[1].offsetLeft - kids[0].offsetLeft, cw = kids[0].offsetWidth, mid = reel.clientWidth / 2;
+  const end = mid - (REEL_AT * step + cw / 2 + (Math.random() - 0.5) * (cw - 18));
+  const D = reduce ? 700 : 5600, ease = (k) => 1 - Math.pow(1 - k, 4);
+  let t0 = performance.now(), under = -1, lastTick = 0, spun = false;
+  const frame = (now) => {
+    if (spun) return;
+    const k = Math.min(1, Math.max(0, (now - t0) / D)), x = end * ease(k);
+    track.style.transform = `translate3d(${x}px,0,0)`;
+    const u = Math.floor((mid - x) / step);
+    if (u !== under) { under = u; if (now - lastTick > 45) { lastTick = now; FX.play("tick"); FX.buzz(3); } }
+    if (k < 1) requestAnimationFrame(frame); else land();
   };
-  bucket.onclick = () => {
-    if (done) return;
-    taps++;
-    const lv = Math.floor((top * taps) / 3), at = names[lv];
-    bucket.innerHTML = bucketArt(at); el.style.setProperty("--rc", GAMBA_COL[at]);
-    el.querySelector(".gr-taps").textContent = taps < 3 ? `${3 - taps} tap${3 - taps === 1 ? "" : "s"}` : "";
-    bucket.classList.remove("bump"); void bucket.offsetWidth; bucket.classList.add("bump");
-    const [x, y] = FX.centre(bucket);
-    FX.play(lv >= 3 ? "crit" : "hit"); FX.buzz(lv >= 3 ? 25 : 10);
-    if (lv >= 1) FX.coins(x, y - 30, 3 + lv * 2);
-    if (lv >= 2) FX.shake(el, 4 + lv * 2, 200);
-    if (lv >= 4) el.classList.add("rays");
-    if (taps >= 3) finish();
+  const land = () => {
+    spun = true;
+    el.classList.remove("reeling"); el.classList.add("flood", r.tier); el.style.setProperty("--rc", t.color);
+    el.querySelector(".gr-taps").textContent = "";
+    kids[REEL_AT].classList.add("hit");
+    FX.play(rank >= 2 ? "rare" : "coin");
+    if (rank >= 2) { FX.shake(el, 6 + rank * 2, 300); FX.buzz(40); }
+    setTimeout(showCard, reduce ? 150 : 650);
   };
-  el.addEventListener("click", (e) => {
-    if (!e.target.closest("[data-act=gamba-close]")) return;
-    FX.destroy(); el.remove(); S.D.wallet = r.wallet; render();
-    load().then(render).catch(() => {});
+  const more = r.left > 0 || r.credits > 0, on = !r.dupe && !me().gear?.[it.slot]; // the server puts it straight on an empty slot
+  const showCard = () => {
+    reel.classList.add("dim"); el.classList.add("carded");
+    const P = el.querySelector(".gr-prize"); P.hidden = false;
+    const st = G.itemStats(it, 0, myStats()), cls = it.cls ? I.CLASSES.find((c) => c.id === it.cls) : null;
+    P.innerHTML = `<div class="gr-card">
+        <span class="gr-rar">${esc(t.label)}${cls ? ` · ${esc(cls.name)}` : ""}</span>
+        <div class="gr-art">${itemArt(it)}</div>
+        <h2 class="ol-sm">${esc(it.name)}</h2>
+        <div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div>
+        <p class="small muted gr-tale">${esc(bucketTale(r.dupe ? "dupe" : r.tier))}</p>
+        <div class="gr-worth">${r.dupe ? `Sold back +${coin(18)}${fmt(r.sells)}` : `Sells for ${coin(18)}${fmt(r.sells)}`}</div>
+        <div class="btn-row">${r.dupe ? "" : on ? `<button class="btn" disabled>${ic("check")} Equipped</button>` : `<button class="btn blue" data-act="gamba-equip">Equip</button>`}<button class="btn gold" data-act="gamba-close">Done</button></div>
+        ${more ? `<button class="btn sm block" style="margin-top:8px" data-act="gamba-again">Another bucket${r.left > 0 ? ` ${priceTag(G.GAMBA.price)}` : ""}</button>` : ""}
+      </div>`;
+    const [x, y] = FX.centre(P.querySelector(".gr-art"));
+    if (r.dupe) FX.coins(x, y, 8);
+    if (rank >= 4) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); }
+    if (rank >= 3) el.classList.add("rays");
+  };
+  const close = () => { FX.destroy(); el.remove(); S.D.wallet = r.wallet; render(); return load().then(render).catch(() => {}); };
+  el.addEventListener("click", async (e) => {
+    if (!spun) { t0 = performance.now() - D; return; } // skip to the landing
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "gamba-close") close();
+    else if (act === "gamba-again") { close(); gambaBuy(); }
+    else if (act === "gamba-equip") {
+      const b = e.target.closest("button"); b.disabled = true;
+      try { await call("equip", { token: S.token, slot: it.slot, item: it.id }); b.className = "btn"; b.innerHTML = `${ic("check")} Equipped`; FX.play("buy"); }
+      catch (err) { b.disabled = false; toast(err.message); }
+    }
   });
+  requestAnimationFrame(frame);
 }
 
 // ---------- The House: skins for real money ----------
@@ -1647,7 +1681,7 @@ function itemSheet(id, deal) {
            ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
     </div>
     ${own && sellFor ? `<button class="btn sm block" style="margin-top:10px" data-sell="${id}">Sell to the shop ${priceTag(sellFor)}</button>
-      <p class="tiny faint" style="text-align:center;margin:6px 0 0">${Math.round(G.RULES.sellBack * 100)}% of the ${fmt(S.D.paid[id])} you spent on it${up ? ", upgrades included" : ""}.</p>` : ""}
+      <p class="tiny faint" style="text-align:center;margin:6px 0 0">${Math.round(G.RULES.sellBack * 100)}% of ${S.D.won?.includes(id) ? `its ${fmt(S.D.paid[id])} shop price (from a bucket)` : `the ${fmt(S.D.paid[id])} you spent on it`}${up ? ", upgrades included" : ""}.</p>` : ""}
     ${!own && !locked && wallet < price ? `<p class="small muted" style="text-align:center;margin:10px 0 0">You need ${fmt(price - wallet)} more Efforts. Walk.</p>` : ""}`, { rc: t.color });
 }
 // Everything you own for one slot, to swap in (the raid lobby and the shop's loadout use it).
@@ -2099,7 +2133,7 @@ function viewReveal() {
     <h1 class="ol disp" style="margin:8px 0 2px;font-size:32px">${esc(a.name || "You")}</h1>
     <div class="chip gold" style="margin:4px auto 10px">${esc(cls.name)}</div>
     <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
-    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / 10) * 100}%"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
+    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${pctFill(st[s.id])}"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
       <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go. Gold names are your class's stats, and your class gear piles more onto your best one.</p></section>
     <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">That's me</button></div>
   </section>`;

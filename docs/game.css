@@ -213,7 +213,11 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .stat { display: grid; grid-template-columns: 28px 74px 1fr 30px; gap: 8px; align-items: center; margin: 7px 0; }
 .stat .sic { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; font-size: 16px; color: #fff; border: 2px solid var(--ink); }
 .stat .sn { font-weight: 600; font-size: 13.5px; }
-.stat .bar { height: 12px; border-radius: 99px; background: var(--inset); border: 2px solid var(--ink); overflow: hidden; display: flex; }
+.stat .bar { position: relative; height: 12px; border-radius: 99px; background: var(--inset); border: 2px solid var(--ink); overflow: hidden; display: flex; }
+/* Faint marks at 10, 20, 50 and 100 (Game.statFill of each), so the curve still reads as a scale. */
+.stat .bar::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent calc(33.33% - 1px), rgba(10,15,38,.5) 0 33.33%, transparent 0 calc(50% - 1px), rgba(10,15,38,.5) 0 50%,
+    transparent 0 calc(71.43% - 1px), rgba(10,15,38,.5) 0 71.43%, transparent 0 calc(83.33% - 1px), rgba(10,15,38,.5) 0 83.33%, transparent 0); }
 .stat .bar i { display: block; height: 100%; }
 .stat .bar i.base { background: linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0) 60%), var(--sc); }
 .stat .bar i.gear { background: repeating-linear-gradient(135deg, var(--gold) 0 4px, var(--gold-lo) 4px 8px); }
@@ -889,7 +893,42 @@ body.typing .chatview .ccomposer { padding-bottom: calc(env(safe-area-inset-bott
 .gamba-reveal .gr-rar { font: 700 12px/1 var(--ui); letter-spacing: .12em; text-transform: uppercase; color: var(--rc); }
 .gamba-reveal .gr-card h2 { margin: 8px 0 6px; font-size: 32px; }
 .gamba-reveal .gr-win { font: 400 26px/1.1 var(--display); color: var(--gold-hi); margin-bottom: 6px; }
-.gamba-reveal.jackpot .gr-card, .gamba-reveal.mythic .gr-card { animation: grpop .4s cubic-bezier(.3,1.5,.5,1), glow 1.4s ease-in-out .4s infinite; }
+.gamba-reveal.relic .gr-card, .gamba-reveal.mythic .gr-card { animation: grpop .4s cubic-bezier(.3,1.5,.5,1), glow 1.4s ease-in-out .4s infinite; }
+/* The crate screen is opaque: the shop behind would fight the reel. */
+.gamba-reveal.crate { background: radial-gradient(70% 50% at 50% 45%, color-mix(in srgb, var(--rc) 30%, var(--bg0)), var(--bg0) 75%); }
+.gamba-reveal.crate.flood { background: radial-gradient(90% 70% at 50% 50%, color-mix(in srgb, var(--rc) 55%, var(--bg0)), var(--bg0) 80%); }
+/* Winny tips the bucket out over the reel while it spins. */
+.gamba-reveal .gr-tip .bucket-svg { width: 104px; height: 104px; transform-origin: 50% 80%; animation: tipout .7s cubic-bezier(.3,1.5,.5,1) both; filter: drop-shadow(0 8px 10px rgba(0,0,0,.5)); }
+@keyframes tipout { from { transform: translateY(-30px) rotate(0); opacity: 0; } to { transform: rotate(150deg); } }
+.gamba-reveal.carded .gr-tip { display: none; }
+button.oddsbar { width: 100%; padding: 0; margin: 0 0 12px; cursor: pointer; background: var(--inset); }
+/* The reel: a CS:GO-style strip of cards past a gold centre line. Cards carry their tier colour along the foot. */
+.gamba-reveal .reel { position: relative; width: calc(100% + 32px); margin: 0 -16px; height: 132px; overflow: hidden; flex: none;
+  background: linear-gradient(180deg, var(--bg1), var(--bg0)); border-block: 3px solid var(--ink); box-shadow: 0 0 40px rgba(0,0,0,.6); transition: opacity .4s ease, height .4s ease;
+  mask: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent); }
+.gamba-reveal .reel.dim { opacity: .35; height: 92px; }
+.gamba-reveal .reel-track { position: absolute; left: 0; top: 50%; display: flex; gap: 8px; translate: 0 -50%; will-change: transform; }
+.gamba-reveal .rcard { position: relative; width: 96px; height: 108px; flex: none; display: grid; place-items: center; border-radius: 12px; overflow: hidden; transition: opacity .35s ease, transform .35s ease;
+  background: radial-gradient(80% 70% at 50% 35%, color-mix(in srgb, var(--tc) 32%, transparent), transparent 75%), var(--panel-lo); border: 2px solid var(--ink); }
+.gamba-reveal .rcard::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 7px; background: var(--tc); box-shadow: 0 0 12px var(--tc); }
+.gamba-reveal .rcard .art { width: 66px; height: 66px; display: grid; place-items: center; font-size: 40px; }
+.gamba-reveal .rcard .art svg { width: 100%; height: 100%; }
+.gamba-reveal .reel.dim .rcard { height: 76px; }
+.gamba-reveal .reel.dim .rcard .art { width: 44px; height: 44px; }
+.gamba-reveal .reel-mark { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; translate: -50% 0; background: var(--gold); box-shadow: 0 0 10px var(--gold); z-index: 2; }
+.gamba-reveal .reel-mark::before, .gamba-reveal .reel-mark::after { content: ""; position: absolute; left: 50%; translate: -50% 0; border: 9px solid transparent; }
+.gamba-reveal .reel-mark::before { top: 0; border-top-color: var(--gold); }
+.gamba-reveal .reel-mark::after { bottom: 0; border-bottom-color: var(--gold); }
+.gamba-reveal:not(.reeling) .rcard:not(.hit) { opacity: .3; }
+.gamba-reveal .rcard.hit { border-color: var(--tc); box-shadow: 0 0 0 2px var(--ink), 0 0 26px var(--tc); }
+.gamba-reveal .gr-prize { width: 100%; display: grid; justify-items: center; }
+.gamba-reveal .gr-art { width: 112px; height: 112px; margin: 10px auto 2px; display: grid; place-items: center; font-size: 64px; filter: drop-shadow(0 0 18px color-mix(in srgb, var(--rc) 70%, transparent)); }
+.gamba-reveal .gr-art svg { width: 100%; height: 100%; }
+.gamba-reveal .gr-card h2.ol-sm { margin: 4px 0 8px; font-size: 24px; line-height: 1.1; }
+.gamba-reveal .gr-card .stats { display: flex; justify-content: center; gap: 10px; margin-bottom: 8px; font: 400 17px/1 var(--display); }
+.gamba-reveal .gr-tale { margin: 0 0 10px; }
+.gamba-reveal .gr-worth { display: flex; justify-content: center; align-items: center; gap: 4px; margin-bottom: 12px; font: 400 18px/1 var(--display); color: var(--gold-hi); }
+.gamba-reveal .gr-card .btn-row { margin: 0; }
 
 /* ---------- The House ---------- */
 .tbadge { display: inline-block; width: 20px; height: 20px; flex: none; background: var(--tc); border: 2px solid var(--ink); vertical-align: middle; }
@@ -921,7 +960,7 @@ body.typing .chatview .ccomposer { padding-bottom: calc(env(safe-area-inset-bott
 .ticks li .ic, .ticks li svg { color: var(--green-hi); flex: none; }
 .ticks li.off { color: var(--text-3); }
 .ticks li.off svg { color: var(--text-3); }
-@media (prefers-reduced-motion: reduce) { .gamba-reveal.rays::before, .bucket-stage .bucket-svg { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .gamba-reveal.rays::before, .bucket-stage .bucket-svg, .gamba-reveal .gr-tip .bucket-svg { animation: none; } }
 
 /* Shop: Winny's and The House up top, where nobody can miss them */
 .shopfeature { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }

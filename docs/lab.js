@@ -207,11 +207,11 @@ function syncSliders() {
 // ---------- Raid ----------
 function statRows(st) {
   const { g } = G.loadout(st, L.equipped, L.inv);
-  const max = Math.max(20, ...Object.values(g));
+  const fill = (v) => `${(G.statFill(v) * 100).toFixed(1)}%`; // never full: bigger stats keep drawing longer bars
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
     return `<div class="stat" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span></div>`;
+      <div class="bar"><i class="base" style="--sc:${col};width:${fill(st[s.id])}"></i><i class="gear" style="width:calc(${fill(g[s.id])} - ${fill(st[s.id])})"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span></div>`;
   }).join("");
 }
 function botKit(cls, kind) {
