@@ -10,7 +10,9 @@ let buildWalker = null;
 try { ({ buildWalker } = await import("./ninja3d.js")); } catch { /* falls back to simple walkers */ }
 
 const INK = 0x1f2a24;
-const ROWS = { front: -0.4, mid: 1.1, back: 2.6 };
+// Rows sit well forward of the boss and the camera looks down on them from higher up, so the squad fills the bottom
+// third of a portrait screen and their heads stay below the boss instead of over its lower half.
+const ROWS = { front: 0.9, mid: 2.4, back: 3.9 };
 const BOSS_Z = -5.2;
 // Ground warning colour for each boss move, and the colour of each class's special.
 const WARN = { swipe: 0xff3b3b, stomp: 0xff3b3b, scream: 0xff3b3b, ooze: 0x5cff4a, spores: 0xffa13d, gust: 0x7ff0ff, grab: 0x9b5cff, slam: 0xff2a00, breath: 0xff7a1a };
@@ -871,8 +873,8 @@ class Arena {
     this.scene.fog = new THREE.Fog(this.pal.fog, 18, 40);
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
     this.scene.add(this.camera); // the flash overlay rides on it
-    this.camBase = opts.mode === "tax" ? V3(0.7, 2.9, 7.6) : V3(0, 4.0, 9.2);
-    this.lookAt = opts.mode === "tax" ? V3(-0.2, 2.5, this.bossZ + 2) : V3(0, 2.9, this.bossZ + 1.5);
+    this.camBase = opts.mode === "tax" ? V3(0.7, 2.9, 7.6) : V3(0, 6.4, 10.0);
+    this.lookAt = opts.mode === "tax" ? V3(-0.2, 2.5, this.bossZ + 2) : V3(0, 1.6, this.bossZ + 1.5);
     this.baseFov = 48;
     // Time: real time drives the camera and the clock; game time (frozen by hit-stop, slowed on the K.O.) drives everything else.
     this.shakeAmt = 0; this.t = 0; this.realT = 0; this.fx = []; this.heroes = new Map();
@@ -1012,10 +1014,13 @@ class Arena {
     this.capMat.color.copy(L.ring).multiplyScalar(2.2);
     this.skyMat.color.copy(L.tint); this.floorMat.color.copy(L.tint);
     this.motes.material.uniforms.uBoost.value = L.boost;
+    // The K.O.: bloom eases down and the vignette closes in, so the dying boss stands out instead of glowing white.
+    const koT = this.koAt != null && this.mode !== "tax" ? 1 : 0;
+    this.koK = (this.koK || 0) + (koT - (this.koK || 0)) * (1 - Math.exp(-real * 4));
     if (this.post) {
       const u = this.post.grade.uniforms;
-      u.uLift.value.copy(L.lift); u.uGain.value.copy(L.gain); u.uSat.value = L.sat; u.uVig.value = L.vig;
-      this.post.bloom.strength = L.bloom;
+      u.uLift.value.copy(L.lift); u.uGain.value.copy(L.gain); u.uSat.value = L.sat; u.uVig.value = L.vig + this.koK * 0.35;
+      this.post.bloom.strength = L.bloom * (1 - this.koK * 0.55);
     }
   }
 
@@ -1171,7 +1176,7 @@ class Arena {
     for (const h of this.heroes.values()) byRow[h.pos].push(h);
     // Spacing follows each neighbour pair's size; on a narrow (portrait) screen a long row closes up to fit,
     // but never tighter than the walkers' own width, so nobody overlaps.
-    const r = this.host.getBoundingClientRect(), aspect = r.width / Math.max(1, r.height), tanH = Math.tan(((aspect < 0.7 ? 58 : 48) * Math.PI) / 360) * aspect;
+    const r = this.host.getBoundingClientRect(), aspect = r.width / Math.max(1, r.height), tanH = Math.tan((this.fovFor(aspect) * Math.PI) / 360) * aspect;
     for (const [row, list] of Object.entries(byRow)) {
       const n = list.length, gap = row === "front" ? 1.9 : 1.75; if (!n) continue;
       const sc = list.map((h) => h.scaleTo ?? 1), want = [], min = [];
@@ -1312,7 +1317,8 @@ class Arena {
     const h = this.heroes.get(id); if (!h || h.down) return;
     h.w.play(big ? "big" : "attack");
     const from = h.w.group.position.clone().add(V3(0, 1.1 * h.w.group.scale.y, -0.3));
-    const to = this.bossPoint(0.45 + Math.random() * 0.3, (Math.random() - 0.5) * 1.2);
+    // Shots land on the body and flanks, below the face, so the boss's expression stays readable mid-fight.
+    const to = this.bossPoint(0.28 + Math.random() * 0.24, (Math.random() - 0.5) * 1.6);
     const strong = crit || big;
     // Mythic and House skins shoot (and land) in their own spark colour, a touch brighter on the strong ones.
     const sk = h.w.skinFx?.spark ? new THREE.Color(h.w.skinFx.spark).getHex() : null;
@@ -1571,7 +1577,9 @@ class Arena {
   // The entrance: start close on the boss, a roar, then pull back to the squad. Taps are locked by the app meanwhile.
   intro(secs = 3.5) {
     const B = this.boss; if (!B) return;
-    this.camMove({ pos: [0, -0.6, -4.2], look: [0, 0.9, -1.2], fov: -8, inT: 0.01, hold: true, outT: Math.min(1.4, secs * 0.4), tag: "intro", free: true });
+    // From the raid camera (high, behind the squad) down to the boss's eye level, close in; the Taxman's is already low.
+    const lo = this.mode === "tax" ? { pos: [0, -0.6, -4.2], look: [0, 0.9, -1.2] } : { pos: [0, -3.0, -5.0], look: [0, 2.2, -1.2] };
+    this.camMove({ ...lo, fov: -8, inT: 0.01, hold: true, outT: Math.min(1.4, secs * 0.4), tag: "intro", free: true });
     setTimeout(() => {
       if (this.disposed || this.boss?.dead) return;
       const B2 = this.boss;
@@ -1656,20 +1664,25 @@ class Arena {
     this.shake(0.7);
     for (const h of this.heroes.values()) if (!h.down) h.w.play("cheer");
     // The finisher, once per fight (a model arriving late re-runs bossKO on the new body): freeze, slow motion, push in, dissolve.
+    // No white-out: the flash is faint and warm, the rings take the stage colour, and bloom eases down (see
+    // updateLook) so the boss's silhouette stays readable while it shudders, topples and burns away.
     if (this.koAt == null) {
       this.koAt = this.realT;
       this.moves.length = 0;
-      this.hitStop(130, { flash: 0.45, color: 0xffffff, punch: 1 });
-      this.slowmo = { t: 0, hold: 1.1, out: 0.7, scale: 0.3 };
-      this.camMove({ pos: [0, 0.5, -1.1], look: [0, 0.9, 0], fov: -4, inT: 0.6, dur: 3.2, outT: 0.9, tag: "ko", free: true });
-      const at = this.bossPoint(0.5, 0);
-      this.shockwave(at, 0xffffff, 9, 0.9, true); this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 14, 1.2);
-      this.burst(at, 0xfff3a0, 70, 8); this.flare(at, 0xffffff, 9);
+      const ring = this.look.ring.getHex();
+      this.hitStop(150, { flash: 0.14, color: 0xffd9a0, punch: 1 });
+      this.slowmo = { t: 0, hold: 0.8, out: 0.6, scale: 0.3 };
+      this.camMove({ ...(this.mode === "tax" ? { pos: [0, 0.5, -1.1], look: [0, 0.9, 0] } : { pos: [0, -1.7, -1.8], look: [0, 2.0, 0] }), fov: -4, inT: 0.6, dur: 3.4, outT: 0.9, tag: "ko", free: true });
+      const at = this.bossPoint(0.45, 0);
+      this.shockwave(at, ring, 4.5, 0.7, true); this.shockwave(V3(0, 0.06, this.bossZ), ring, 12, 1.2);
+      this.burst(at, 0xffd36b, 40, 7); this.flare(at, ring, 3);
+      // Three hit-flickers while it shudders (game time is slowed, so these are spaced in real time).
+      for (const ms of [0, 260, 520]) setTimeout(() => { if (!this.disposed && this.boss === B) { B.flash = 0.55; B.squash = 0.06; } }, ms);
       // The Taxman stays down so you can go through his pockets; a raid boss burns away.
       if (this.mode === "tax") this.lootStart();
       else {
-        this.dissolveAt = this.realT + 1.1;
-        setTimeout(() => { if (!this.disposed) { const p = this.bossPoint(0.45, 0); this.burst(p, this.look.ring.getHex(), 30, 6); this.shockwave(p, this.look.ring.getHex(), 5, 0.7, true); this.shake(0.4); } }, 1100);
+        this.dissolveAt = this.realT + 1.25;
+        setTimeout(() => { if (!this.disposed) { this.dustRing(V3(0, 0.05, this.bossZ + 0.8), 3.5, 0x8a7a6a, 22); this.shockwave(V3(0, 0.06, this.bossZ + 0.8), ring, 6, 0.8); this.shake(0.35); } }, 1150);
       }
     }
   }
@@ -1734,11 +1747,11 @@ class Arena {
   }
   // A glowing shot on a curved path, leaving a continuous trail; bursts on landing.
   projectile(from, to, color, size, big, onHit, mine = true) {
-    const head = new THREE.Sprite(spriteMat(color, big ? 3.2 : 2.6)); head.geometry.userData.keep = true;
+    const head = new THREE.Sprite(spriteMat(color, big ? 2.4 : 2.1)); head.geometry.userData.keep = true;
     const core = new THREE.Sprite(spriteMat(0xffffff, 2)); core.scale.setScalar(0.42); head.add(core);
     head.scale.setScalar(size * 5.5); head.position.copy(from); this.scene.add(head);
     const mid = from.clone().lerp(to, 0.5).add(V3(0, big ? 1.6 : 0.8, 0));
-    const trailC = hdr(color, big ? 2.2 : 1.6), prev = from.clone(), a = V3(), b = V3();
+    const trailC = hdr(color, (big ? 1.5 : 1.3) * (mine ? 1 : 0.7)), prev = from.clone(), a = V3(), b = V3(); // trails stay under the bloom white point
     this.fx.push({ obj: head, life: big ? 0.38 : 0.26, t: 0,
       update: (f) => {
         const k = Math.min(1, f.t / f.life);
@@ -1747,7 +1760,7 @@ class Arena {
         const n = Math.min(8, Math.ceil(prev.distanceTo(head.position) / (big ? 0.12 : 0.18)));
         for (let i = 1; i <= n; i++) {
           a.copy(prev).lerp(head.position, i / n);
-          this.sparks.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-0.3, 0.3), vy: rnd(-0.1, 0.4), vz: rnd(-0.3, 0.3), c: trailC, life: big ? 0.32 : 0.2, size: size * (big ? 3 : 2.4), end: 0.1, shape: 0, core: 0.3 });
+          this.sparks.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-0.3, 0.3), vy: rnd(-0.1, 0.4), vz: rnd(-0.3, 0.3), c: trailC, life: (big ? 0.32 : 0.2) * (mine ? 1 : 0.7), size: size * (big ? 3 : 2.4), end: 0.1, shape: 0, core: 0.3 });
         }
         prev.copy(head.position);
       },
@@ -1760,9 +1773,12 @@ class Arena {
       } });
   }
   // A star-shaped flash where something lands.
+  // Clamped in size and brightness: a Big Swing or a special used to throw a flare big and hot enough for the bloom
+  // to wash out the boss's face.
   flare(at, color, size = 2.5) {
-    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 2.4), life: 0.22, size, end: 1.5, shape: 3, core: 1 });
-    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 1.0), life: 0.3, size: size * 0.55, end: 1.8, shape: 0, core: 0.3 });
+    size = Math.min(size, 2.4);
+    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 1.7), life: 0.2, size, end: 1.4, shape: 3, core: 0.85 });
+    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 0.7), life: 0.28, size: size * 0.5, end: 1.6, shape: 0, core: 0.25 });
   }
   // Sparks that streak and fall, plus slower glowing embers.
   burst(at, color, n, speed, embers = true) {
@@ -1859,12 +1875,13 @@ class Arena {
   }
 
   // ---------- frame ----------
+  // Portrait phones need a wider view to fit the boss and the squad (the raid camera sits higher, so a little less).
+  fovFor(aspect) { return aspect < 0.7 ? (this.mode === "tax" ? 58 : 50) : 48; }
   resize() {
     const r = this.host.getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    // Portrait phones need a wider view to fit the boss and the squad.
-    this.baseFov = this.camera.aspect < 0.7 ? 58 : 48;
+    this.baseFov = this.fovFor(this.camera.aspect);
     this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
     if (this.post) { this.post.composer.setPixelRatio(this.renderer.getPixelRatio()); this.post.composer.setSize(w, h); }
@@ -1944,6 +1961,15 @@ class Arena {
         x = B.blink.x * k * 0.85; z += (B.blink.z - z) * k * 0.55;
         if (B.blink.t <= 0) B.blink = null;
       }
+    } else if (this.mode !== "tax" && this.koAt != null) {
+      // Raid boss death, in real time so it reads through the slow motion: a shudder on the killing blow (0–0.7s),
+      // then it buckles, sags and topples back (0.5–1.7s) as the burn-away starts from the top (1.25s on).
+      const kr = this.realT - this.koAt, own = B.mixer && B.clips.death;
+      const shud = Math.max(0, 1 - kr / 0.7);
+      x = Math.sin(this.realT * 55) * 0.09 * shud; ry = Math.sin(this.realT * 41) * 0.05 * shud;
+      const f = easeIO(Math.max(0, Math.min(1, (kr - 0.5) / 1.2)));
+      if (!own) { rx = -f * 0.85; y = -f * 0.55; sy = 1 - f * 0.12; sx = 1 + f * 0.06; }
+      if (B.squash) { sx += B.squash; sy -= B.squash; B.squash *= Math.pow(0.001, real * 6); if (B.squash < 0.002) B.squash = 0; }
     } else {
       const k = Math.min(1, B.actT / 1.2);
       if (!B.mixer || !B.clips.death) { rx = -k * 1.4; y = -k * 0.4; }
@@ -1966,14 +1992,15 @@ class Arena {
     H.rotation.set(rx, ry, 0);
     // K.O. dissolve: the boss burns away from the top down into rising particles.
     if (this.dissolveAt != null && B.dis) {
-      const k = Math.max(0, Math.min(1, (this.realT - this.dissolveAt) / 1.25));
+      const k = Math.max(0, Math.min(1, (this.realT - this.dissolveAt) / 1.4));
       if (k > 0) {
         if (!B.disStarted) { B.disStarted = true; for (const o of B.shells || []) o.visible = false; }
         const h = (B.height || 5) * H.scale.y;
         B.dis.dis.value = k * 1.05; B.dis.h.value = h; B.dis.base.value = H.position.y + (B.hover || 0);
         if (k < 1) {
-          const front = B.dis.base.value + h * (1 - k * 0.9), r = h * 0.22, c1 = hdr(this.look.ring.getHex(), 2.6), c2 = hdr(0xffffff, 1.6);
-          for (let i = 0; i < Math.ceil(real * 220 * this.fxScale); i++) {
+          // Embers in the stage colour, kept under the bloom's white point so the burning edge, not a glare, is what reads.
+          const front = B.dis.base.value + h * (1 - k * 0.9), r = h * 0.22, c1 = hdr(this.look.ring.getHex(), 1.7), c2 = hdr(0xffe2b0, 1.1);
+          for (let i = 0; i < Math.ceil(real * 160 * this.fxScale); i++) {
             const a = Math.random() * Math.PI * 2, rr = r * Math.sqrt(Math.random());
             this.sparks.emit({ x: H.position.x + Math.cos(a) * rr, y: front + rnd(-0.6, 0.3), z: H.position.z + 0.6 + Math.sin(a) * rr * 0.6,
               vx: rnd(-0.8, 0.8), vy: rnd(1.2, 3), vz: rnd(-0.4, 0.8), c: Math.random() < 0.8 ? c1 : c2, life: rnd(0.8, 1.5), size: rnd(0.07, 0.14), drag: 0.6, grav: -0.8, shape: Math.random() < 0.3 ? 1 : 0, stretch: 0.03, core: 0.7 });
@@ -1985,8 +2012,8 @@ class Arena {
     if (B.flash > 0) B.flash = Math.max(0, B.flash - Math.max(dt, real * 0.5) * 6); // still fades (slower) through a hit-stop
     const feast = B.feastGlow > 0 ? (B.feastGlow -= dt, 0.25 + Math.sin(this.t * 10) * 0.15) : 0;
     const wind = B.windup ? 0.18 + Math.sin(this.t * 20) * 0.08 : 0;
-    const fl = B.flash * 0.28; // with bloom on, a full-white flash blows the whole boss out
-    for (const m of B.mats || []) m.emissive.setRGB(fl + feast + wind, fl * 0.9 + feast * 0.7, fl * 0.8);
+    const fl = B.flash * 0.15; // a hit tint, not a white-out: at six taps a second a stronger flash kept the whole boss pale
+    for (const m of B.mats || []) m.emissive.setRGB(fl + feast + wind, fl * 0.6 + feast * 0.7, fl * 0.45);
     // Built-in limbs.
     const parts = B.built?.parts;
     if (parts && !B.dead) {

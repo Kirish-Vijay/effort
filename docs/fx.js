@@ -92,11 +92,15 @@ function draw(p, dt) {
   } else if (p.kind === "text") {
     const pop = k < 0.12 ? 0.6 + (k / 0.12) * 0.7 : 1.3 - Math.min(0.3, (k - 0.12) * 1.2);
     const y = p.y - ease(k) * (p.rise ?? 70);
-    ctx.translate(p.x + (p.drift || 0) * k, y); ctx.scale(pop, pop);
+    // Full strength until the last third, then a quick fade (a long fade read as grey, low-contrast numbers).
+    ctx.globalAlpha = k < 0.66 ? 1 : Math.max(0, 1 - (k - 0.66) / 0.34);
+    ctx.translate(p.x + (p.drift || 0) * ease(k), y); ctx.scale(pop, pop);
     ctx.font = `400 ${p.size}px "Lilita One", "Arial Rounded MT Bold", system-ui, sans-serif`;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.lineJoin = "round"; ctx.lineWidth = Math.max(4, p.size / 5); ctx.strokeStyle = p.stroke || "#1f2a24";
+    ctx.lineJoin = "round"; ctx.lineWidth = Math.max(5, p.size / 4.2); ctx.strokeStyle = p.stroke || "#0a0f26";
+    ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowOffsetY = Math.max(2, p.size / 12);
     ctx.strokeText(p.text, 0, 0);
+    ctx.shadowColor = "transparent";
     if (p.grad) { const g = ctx.createLinearGradient(0, -p.size / 2, 0, p.size / 2); g.addColorStop(0, p.grad[0]); g.addColorStop(1, p.grad[1]); ctx.fillStyle = g; } else ctx.fillStyle = p.color;
     ctx.fillText(p.text, 0, 0);
   } else if (p.kind === "beam") {
@@ -122,23 +126,29 @@ function tapHit(x, y, { color = "#ffb703", crit = false, dmg = 0, kind = "hit" }
   add({ kind: "slash", x, y, angle: rnd(-0.9, 0.3), r: crit ? 56 : 38, width: crit ? 9 : 6, color, life: 0.22 });
   sparks(x, y, crit ? "#ff7a3d" : color, crit ? 9 : 4, crit ? 520 : 380);
   if (crit) { add({ kind: "glow", x, y, r: 46, color: "rgba(255,170,60,.4)", life: 0.18 }); for (let i = 0; i < 2; i++) add({ kind: "star", x, y, vx: rnd(-220, 220), vy: rnd(-380, -160), life: 0.55, size: rnd(5, 8), color: "#ffe066", spin: rnd(-8, 8), g: 900 }); }
-  if (dmg) number(x, y - 26, kind === "blocked" ? "BLOCKED" : fmtNum(dmg) + (crit ? "!" : ""), { tap: true, ...(crit ? { size: 34, grad: ["#fff3a0", "#ff7a3d"] } : kind === "weak" ? { size: 30, grad: ["#c8f7ff", "#2bb3ff"] } : kind === "blocked" ? { size: 20, color: "#b8c4ff" } : { size: 22, color: "#fff" }) });
+  // Crits: bigger, warmer, a dark-red outline. Normal hits: white on a heavy ink outline, so they read on any backdrop.
+  if (dmg) number(x, y, kind === "blocked" ? "BLOCKED" : fmtNum(dmg) + (crit ? "!" : ""), { tap: true, ...(crit ? { size: 38, grad: ["#fff6b0", "#ff8a2b"], stroke: "#4a1200", crit: true } : kind === "weak" ? { size: 30, grad: ["#e6fbff", "#2bb3ff"], stroke: "#06253f" } : kind === "blocked" ? { size: 20, color: "#d4dcff" } : { size: 25, color: "#ffffff", stroke: "#0a0f26" }) });
 }
 // Kept clear of the screen edges so long words like "BIG SWING!" stay readable. Numbers are always formatted.
-// tap: damage numbers from tapping take turns across a few lanes and only a handful show at once, so they fan out
-// instead of stacking into a column.
-const LANES = [-46, 30, -14, 54, 6, -60];
+// tap: damage numbers alternate between a lane left and a lane right of where you hit, with some jitter, and pop
+// outwards (a short lift, a long sideways arc) instead of rising up into the boss's face. Only a few show at once,
+// and a new one steps past a live one in its lane rather than landing on top of it.
 let lane = 0;
 function number(x, y, text, o = {}) {
   if (typeof text === "number") text = fmtNum(text);
   if (o.tap) {
     const live = parts.filter((p) => p.tap);
-    if (live.length >= 4) live.slice(0, live.length - 3).forEach((p) => (p.t = p.life));
-    x += LANES[lane++ % LANES.length]; o = { life: 0.6, rise: 80, drift: 0, ...o };
+    if (live.length >= 5) live.slice(0, live.length - 4).forEach((p) => (p.t = p.life));
+    const side = lane++ % 2 ? 1 : -1;
+    x += side * rnd(30, 58); y += rnd(-12, 12);
+    for (const p of live) if (p.side === side && p.t < p.life * 0.7 && Math.abs(p.y - y) < 30) y = p.y + 34;
+    o = { life: o.crit ? 0.85 : 0.65, rise: rnd(12, 26), drift: side * rnd(46, 76), side, ...o };
   }
-  const pad = Math.min(W / 2, String(text).length * 7 + 20); x = Math.max(pad, Math.min(W - pad, x));
+  const pad = Math.min(W / 2, String(text).length * 8 + 22); x = Math.max(pad, Math.min(W - pad, x));
   add({ kind: "text", x, y, text, size: 26, color: "#fff", life: 0.75, rise: 110, drift: rnd(-60, 60), ...o });
 }
+// Drop every floating word and number (the K.O. clears the fight's callouts in one go).
+function clearText() { for (const p of parts) if (p.kind === "text") p.t = p.life; }
 function fmtNum(n) { return n >= 1e4 ? (n / 1000).toFixed(1) + "k" : Math.max(1, Math.round(n)).toString(); }
 function ring(x, y, o = {}) { add({ kind: "ring", x, y, r0: 10, r1: 160, width: 10, color: "rgba(255,255,255,.9)", life: 0.6, ...o }); }
 function coins(x, y, n = 8, toX, toY) {
@@ -465,7 +475,7 @@ function musicStep(step, at, s16) {
 }
 
 root.FX = {
-  init, destroy, resize, local, centre, add, sparks, tapHit, number, ring, coins, confetti, heal, shieldDome, claw, stompWave, screamWaves, beam, chomp,
+  init, destroy, resize, local, centre, add, sparks, tapHit, number, clearText, ring, coins, confetti, heal, shieldDome, claw, stompWave, screamWaves, beam, chomp,
   shake, flash, play, buzz, get muted() { return muted; }, setMuted, unlock: audio, music,
 };
 })(window);
