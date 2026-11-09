@@ -138,12 +138,20 @@ async function scrollFor(db: Any, id: string, from: string, to: string) {
 const avgOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
 // Everything in the ledger for these players: wallet, XP and owned gear all come from it. Gear is bought ("buy",
-// ref "id") or comes out of a Gamba Bucket ("crate", same refs, amount 0), upgraded ("upgrade", "id:3") and sold
+// ref "id") or comes out of a Gamba Bucket (a "buy" row with amount 0, under the same ref, so the shop and a bucket
+// can never both hand over the same copy; older buckets wrote "crate" rows), upgraded ("upgrade", "id:3") and sold
 // back ("sell", "id"). Getting it again after selling makes a new copy, "id#2" ("id#2:3" for its upgrades), since a
 // ledger ref can only be used once. paid[id] is what the copy you own cost you, buying and upgrading (a bucket's
 // gear counts as its shop price, Game.crateValue): the shop's buy-back is a share of that. won[id]: out of a bucket.
 const copyOf = (ref: string) => { const [id, n] = String(ref).split("#"); return { id, n: Number(n) || 1 }; };
 const copyRef = (id: string, n: number) => (n > 1 ? `${id}#${n}` : id);
+const isDrop = (r: Any) => r.kind === "crate" || (r.kind === "buy" && Number(r.amount) === 0);
+// What bucket gear counts as having cost (its shop price), even on a game.js from before crates.
+const dropValue = (id: string) => {
+  const item = G.itemById(id);
+  if (!item) return 0;
+  try { return typeof G.crateValue === "function" ? G.crateValue(item) : G.priceOf(item, false); } catch { return 0; }
+};
 async function ledgerFor(db: Any, ids: string[]) {
   const { data } = await db.from("ledger").select("player_id,kind,ref,amount,xp,note,at").in("player_id", ids).order("at", { ascending: false }).limit(50000);
   const out: Record<string, Any> = Object.fromEntries(ids.map((id) => [id, { wallet: 0, xp: 0, inv: {}, rows: [], copy: {}, paid: {}, sold: {}, won: {} }]));
@@ -154,8 +162,8 @@ async function ledgerFor(db: Any, ids: string[]) {
   for (const L of Object.values(out)) {
     for (const r of [...L.rows].reverse()) {
       if (r.kind === "buy" || r.kind === "crate") {
-        const { id, n } = copyOf(r.ref), won = r.kind === "crate";
-        L.inv[id] = 0; L.copy[id] = n; L.paid[id] = won ? G.crateValue(G.itemById(id)) : -r.amount;
+        const { id, n } = copyOf(r.ref), won = isDrop(r);
+        L.inv[id] = 0; L.copy[id] = n; L.paid[id] = won ? dropValue(id) : -r.amount;
         if (won) L.won[id] = true; else delete L.won[id];
       }
       else if (r.kind === "upgrade") {
@@ -717,7 +725,18 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       // The day's 5 cost Efforts; after that, only buckets bought with real money.
       const paid = today >= G.GAMBA.perDay;
       if (paid && gambaCredits(L) <= 0) return fail(`That's ${G.GAMBA.perDay} buckets today. More from The House, or back at midnight`);
-      const ref = `${day}:${paid ? "p" : today + 1}:${crypto.randomUUID().slice(0, 8)}`;
+      // The ref is the bucket's number: today's 1st to 5th, or the paid credit it uses. Two taps at once work out the
+      // same number, and the ledger's unique key (player, kind, ref) lets only one of them through.
+      const ref = paid ? `credit:${L.rows.filter((r: Any) => r.kind === "gamba-paid").length + 1}` : `${day}:${today + 1}`;
+      // Roll first, and make sure a real piece of gear came out, before anything is charged.
+      const [u, v] = Array.from(crypto.getRandomValues(new Uint32Array(2)), (x) => x / 4294967296);
+      let tier: string, id: string, item: Any, sells: number;
+      try {
+        ({ tier, item: id } = G.gambaRoll(u, v, { cls: G.classOf(statsOf(player)).id, level: level(L), day: localDate(now, SQUAD_TZ) }));
+        item = id ? G.itemById(id) : null;
+        sells = item ? G.sellPrice(G.crateValue(item)) : NaN;
+      } catch { item = null; sells = NaN; }
+      if (!item || !Number.isFinite(sells)) return fail("Winny's is restocking. Try again in a minute");
       let bal = L.wallet;
       if (paid) {
         const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "gamba-paid", ref, amount: 0, xp: 0, note: "Winny's Gamba Bucket (paid)" });
@@ -729,13 +748,12 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         if (r.data === -2) return fail("Try again");
         bal = r.data;
       }
-      const [u, v] = Array.from(crypto.getRandomValues(new Uint32Array(2)), (x) => x / 4294967296);
-      const { tier, item: id } = G.gambaRoll(u, v, { cls: G.classOf(statsOf(player)).id, level: level(L), day: localDate(now, SQUAD_TZ) });
-      const item = G.itemById(id), sells = G.sellPrice(G.crateValue(item));
       let dupe = id in L.inv;
       if (!dupe) {
-        const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "crate", ref: copyRef(id, (L.sold[id] || 0) + 1), amount: 0, xp: 0, note: `Gamba Bucket: ${item.name}` });
-        if (error?.code === "23505") dupe = true; // another bucket dropped the same piece a moment ago
+        // The drop takes the same ledger key as buying this copy in the shop: if a purchase (or another bucket) got
+        // there a moment ago, the insert is refused and this one goes back to the shop as a duplicate.
+        const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "buy", ref: copyRef(id, (L.sold[id] || 0) + 1), amount: 0, xp: 0, note: `Gamba Bucket: ${item.name}` });
+        if (error?.code === "23505") dupe = true;
         else if (error) throw error;
       }
       if (dupe) {
@@ -758,12 +776,12 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
       const R = G.raidCreate(st.roster, { seed: st.seed, tier: st.tier, minutes: G.HUNT.minutes, affix: st.affix, den: den.levels, scale: G.HUNT.hp ?? 1 });
       const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
-      fightReport(R, report, body);
+      fightReport(R, report, body, how);
       const dealt = R.members.reduce((a: number, m: Any) => a + m.dmg, 0);
       R.boss.hp = R.boss.max * (1 - (how === "won" ? 1 : Math.min(0.999, n(body.frac, 1), dealt / R.boss.max)));
       G.raidEnd(R, how);
       const mine = R.result.shares.find((x: Any) => x.id === player.id), amount = Math.max(0, mine?.reward ?? 0);
-      const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "hunt", ref: st.day, amount, xp: amount + Math.round((mine?.dmg ?? 0) / 1000),
+      const { error } = await db.from("ledger").insert({ player_id: player.id, kind: "hunt", ref: st.day, amount, xp: Math.max(amount, mine?.xp ?? 0),
         note: `Midweek Hunt: ${R.boss.name}, ${{ won: "won", timeout: "out of time", wiped: "wiped" }[how as "won"]}` });
       if (error) return fail(error.code === "23505" ? "You've hunted this week" : "Couldn't save the Hunt");
       return json({ ok: true, amount, how, boss: R.boss.name, wallet: L.wallet + amount });
@@ -848,20 +866,23 @@ async function squadRaid(db: Any, squad: Any, id: unknown) {
   return data;
 }
 
-// What the host's phone says each fighter did, clamped: nobody deals more than the boss had, taps can't beat the tap
-// cap over the fight's length, and the fight can't run longer than its clock. The shares (damage × stride) and taps a
-// second come out of G.raidEnd from these.
-function fightReport(R: Any, report: Record<string, Any>, body: Any) {
+// What the host's phone says each fighter did, clamped: the fight can't run longer than its clock (or than the server
+// has seen it running: maxSecs), taps can't beat the tap cap over that time, and nobody's damage can beat what their
+// real gear, stats and stride could do in it (Game.raidClampReport: capped each, scaled down to the boss's health, and
+// a won fight's missing damage goes to whoever had room, so zeroing your squad-mates doesn't buy you their share).
+// The shares (by damage) and taps a second come out of G.raidEnd from these.
+function fightReport(R: Any, report: Record<string, Any>, body: Any, how: string, maxSecs: number = R.dur) {
   const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
-  const secs = n(body.secs, R.dur);
+  const limit = n(maxSecs, R.dur - (R.start || 0));
+  // An old app that doesn't say how long it ran gets the longest the fight could have been.
+  const secs = body.secs == null ? limit : n(body.secs, limit);
   R.t = (R.start || 0) + secs;
   for (const m of R.members) {
     const r = report[m.id] || {};
     m.dmg = n(r.dmg, 1e10); m.healed = n(r.healed, 1e7); m.taken = n(r.taken, 1e7);
     m.taps = Math.round(n(r.taps, G.RULES.tapCap * 1.2 * secs + 20));
   }
-  const dealt = R.members.reduce((s: number, m: Any) => s + m.dmg, 0);
-  if (dealt > R.boss.max) for (const m of R.members) m.dmg *= R.boss.max / dealt;
+  return G.raidClampReport(R, secs, how === "won");
 }
 
 // The host's phone reports how the fight went; the server works out the pay itself from the squad's real
@@ -874,9 +895,12 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
   const how = ["won", "timeout", "wiped"].includes(body.how) ? body.how : "timeout";
   let result: Any = { how, frac: 0, pool: 0, shares: [], boss: G.bossFor(raid.tier).name, tier: raid.tier, settle: null };
   if (fighters.length) {
-    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged, affix: raid.goal?.affix || null, den: raid.goal?.den || null });
+    const R = G.raidCreate(fighters, { seed: Number(raid.seed), tier: raid.tier, minutes: G.RULES.raidMin, enraged: !!raid.goal?.enraged, affix: raid.goal?.affix || null, den: raid.goal?.den || null,
+      size: raid.fighters?.length || fighters.length });
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
-    fightReport(R, report, body);
+    // The fight can't have run longer than the server's seen it live (plus a little for the clocks), less the entrance.
+    const seen = (now - Date.parse(raid.started_at)) / 1000 - (R.start || 0) + 15;
+    fightReport(R, report, body, how, Number.isFinite(seen) ? seen : R.dur);
     const dealt = R.members.reduce((s: number, m: Any) => s + m.dmg, 0);
     const frac = how === "won" ? 1 : Math.min(0.999, n(body.frac, 1), dealt / R.boss.max);
     R.boss.hp = R.boss.max * (1 - frac);
@@ -885,7 +909,7 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
     G.raidEnd(R, how);
     result = { ...R.result, settle: null };
     await db.from("ledger").upsert(result.shares.map((s: Any) => ({
-      player_id: s.id, kind: "raid", ref: raid.id, amount: s.reward, xp: Math.max(0, s.reward) + Math.round(s.dmg / 1000),
+      player_id: s.id, kind: "raid", ref: raid.id, amount: s.reward, xp: Math.max(0, s.reward, s.xp ?? 0),
       note: `${R.boss.name}: ${{ won: "won", timeout: "out of time", wiped: "wiped" }[how as "won"]}`,
     })), { onConflict: "player_id,kind,ref", ignoreDuplicates: true });
     if (R.paralysed) {

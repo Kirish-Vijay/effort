@@ -22,7 +22,7 @@ const DEFAULT_RULES = {
   // Walking is the point. In the Sunday raid your steps this week, against the squad's average, decide how hard you hit.
   strideMin: 0.5,           // half the squad average or less: half damage
   strideMax: 1.6,           // the hardest walker hits up to 60% harder
-  // Raid loot: your share of the pool is your damage × your stride, over the squad's (gear loot perks add on top).
+  // Raid loot: your share of the pool is your damage over the squad's (your stride is already in your damage; gear loot perks add on top).
   slackerTax: 0.1,          // the week's lowest walker pays 10% of their week's Efforts to the top walker
   slackerAggro: 2.5,        // the boss goes for the lowest walker this many times as often
   windowHour: 18,           // the Taxman's in from 6pm...
@@ -54,7 +54,7 @@ const DEFAULT_RULES = {
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 6800000,      // Brett's health; every boss has its own multiple. Fixed: how many turn up doesn't change it. Tuned so
+  raidHpBase: 6800000,      // Brett's health; every boss has its own multiple. Five get all of it, four 80% (raidFullSquad). Tuned so
                             // five tapping flat out (the 7/s cap) and dodging need 12 to 13 minutes of the 15: five times the
                             // 2.5 minutes a squad took before the cap. Four, or slower tappers, often run out of time.
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
@@ -73,13 +73,23 @@ const DEFAULT_RULES = {
   tapCap: 7,                // taps a second that count, for everyone (host or not): past this you're drumming, not walking
   feastShare: 0.004,        // Feast: deal this share of the boss's health in 6s or it eats…
   feastHeal: 0.03,          // …and heals this share
-  raidRewardPerMember: 70,  // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
+  raidRewardPerMember: 150, // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
   raidRewardCurve: 1.25,    // rewards grow faster than difficulty: pool × level^1.25
   raidGoalPerDay: 5000,     // the squad's weekly goal before Sunday: this many steps a day for each player…
   raidGoalStep: 500,        // …plus this much more for each boss up the ladder (back to the start every lap)
   raidGoalDays: 6,          // Monday to Saturday (Sunday's steps before the raid count too)
-  enragedHp: 1.8,           // miss the goal and the boss has this much more health…
-  enragedDmg: 1.35,         // …and hits this much harder (beatable only with gear well past what it asks for)
+  enragedHp: 1.25,          // miss the goal and the boss has this much more health…
+  enragedDmg: 1.2,          // …and hits this much harder (a squad in the gear it asks for still has a chance)
+  raidFullSquad: 5,         // the boss's full health is for five; fewer get a smaller one (health × turnout ÷ 5, never under ×0.8)
+  raidTurnoutMin: 0.8,
+  lootPerkMax: 0.3,         // gear loot perks stack to +30% of your share at most
+  raidXpPerKill: 2200,      // XP for taking all of Brett's health, split by the share of it each fighter took off (other bosses
+                            // give their health multiple, the Hunt its smaller boss). On top of the Efforts won, which count as XP too
+  dmgCapHits: 2,            // the server's ceiling on what anyone can have dealt: their average full-combo hit (crits in) × the tap
+  dmgCapBurst: 1.2,         // cap × this (bursts) × the fight's seconds × dmgCapHits (Big Swings, specials, openings, combos)
+  unownedDmg: 0.05,         // a won fight's damage can come up this far short of the boss's health (trivia) before the server fills it
+  botDmgFloor: 6,           // the Hunt's bot squad-mates always deal at least this many plain taps' worth a second (by sim, 99% of
+                            // them deal more), so a report that says they did nothing can't hand their share to the player
   spMax: 100,               // a class special is ready at this much charge…
   spPerTap: 0.25,           // …which builds a little with every tap…
   spPerAbility: 8,          // …more with every Big Swing…
@@ -572,17 +582,17 @@ const BOSSES = [
     sig: "gust", style: "Fast, and blows the front row out of position",
     pattern: [["swipe", "swipe", "gust", "stomp", "scream"], ["swipe", "gust", "stomp", "scream", "feast", "gust"], ["swipe", "gust", "scream", "scream", "feast"]],
     attacks: { swipe: "Slice", stomp: "Downdraft", scream: "Howl", feast: "Siphon", gust: "Gust" } },
-  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.3, dmg: 1.22, speed: 0.88, reward: 3.2,
+  { id: "kraken", name: "The Kraken", title: "Came up from somewhere deep", hp: 1.1, dmg: 1.22, speed: 0.88, reward: 3.2,
     sig: "grab", style: "Two tentacles hit at once, and it grabs people",
     swipeHits: 2, swipeMult: 0.65,
     pattern: [["swipe", "swipe", "grab", "stomp", "scream"], ["swipe", "swipe", "grab", "stomp", "feast"], ["swipe", "grab", "scream", "stomp", "feast", "grab"]],
     attacks: { swipe: "Tentacle Lash", stomp: "Ink Slam", scream: "Deep Roar", feast: "Devour", grab: "Grab" } },
-  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.35, dmg: 1.05, speed: 0.85, reward: 4,
+  { id: "algorithm", name: "Grimm", title: "Big, blue, and carrying a club", hp: 1.1, dmg: 1.05, speed: 0.85, reward: 4,
     sig: "slam", style: "Slow, crushing club swings. Stop the Ground Slam or it flattens you",
     swipeMult: 1.3,
     pattern: [["swipe", "swipe", "stomp", "slam"], ["swipe", "stomp", "slam", "scream", "feast"], ["swipe", "slam", "slam", "scream", "feast"]],
     attacks: { swipe: "Club Swing", stomp: "Boot Stomp", scream: "War Cry", feast: "Feast", slam: "Ground Slam" } },
-  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.8, dmg: 1.38, speed: 0.82, reward: 5,
+  { id: "dragon", name: "Vex", title: "The last one. A dragon", hp: 1.35, dmg: 1.38, speed: 0.82, reward: 5,
     sig: "breath", style: "Fire that keeps burning. Only a front row's raised shields cover the rows behind",
     pattern: [["swipe", "stomp", "scream", "breath"], ["swipe", "stomp", "breath", "scream", "feast"], ["swipe", "breath", "breath", "scream", "feast", "stomp"]],
     attacks: { swipe: "Claw", stomp: "Tail Slam", scream: "Roar", feast: "Hoard", breath: "Fire Breath" } },
@@ -674,20 +684,22 @@ function makeMember(m, row) {
     cdUntil: 0, moveUntil: 0, dodgeUntil: 0, fullSince: 0, stunUntil: 0, shieldUntil: 0, swing: 0, combo: 0, lastTap: -9, botNext: 0, secondWind: !!perks.secondWind,
     joyUntil: 0, slimeUntil: 0, dotUntil: 0, dotBase: 0, dotAcc: 0, botBackAt: 0 };
 }
-// scale: the boss's health on top of everything else (the Midweek Hunt fights a smaller one).
-function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null, scale = 1 } = {}) {
+// scale: the boss's health on top of everything else (the Midweek Hunt fights a smaller one, already sized for its four,
+// so the turnout discount is for Sunday raids only). size: how many started the fight (defaults to everyone passed in).
+const turnout = (n) => clamp((Number(n) || 0) / (RULES.raidFullSquad || 5), RULES.raidTurnoutMin ?? 0.8, 1);
+function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null, scale = 1, size = null } = {}) {
   const r = rng(seed);
   const table = weekTable(members);
   const ms = members.map((m) => makeMember(m, table.rows.find((x) => x.id === m.id)));
-  // The boss is the same however many turn up and whatever they wear: gear, positions and steps decide it.
+  // The boss is the same whatever they wear: gear and steps decide it. Four get a slightly smaller one than five.
   const lvl = 1;
   const def = bossFor(tier);
   // Shorter test raids get a proportionally smaller boss so the pacing feels the same.
-  const max = Math.round(RULES.raidHpBase * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1) * scale);
+  const max = Math.round(RULES.raidHpBase * def.hp * (minutes / 15) * (enraged ? RULES.enragedHp : 1) * scale * (scale === 1 ? turnout(size ?? members.length) : 1));
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null, start: 0,
     // Short test raids pay proportionally less.
-    sizeDmg: 1, timeShare: Math.min(1, minutes / 15),
+    sizeDmg: 1, timeShare: Math.min(1, minutes / 15), xpPool: (RULES.raidXpPerKill || 0) * def.hp * Math.min(1, minutes / 15) * scale,
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
     members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: affixList(affix).join("+") || null, mods: modsFor(affix, den), atkCount: 0, echo: null,
     // Squad-wide effects from specials (each is a time it lasts until, or a count of attacks).
@@ -1208,8 +1220,9 @@ function endRaid(R, how) {
   const full = RULES.raidRewardPerMember * n * R.lvl ** RULES.raidRewardCurve * R.boss.reward * R.timeShare;
   // A loss still pays for the share of its health you took off it: a bit less if everyone ended up on the floor.
   const pool = (how === "won" ? full : full * frac * (how === "timeout" ? 0.35 : 0.25)) * (1 + (R.mods?.loot || 0));
-  // Your share: your damage to the boss × your stride, over the squad's. Gear loot perks add on top of the share.
-  const weight = (m) => Math.max(0, m.dmg) * (m.stride || 1);
+  // Your share: your damage to the boss over the squad's (your steps already made every hit bigger). Gear loot perks
+  // add on top of the share, up to lootPerkMax.
+  const weight = (m) => Math.max(0, m.dmg);
   const totalW = R.members.reduce((s, m) => s + weight(m), 0);
   const part = (m) => (totalW > 0 ? weight(m) / totalW : (m.stride || 1) / R.members.reduce((s, x) => s + (x.stride || 1), 0));
   const secs = Math.max(1, Math.min(R.t, R.dur) - (R.start || 0));
@@ -1219,11 +1232,13 @@ function endRaid(R, how) {
   R.result = {
     how, frac, pool: Math.round(pool), lvl: R.lvl, tier: R.tier, boss: R.boss.name, paralysed: R.paralysed, deepDive: R.deepDive, settle, secs: Math.round(secs),
     shares: R.members.map((m) => {
-      const reward = Math.round(pool * part(m) * (1 + (m.perks.loot || 0)));
+      const reward = Math.round(pool * part(m) * (1 + Math.min(RULES.lootPerkMax ?? 0.3, m.perks.loot || 0)));
+      // XP: the Efforts, plus your part of the boss's health (what you took off it, out of all of it).
+      const xp = Math.max(0, reward) + Math.round((R.xpPool ?? 0) * Math.min(1, Math.max(0, m.dmg) / Math.max(1, R.boss.max)));
       const tax = settle ? (m.id === settle.to ? settle.amount : m.id === settle.from ? -settle.amount : 0) : 0;
       const taps = Math.round(m.taps || 0);
       return { id: m.id, name: m.name, dmg: Math.round(m.dmg), healed: Math.round(m.healed), taken: Math.round(m.taken), taps, tps: Math.round((taps / secs) * 10) / 10,
-        weekSteps: m.weekSteps, stride: m.stride, title: m.title, reward, tax, total: reward + tax };
+        weekSteps: m.weekSteps, stride: m.stride, title: m.title, reward, xp, tax, total: reward + tax };
     }),
   };
   fx(R, { type: "end", how });
@@ -1519,8 +1534,9 @@ const baseTier = (t) => (isEventTier(t) ? Number(t) % 1000 : Number(t));
 // ---------- the Midweek Hunt ----------
 // Wednesdays, noon to 11pm UK: a five-minute fight against your squad's ladder boss, with your squad-mates' gear
 // fighting beside you as bots. Once a week; you keep your own share.
-// hp: the Hunt's boss has this share of a Sunday boss's health per minute (you and three bots, who don't tap as hard).
-const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5, hp: 0.6 };
+// hp: the Hunt's boss has this share of a Sunday boss's health per minute (you and three bots, who don't tap as hard). By sim,
+// you at 6 taps a second in starter gear beat Brett about 70% of the time (0.55: under 60%).
+const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5, hp: 0.53 };
 
 // Miles along the route from the squad's daily average steps (each day only counts people who'd joined by then).
 const journeyMiles = (S, dailyAvgs, bonus = 0) => Math.min(S.miles[S.miles.length - 1], (dailyAvgs.reduce((a, x) => a + x, 0) / RULES.stepsPerMile) * (1 + bonus));
@@ -1549,6 +1565,48 @@ function bountiesFor(code, weekStart, n) {
 // Progress on this week's bounties. d: { ids, days (Mon-Sun), steps {id: {day: n}}, taxFights, goalMet, raidWon }.
 function bountyProgress(code, weekStart, d) {
   return bountiesFor(code, weekStart, d.ids.length).map((b) => { const have = BOUNTIES[b.id].of(d); return { ...b, have: Math.min(have, b.need), done: have >= b.need }; });
+}
+
+// ---------- what the server believes ----------
+// The most damage a fighter can have dealt in `secs` of fighting, from their real gear, stats and stride: their average
+// full-combo hit (crits in, with the squad's best crit and damage buffs on) at the tap cap with room for bursts, then
+// dmgCapHits times that for everything that isn't a plain tap (Big Swings, specials and their combos, openings, pigeons).
+// The host's phone reports everyone's damage; the server holds each report to this. A generous ceiling, not a guess:
+// honest players never reach it.
+function raidDmgCap(R, m, secs) {
+  const crit = Math.min(1, (m.e.crit || 0) + (m.perks.critChance || 0) + RULES.prophecyCrit);
+  const critX = 2.5 + (m.perks.critDmg || 0) + Math.max(0, R.mods?.crit || 0);
+  const hit = tapBase(m) * (1 + m.e.combo) * (1 + crit * (critX - 1)) * (1 + RULES.brewVuln) * (1 + Math.max(0, R.mods?.dealt || 0));
+  const s = clamp(Number(secs) || 0, 0, R.dur || 0);
+  // Plus one giant special combo's worth, so a very short fight isn't held to almost nothing.
+  return hit * (RULES.tapCap * (RULES.dmgCapBurst ?? 1.2) * s * (RULES.dmgCapHits ?? 2) + 200);
+}
+// Hold a fight report to what was possible. members carry the reported dmg; secs is the fight's length. Each fighter is
+// capped (raidDmgCap); if the squad still dealt more than the boss had, everyone scales down to fit; and if the boss
+// went down (won) but the report comes up short, the missing damage goes to the fighters with room under their caps (a
+// host that zeroes everyone else doesn't get their share). Bots (the Hunt's squad-mates) are first raised to
+// botDmgFloor plain taps a second. Returns { capped: [ids], filled }.
+function raidClampReport(R, secs, won) {
+  const caps = Object.fromEntries(R.members.map((m) => [m.id, raidDmgCap(R, m, secs)]));
+  const capped = [], s = clamp(Number(secs) || 0, 0, R.dur || 0);
+  for (const m of R.members) {
+    m.dmg = Math.max(0, Number(m.dmg) || 0);
+    if (m.bot) m.dmg = Math.max(m.dmg, tapBase(m) * (RULES.botDmgFloor ?? 6) * s);
+    if (m.dmg > caps[m.id]) { m.dmg = caps[m.id]; capped.push(m.id); }
+  }
+  // Trivia knocks a little off the boss that nobody's damage counts (a few % at most), so a short fall is honest.
+  let dealt = R.members.reduce((a, m) => a + m.dmg, 0), filled = 0;
+  const short = R.boss.max * (1 - (RULES.unownedDmg ?? 0.05)) - dealt;
+  if (won && short > 0) {
+    const room = R.members.map((m) => Math.max(0, caps[m.id] - m.dmg)), roomAll = room.reduce((a, b) => a + b, 0);
+    if (roomAll > 0) {
+      const add = Math.min(roomAll, short);
+      R.members.forEach((m, i) => { m.dmg += (add * room[i]) / roomAll; });
+      filled = add; dealt += add;
+    }
+  }
+  if (dealt > R.boss.max) for (const m of R.members) m.dmg *= R.boss.max / dealt;
+  return { capped, filled };
 }
 
 // ---------- live raids ----------
@@ -1583,6 +1641,8 @@ function raidImport(d) {
 
 addSeasonGear();
 root.Game = {
+  // Bumped when the server needs something new from this file (rules.ts refuses an older copy).
+  API: 2,
   DEFAULT_RULES, get RULES() { return RULES; }, setRules,
   hash, rng, effortsFromSteps, money, scrollBudget, scrollCounted, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
@@ -1592,7 +1652,7 @@ root.Game = {
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidHold, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
-  SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale,
+  SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale, raidDmgCap, raidClampReport, turnout,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
   DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, crateOdds, cratePool, crateValue, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,
 };
