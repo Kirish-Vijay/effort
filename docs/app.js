@@ -1299,7 +1299,7 @@ function lastRaidPanel(L) {
 function howRaids() {
   return `<details class="panel howbox"><summary class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></summary>
       <div class="how">
-        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit and how big you stand. Half the loot goes by steps, half by the fight. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit. Loot splits by damage dealt. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Squad combos</b><span>Fire specials within ${G.RULES.comboWindow}s of each other and they combo: ×${G.comboMult(2)} for two, ×${G.comboMult(3)} for three, ×${G.comboMult(4)} for four or more. Call it in chat. His Scream drains everyone's charge, so don't sit on it too long.</span></div></div>
         <div class="hrow"><span class="hic">${ic("arrowRight")}</span><div><b>Dodge</b><span>Marked by an attack? Tap Dodge before it lands and it misses you.</span></div></div>
         <div class="hrow"><span class="hic">${ic("bigSwing")}</span><div><b>Stagger the wind-ups</b><span>Hit hard together while he winds up (Big Swing helps) and the attack lands at half strength, or not at all.</span></div></div>
