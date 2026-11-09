@@ -7,8 +7,11 @@
 
 const INK = "#0b1024";
 const NS = 'xmlns="http://www.w3.org/2000/svg"';
-let _n = 0;
-const nid = () => "ei" + (++_n).toString(36);
+// Defs ids are written as "§n" and given a fresh prefix every time an SVG is handed out, so two copies of
+// one cached icon (or a second load of this file) never share an id and never borrow each other's clip paths.
+let _n = 0, _inst = (Math.random() * 46656) | 0;
+const nid = () => "§" + (++_n).toString(36);
+const uniq = (s) => { const p = "e" + (++_inst).toString(36) + "_"; return s.replace(/§/g, p); };
 const f = (n) => Math.round(n * 100) / 100;
 
 /* ------------------------------------------------------------------ */
@@ -227,6 +230,7 @@ const TINT_ORDER = ["red", "orange", "yellow", "lime", "green", "teal", "cyan", 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, t) => "#" + hex(a).map((v, i) => Math.round(v + (hex(b)[i] - v) * t).toString(16).padStart(2, "0")).join("");
 const dk = (q) => pal(q.s, mix(q.s, INK, .35), q.b); // the "side face" palette of a colour
+const luma = (h) => { const [r, g, b] = hex(h); return (.2126 * r + .7152 * g + .0722 * b) / 255; };
 
 // Shaded shape: base fill, optional clipped inner detail, cel shadow (bottom-right), rim light (top-left), ink outline.
 function S(d, q, o) {
@@ -242,10 +246,12 @@ function S(d, q, o) {
       `<rect x="-40" y="-40" width="144" height="144" fill="${o.ink ? INK : q.s}"${o.ink ? ' opacity=".24"' : ""} mask="url(#${m})"/>`;
   }
   if (bx || by) s += `<path d="${d}" fill="none" stroke="${q.h}" stroke-width="${o.hw || 2}" stroke-linejoin="round" opacity="${o.ho || .9}" transform="translate(${bx} ${by})"/>`;
+  // Dark fills get a 1.5u lighter rim inside the ink line, so a black object never melts into its outline.
+  if (!o.norim && luma(q.b) < .3) s += `<path d="${d}" fill="none" stroke="${mix(q.b, "#ffffff", .38)}" stroke-width="3" stroke-linejoin="round" opacity=".8"/>`;
   return s + `</g><path d="${d}" fill="none" stroke="${INK}" stroke-width="${o.sw || 2.5}" stroke-linejoin="round"${ev}/>`;
 }
 const F = (d, fill, sw, op) => `<path d="${d}" fill="${fill}" stroke="${INK}" stroke-width="${sw || 2.5}" stroke-linejoin="round"${op != null ? ` opacity="${op}"` : ""}/>`;
-const L = (d, col, w, op, extra) => `<path d="${d}" fill="none" stroke="${col || INK}" stroke-width="${w || 2}" stroke-linecap="round" stroke-linejoin="round"${op != null ? ` opacity="${op}"` : ""}${extra || ""}/>`;
+const L = (d, col, w, op, extra) => `<path d="${d}" fill="none" stroke="${col || INK}" stroke-width="${w || 2}"${extra && extra.includes("linecap") ? "" : ' stroke-linecap="round"'} stroke-linejoin="round"${op != null ? ` opacity="${op}"` : ""}${extra || ""}/>`;
 const TL = (d, col, w) => L(d, INK, w + 3) + L(d, col, w); // outlined thick line
 const Gl = (cx, cy, rx, ry, r, op) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#fff" opacity="${op || .8}"${r ? ` transform="rotate(${r} ${cx} ${cy})"` : ""}/>`;
 const Sp = (cx, cy, r, col) => `<path d="M${cx} ${cy - r}Q${f(cx + r * .18)} ${f(cy - r * .18)} ${cx + r} ${cy}Q${f(cx + r * .18)} ${f(cy + r * .18)} ${cx} ${cy + r}Q${f(cx - r * .18)} ${f(cy + r * .18)} ${cx - r} ${cy}Q${f(cx - r * .18)} ${f(cy - r * .18)} ${cx} ${cy - r}Z" fill="${col || "#fff"}"/>`;
@@ -282,10 +288,6 @@ const M = {
     S(R(28.5, 44, 7, 11, 2), m, { a: [2, 0], b: [1.2, 0], inner: L("M28 47.5H36M28 51H36", m.s, 1.6) }) +
     S(C(32, 58, 3.6), P.gold, { a: 1.4, b: 1 }), 45),
 
-  spork: (m) => rot(
-    S("M28.6 26H35.4L36 57Q36 61 32 61Q28 61 28 57Z", m, { a: [2.4, 0], b: [1.4, 0], hw: 1.4 }) + `<circle cx="32" cy="56" r="1.7" fill="${INK}"/>` +
-    S("M32 30C24.6 30 21.5 24 21.5 16.5C21.5 10 23 5 24.4 3.5H26.6L27.6 12H29.6L30.1 3H33.9L34.4 12H36.4L37.4 3.5H39.6C41 5 42.5 10 42.5 16.5C42.5 24 39.4 30 32 30Z", m, { a: 3.4, b: 2.2 }) +
-    Gl(27.6, 19, 1.8, 4.6, 0, .8), 45),
 
   umbrella: (m) => rot(
     S(R(30.4, 28, 3.2, 24, 1.6), P.dmetal, { a: [1, 0], b: 0 }) +
@@ -297,14 +299,6 @@ const M = {
     }) + S(C(32, 6.5, 2.4), P.dmetal, { a: 1, b: 0 }) +
     S(drop(13, 41, 1.05), T.cyan, { a: 1.2, b: .8, hw: 1.2, sw: 2 }) + S(drop(51, 44, .85), T.cyan, { a: 1, b: .7, hw: 1, sw: 2 }), -15),
 
-  sack: (m) =>
-    TL("M22 27C22 12 42 12 42 27", dk(m).b, 3.2) +
-    S(R(19, 14, 13, 16, 2), P.metal, { a: 2, b: 1.5 }) + F(E(25.5, 14, 6.5, 2.2), P.metal.h, 2) +
-    S(R(32, 11, 12, 18, 2), P.metal, { a: 2, b: 1.5 }) + F(E(38, 11, 6, 2), P.metal.h, 2) +
-    S("M50 26L55.5 29.5L52.5 56L47 58Z", dk(m), { a: 1.6, b: 1 }) +
-    S("M11 26H50L47 58H14Z", m, { a: [4, 3], inner: L("M11 31H50", m.s, 2, .5) }) +
-    S(C(30.5, 43, 7.5), P.white, { a: 1.6, b: 1.2, sw: 2 }) + F("M30.5 47C27 44 26 41.6 27.4 40C28.6 38.8 30 39.4 30.5 40.6C31 39.4 32.4 38.8 33.6 40C35 41.6 34 44 30.5 47Z", m.b, 1.6) +
-    TL("M19 28C19 10 42 10 42 28", m.s, 3.2),
 
   plank: (m, v) => diag(
     S("M25 9L32 2L39 9V59Q39 62 36 62H28Q25 62 25 59Z", m, { a: [4, 1.5], inner: L("M29 14C30.4 26 28 34 30 46M35 18C34 30 36 40 34.4 55", m.s, 1.5, .8) + F(E(31.6, 36, 1.8, 3), m.s, 1.4) }) +
@@ -416,15 +410,15 @@ const M = {
       : _sign(m, v),
 
   staff: (m, v) => v === "zebra"
-    ? rot(S(R(28, 3, 8, 58, 4), P.white, { a: [2.4, 0], b: [1.6, 0], ink: 1, inner: [10, 20, 30, 40, 50].map((y) => fill(R(27, y, 10, 5, 0), INK)).join("") }) +
-      S(R(27.5, 2, 9, 6, 2.5), P.gold, { a: [1.4, 0], b: 0 }) + S(R(27.5, 56, 9, 6, 2.5), P.gold, { a: [1.4, 0], b: 0 }), 45)
+    ? rot(S(R(27, 3, 10, 58, 5), P.white, { a: [2.4, 0], b: [1.6, 0], ink: 1, inner: [10, 20, 30, 40, 50].map((y) => fill(R(26, y, 12, 5, 0), INK)).join("") }) +
+      S(R(26.4, 2, 11.2, 6, 2.5), P.gold, { a: [1.4, 0], b: 0 }) + S(R(26.4, 56, 11.2, 6, 2.5), P.gold, { a: [1.4, 0], b: 0 }), 45)
     : v === "star"
-      ? rot(S(R(29, 20, 6, 42, 3), P.dwood, { a: [2, 0], b: [1.4, 0] }) + glow(32, 12, 13, "#fff3a0", .5) + S(star(32, 12, 12, 5.2, 5, -90), P.gold, { a: 2.2, b: 1.6 }) +
+      ? rot(S(R(28.2, 20, 7.6, 42, 3.4), P.dwood, { a: [2, 0], b: [1.4, 0] }) + glow(32, 12, 15, "#fff3a0", .5) + S(star(32, 12, 13.6, 6, 5, -90), P.gold, { a: 2.2, b: 1.6 }) +
         G("rotate(-20 42 22)", S(R(36, 18, 12, 8, 1.2), pal("#ff8a2b", "#d2561b", "#ffc27a"), { a: 0, b: 0, sw: 1.8 }) + Tx(42, 24.4, "£1", 5.6, "#fff")), 40)
-      : rot(S(R(29, 17, 6, 45, 3), P.dwood, { a: [2, 0], b: [1.4, 0] }) +
+      : rot(S(R(28.2, 17, 7.6, 45, 3.4), P.dwood, { a: [2, 0], b: [1.4, 0] }) +
         S(R(28, 36, 8, 7, 2), m, { a: [2, 0], b: 0, inner: L("M27 39.5H37", m.s, 1.4) }) +
         glow(32, 11, 11, m.h, .45) + TL("M27.5 19C24 14 25 6 30 3.5M36.5 19C40 14 39 6 34 3.5", P.gold.b, 2.4) +
-        S(C(32, 11, 7), m, { a: 2.2, b: 1.8 }) + Gl(29.5, 8.5, 1.8, 1.2, -30, .9) +
+        S(C(32, 11, 8.4), m, { a: 2.2, b: 1.8 }) + Gl(29.5, 8.5, 1.8, 1.2, -30, .9) +
         (v === "shop" ? L("M34 41L40 47", INK, 1.2) + G("rotate(30 44 50)", S(R(37, 46, 15, 8, 1.2), P.white, { a: 0, b: 0, sw: 1.6 }) + Tx(44.5, 52.2, "OPEN", 4.4, T.red.s)) : ""), 40),
 
   book: (m, v, o) => v === "steps"
@@ -442,14 +436,6 @@ const M = {
     S("M13 28H51L46 58H18Z", m, { a: [4, 2], ink: 1, inner: fill("M0 36H64V41H0Z", "#fff", .95) }) +
     S(star(32, 49, 5, 2.2, 5, -90), P.gold, { a: .8, b: 0, sw: 1.8 }),
 
-  bread: (m, v) => rot(
-    S(R(5, 23, 54, 17, 8.5), m, {
-      a: [0, 4], b: [0, 2.4],
-      inner: [16, 26, 36, 46].map((x) => F(`M${x - 4} 27Q${x} 29 ${x + 4} 36Q${x + 1} 33 ${x - 4} 27Z`, m.h, 1.6)).join("") +
-        (v === "gravel" ? [[14, 33], [22, 26], [31, 35], [41, 27], [50, 33]].map(([x, y]) => F(C(x, y, 1.5), "#8b8d85", 1.2)).join("") : ""),
-    }) +
-    (v === "crown" ? S("M53 22L52 12L56 16L59 10L61.5 16L64 13L63 23Z", P.gold, { a: 1, b: .8, sw: 2 }) : "") +
-    F(C(10, 46, 1.4), m.h, 1.4) + F(C(16, 49, 1.1), m.h, 1.2), -32),
 
   pigeon: (m, v) => {
     const bird = (eye) =>
@@ -461,7 +447,7 @@ const M = {
       S("M19 34C27 30 39 32 46 40C42 46.5 32 48.5 24 46.5C19.5 43.5 17.5 38 19 34Z", P.greyD, { a: 2, b: 1.5, inner: L("M25 38C31 37 37 39 41 42M23 42C29 42 34 43 38 45", INK, 1.8, .45) }) +
       F("M52.6 18L59.5 20.8L52.4 23Z", P.dark.b, 2) + F(E(52, 17.4, 1.7, 1.2), "#e9edf5", 1.2) + eye;
     const eye = v === "patch"
-      ? TL("M37.5 10L54 21", "#7a4f2e", 1.8) + F(E(46, 15.4, 5.2, 4.4), "#1a1f36", 2) + Gl(44.2, 13.8, 1.6, .9, -20, .55)
+      ? TL("M36 9L55 22", "#e0b07a", 2.2) + S(E(46, 15.6, 6.6, 5.6), P.dark, { a: 0, b: [1.2, 1.2], sw: 2.4 }) + Gl(43.6, 13.6, 1.8, 1, -20, .6)
       : F(C(46, 15, 3), "#ff9a2b", 1.6) + `<circle cx="46.3" cy="15" r="1.3" fill="${INK}"/>` + Gl(45.2, 14, .7, .7, 0, .95) +
         (v === "angry" ? L("M41.5 10.5L50.5 13.5", INK, 2.6) : "");
     if (v === "angry") return G("translate(-6 -3) scale(.55)", `<g opacity=".7">${bird(F(C(46, 15, 3), "#ff4d5e", 1.6))}</g>`) + G("translate(6 6) scale(.9)", bird(eye));
@@ -501,12 +487,6 @@ const M = {
     S(Cap(32, 33, 20.5, 46, 3), m, { a: 1.2, b: 0 }) + S(C(20, 50, 9) + C(20, 50, 4.8), m, { ev: 1, a: 2, b: 1.6 }) +
     S(C(32, 33, 2.8), P.gold, { a: .8, b: 0, sw: 2 }), -15),
 
-  magnet: (m, v) =>
-    (v === "moon" ? S(C(52, 12, 9), T.cream, { a: 2, b: 0, inner: F(C(49, 10, 2), T.cream.s, 1) + F(C(55, 15, 2.4), T.cream.s, 1) }) + L("M44 20L40 24M48 24L46 28M40 16L36 18", "#b8ecff", 2, .9) :
-      v === "fridge" ? "" : L("M48 6C51 3 55 3 58 6M50 11C52 9.5 54 9.5 56 11", T.cyan.b, 2.4) + S(C(55, 18, 4.5), P.gold, { a: 1.2, b: .8, sw: 2 })) +
-    rot(S(R(29, 46, 6, 17, 3), P.wood, { a: [2, 0], b: [1.2, 0] }) +
-      S("M14 15V32C14 44 22 50 32 50C42 50 50 44 50 32V15H38V32C38 35.6 35.4 38 32 38C28.6 38 26 35.6 26 32V15Z", m, { a: [3, 3], b: 2.2 }) +
-      S(R(13, 5, 14, 11, 2), P.metal, { a: [2, 1.5], b: 1.4 }) + S(R(37, 5, 14, 11, 2), P.metal, { a: [2, 1.5], b: 1.4 }), 22),
 
   glove: (m, v) =>
     S(Cap(23, 30, 19.5, 11, 4), m, { a: 2, b: 1.4 }) + S(Cap(30.5, 28, 30.5, 7.5, 4.1), m, { a: 2, b: 1.4 }) +
@@ -517,9 +497,9 @@ const M = {
       : S(R(18, 51, 28, 10, 3), dk(m), { a: [0, 2], b: [0, 1.2] })) + Gl(23, 17, 1, 3, -10, .6),
 
   wand: (m, v) => {
-    const shaft = v === "twig" ? rod("M24 60C26 50 30 40 31 30C32 24 33 20 32 16", P.dwood, 4) + F(E(28.8, 42, 1.2, 1.8), P.dwood.s, 1)
-      : S(R(29.5, 24, 5, 38, 2.5), P.dark, { a: [1.6, 0], b: [1, 0], hw: 1.2 }) + S(R(29.5, 24, 5, 6, 2), P.white, { a: [1.4, 0], b: 0, sw: 2 });
-    let top = glow(32, 15, 11.5, m.h, .45) + S(star(32, 15, 12, 5.2, 5, -90), m, { a: 2.4, b: 1.8 }) + Gl(28.8, 12.4, 1.4, 2.4, 30, .85);
+    const shaft = v === "twig" ? rod("M24 60C26 50 30 40 31 30C32 24 33 20 32 16", P.dwood, 5.6) + F(E(28.8, 42, 1.2, 1.8), P.dwood.s, 1)
+      : S(R(28.6, 24, 6.8, 38, 3), P.dark, { a: [1.8, 0], b: [1.2, 0], hw: 1.2 }) + S(R(28.6, 24, 6.8, 7, 2.4), P.white, { a: [1.4, 0], b: 0, sw: 2 });
+    let top = glow(32, 14, 14, m.h, .45) + S(star(32, 14, 14, 6, 5, -90), m, { a: 2.4, b: 1.8 }) + Gl(28.8, 12.4, 1.4, 2.4, 30, .85);
     if (v === "twig") top = glow(32, 13, 10, m.h, .5) + S(C(32, 13, 4.5), m, { a: 1, b: .8, sw: 2 }) + Sp(32, 13, 3.4) + L("M30 30L22 34", INK, 1.4) + G("rotate(-60 20 36)", S(C(20, 32, 3), P.metal, { a: .8, b: 0, sw: 1.8 }) + S(R(19, 34, 2.4, 9, .8), P.metal, { a: 0, b: 0, sw: 1.6 }) + fill("M21.4 38h1.6v1.4h-1.6Z M21.4 41h1.2v1.2h-1.2Z", P.metal.b));
     if (v === "trail") top = L("M32 15L6 38", "#fff3a0", 7, .45) + L("M32 15L10 36", "#ffe25a", 3, .8) + top;
     if (v === "galaxy") top = glow(32, 15, 14, "#a98bff", .55) + top + L("M32 15a1.5 1.5 0 0 1 3 0a3 3 0 0 1 -6 0", INK, 1.2, .5);
@@ -571,7 +551,8 @@ const M = {
     if (v === "door") inner += fill("M22 18H42V58H22Z", m.s, .25) + L("M20 18V58M44 18V58", INK, 1.4, .3);
     if (v === "planks") inner += L("M22 10V60M32 10V60M42 10V60", m.s, 2, .8) + fill(R(0, 24, 64, 4, 0), P.dmetal.b) + fill(R(0, 44, 64, 4, 0), P.dmetal.b);
     if (o.pat) inner += PAT[o.pat](m, o);
-    let out = S("M13 11L24 8C26 13 29 16 32 16C35 16 38 13 40 8L51 11L55 21L50 26V43C50 52 42 58 32 58C22 58 14 52 14 43V26L9 21Z", m, { a: [4, 2], inner, ink: o.ink }) +
+    const hem = { hex: "V44L46 48V54L40 58H24L18 54V48L14 44", scale: "V44Q47 50 43 47Q41 54 36.4 52Q32 60 27.6 52Q23 54 21 47Q17 50 14 44", jag: "V42L46 47L42 44L38 52L34 47L30 56L27 48L22 50L18 45L14 46" }[o.cut] || "V43C50 52 42 58 32 58C22 58 14 52 14 43";
+    let out = S(`M13 11L24 8C26 13 29 16 32 16C35 16 38 13 40 8L51 11L55 21L50 26${hem}V26L9 21Z`, m, { a: [4, 2], inner, ink: o.ink }) +
       L("M24 8.5C26 14 29 17 32 17C35 17 38 14 40 8.5", (tone(o.trim) || P.gold).b, 2.2) + F(C(18, 29, 1.6), (tone(o.trim) || P.gold).b, 1.4) + F(C(46, 29, 1.6), (tone(o.trim) || P.gold).b, 1.4);
     if (v === "vac") out += TL("M50 30C60 32 60 50 50 54C44 56 40 52 42 48", P.dark.b, 3.4) + S(R(38, 45, 7, 5, 2), P.dark, { a: 0, b: 0, sw: 2 }) + S(R(22, 26, 20, 14, 7), T.red, { a: [2, 2], b: 1.4, inner: fill(R(22, 31, 20, 4, 0), P.dark.b) }) + F(C(32, 22, 2.6), P.dark.b, 1.6);
     if (v === "door") out += S(R(26, 26, 12, 16, 1.5), P.gold, { a: 1.2, b: .8, sw: 2 }) + Tx(32, 36.4, "PUSH", 4.4, P.gold.s) + S(C(32, 49, 4.4), P.glass, { a: 1, b: 0, sw: 2 });
@@ -580,12 +561,6 @@ const M = {
     return out;
   },
 
-  helmet: (m, v, o) => v === "beacon"
-    ? glow(32, 11, 14, "#ffb34d", .55) + S(R(29, 15, 6, 10, 1), P.white, { a: [1, 0], b: 0, sw: 2, inner: fill(R(29, 18, 6, 3, 0), INK) }) +
-      S(C(32, 11, 8), T.orange, { a: 2, b: 1.6 }) + Gl(29, 8, 2, 1.4, -30, .9) +
-      S("M10 47C10 31 20 22 32 22C44 22 54 31 54 45V48H10Z", P.white, { a: [4, 3], ink: 1, inner: fill("M0 28H64V33H0Z M0 38H64V43H0Z", INK) }) +
-      S(R(6, 45, 52, 7, 3.5), P.white, { a: [0, 2], b: 0, ink: 1 }) + L("M16 52C16 58 22 61 30 61", INK, 2.2)
-    : _helmet(m, v, o),
 
   hoodie: (m, v, o) => {
     o = o || {};
@@ -601,22 +576,7 @@ const M = {
       F("M22 44H42L45 54H19Z", m.s, 2) + (o.emb ? emb(o.emb, +o.ex || 32, +o.ey || 40, +o.es || 1) : "");
   },
 
-  cloak: (m, v, o) => {
-    o = o || {};
-    let inner = L("M26 28L21 57M38 28L43 57M32 30V58", m.s, 2.2, .8) + (PAT[v] ? PAT[v](m, o) : "") + (o.pat ? PAT[o.pat](m, o) : "");
-    return S("M32 5C24 5 20 11 20 19L9 56Q20 61 32 58Q44 61 55 56L44 19C44 11 40 5 32 5Z", m, { a: [4, 2], inner, ink: o.ink }) +
-      (o.hem ? S("M9 56Q20 61 32 58Q44 61 55 56L54 52Q44 57 32 54Q20 57 10 52Z", tone(o.hem), { a: 0, b: 0, sw: 2 }) : "") +
-      F("M32 11C27 11 25 15 25 21C28 24 36 24 39 21C39 15 37 11 32 11Z", P.dark.s) +
-      (o.clasp ? emb(o.clasp, 32, 27, .7) : S(C(32, 27, 3.6), P.gold, { a: 1, b: .8, sw: 2 })) +
-      (o.emb ? emb(o.emb, +o.ex || 38, +o.ey || 44, +o.es || 1) : "");
-  },
 
-  aura: (m, v) => v === "shush"
-    ? glow(32, 32, 30, m.b, .3) +
-      `<ellipse cx="32" cy="32" rx="27" ry="9" transform="rotate(-20 32 32)" fill="none" stroke="${INK}" stroke-width="5"/><ellipse cx="32" cy="32" rx="27" ry="9" transform="rotate(-20 32 32)" fill="none" stroke="${m.h}" stroke-width="2.2"/>` +
-      S(C(32, 32, 15.5), m, { a: 3.4, b: 2.2 }) + F("M24 36Q32 41 40 36Q32 44 24 36Z", T.red.b, 1.6) + S(R(29.5, 18, 5, 21, 2.5), P.skin, { a: [1, 0], b: 0, sw: 1.8 }) +
-      G("rotate(-20 32 32)", L("M5 32A27 9 0 0 0 59 32", INK, 5) + L("M5 32A27 9 0 0 0 59 32", m.h, 2.2)) + at(50, 10, 1.1, EMB.shh()) + Sp(10, 12, 3.6) + Sp(55, 50, 3)
-    : _aura(m, v),
 
   crown: (m, v) =>
     S("M12 42L7 16L21 28L32 9L43 28L57 16L52 42Z", m, { a: [4, 3], inner: L("M21 28L23 42M43 28L41 42", m.s, 1.8, .5) }) +
@@ -676,12 +636,6 @@ const M = {
     }) +
     G("translate(48 34) rotate(28)", S(R(-4, -22, 8, 34, 1.5), T.yellow, { a: [2, 0], b: [1.2, 0] }) + S(R(-4, -26, 8, 5, 2), T.pink, { a: [1.4, 0], b: 0, sw: 2 }) + S("M-4 12L0 21L4 12Z", P.wood, { a: 1, b: 0, sw: 2 }) + fill("M-1.4 18L0 21L1.4 18Z", INK)),
 
-  bar: (m) =>
-    F("M9 26L21 15.5H55L43 26Z", P.oat.h) +
-    S("M9 26H43V48H9Z", P.oat, { a: [0, 3], b: [0, 1.6], inner: [[16, 33], [24, 38], [33, 31], [38, 42], [20, 44], [29, 44]].map(([x, y]) => F(E(x, y, 2, 1.2), P.oat.s, 1, .7)).join("") }) +
-    S("M43 26L55 15.5V37.5L43 48Z", dk(P.oat), { a: 1.4, b: 1 }) +
-    [[26, 19], [36, 22], [45, 18]].map(([x, y]) => F(E(x, y, 2, 1), P.oat.s, 1, .6)).join("") +
-    S("M7 24H24L21.5 30L25 36L21.5 42L24 50H7Z", m, { a: [0, 2.5], b: [1.6, 1.6], inner: fill("M0 33H64V38H0Z", "#fff", .9) }) + F("M7 24L19 13.5H26L24 24Z", m.h, 2),
 
   clover: (m, v) => v === "tag"
     ? rot(S(R(14, 12, 36, 46, 9), pal("#eafff3", "#b5dcc8", "#ffffff"), { a: 2.5, b: 2, inner: fill("M14 36L39 12H47L14 46Z", "#fff", .7) }) + F(C(32, 19, 2.6), "#fff", 1.6) +
@@ -953,10 +907,10 @@ const M = {
     L("M28.5 45.5L32 37.5L35.5 45.5", INK, 1.6, .6) + F(R(26, 30, 12, 6, 1), T.red.b, 1.4) + Tx(32, 34.6, "SORRY", 3.6, "#fff"), 42),
 
   hockeystick: (m) => diag(
-    rod("M33 3V46C33 56 24 59 18.5 54", P.wood, 6) +
-    L("M33 12V36", "#f3f6fd", 6.4) + L("M30 13.5L36 11.5M30 16.5L36 14.5M30 19.5L36 17.5M30 22.5L36 20.5M30 25.5L36 23.5M30 28.5L36 26.5M30 31.5L36 29.5M30 34.5L36 32.5", "#aeb8d0", 1.2) +
-    L("M29.6 12V36M36.4 12V36", INK, 1.6) +
-    L("M33 2.5V10", m.b, 6.2) + L("M29.6 2.5V10M36.4 2.5V10", INK, 1.6) + L("M30 1.5H36", INK, 2) +
+    rod("M33 3V45C33 57 23 60 16 54", P.wood, 7.6) +
+    L("M33 12V36", "#f3f6fd", 7.8) + L("M30 13.5L36 11.5M30 16.5L36 14.5M30 19.5L36 17.5M30 22.5L36 20.5M30 25.5L36 23.5M30 28.5L36 26.5M30 31.5L36 29.5M30 34.5L36 32.5", "#aeb8d0", 1.2) +
+    L("M28.9 12V36M37.1 12V36", INK, 1.6) +
+    L("M33 2.5V10", m.b, 7.6) + L("M28.9 2.5V10M37.1 2.5V10", INK, 1.6) + L("M30 1.5H36", INK, 2) +
     L("M33 44V48", "#f3f6fd", 6) + L("M23 55.5L25.5 52", "#f3f6fd", 5) , 38),
 
   rolledmenu: (m) => rot(
@@ -966,10 +920,10 @@ const M = {
 
   selfie: (m) => diag(
     L("M30 58C24 62 23 54 29 54", INK, 3.4) + L("M30 58C24 62 23 54 29 54", m.b, 1.6) +
-    S(R(28.5, 42, 7, 20, 3), P.rubber, { a: [1.6, 0], b: [1, 0], hw: 1.2, inner: L("M28 46H36M28 49H36M28 52H36", P.rubber.h, 1, .6) }) + F(R(29.5, 43, 5, 4, 1), m.b, 1.2) +
-    S(R(29.8, 28, 4.4, 15, 1.5), P.metal, { a: [1.4, 0], b: 0, sw: 2 }) + S(R(28.8, 40, 6.4, 3, 1), P.dmetal, { a: 0, b: 0, sw: 1.6 }) +
-    S(R(30.6, 17, 2.8, 12, 1), P.metal, { a: [1, 0], b: 0, sw: 1.8 }) + S(R(29.6, 26.6, 4.8, 2.4, 1), P.dmetal, { a: 0, b: 0, sw: 1.6 }) +
-    S(R(31.2, 11, 1.6, 7, .8), P.metal, { a: 0, b: 0, sw: 1.6 }) +
+    S(R(27.6, 42, 8.8, 20, 3.4), P.rubber, { a: [1.6, 0], b: [1, 0], hw: 1.2, inner: L("M28 46H36M28 49H36M28 52H36", P.rubber.h, 1, .6) }) + F(R(29.5, 43, 5, 4, 1), m.b, 1.2) +
+    S(R(29, 28, 6, 15, 1.6), P.metal, { a: [1.6, 0], b: [1, 0], sw: 2 }) + S(R(28.8, 40, 6.4, 3, 1), P.dmetal, { a: 0, b: 0, sw: 1.6 }) +
+    S(R(29.8, 17, 4.4, 12, 1.2), P.metal, { a: [1.2, 0], b: 0, sw: 2 }) + S(R(29.6, 26.6, 4.8, 2.4, 1), P.dmetal, { a: 0, b: 0, sw: 1.6 }) +
+    S(R(30.6, 11, 2.8, 7, 1), P.metal, { a: 0, b: 0, sw: 1.8 }) +
     S(R(27, 9, 10, 4, 1.5), P.dark, { a: 0, b: 0, sw: 1.8 }) +
     S(R(19, 0, 26, 11, 2.4), P.dark, { a: [0, 1.4], b: 0, sw: 2.2 }) + fill(R(21, 1.8, 22, 7.4, 1), "#4a7dff") + F(C(32, 5.5, 2.2), "#ffd23d", 1) + `<circle cx="31.2" cy="5" r=".6" fill="${INK}"/><circle cx="32.8" cy="5" r=".6" fill="${INK}"/>`, 45),
 
@@ -979,16 +933,11 @@ const M = {
     S(R(28, 38, 8, 23, 3.5), m, { a: [2, 0], b: [1.2, 0], inner: F(C(32, 56.5, 1.8), INK, 0) + L("M28 42H36", INK, 1.4, .4) }) + F(R(29, 37, 6, 3, 1), P.metal.b, 1.4), 40),
 
   gardenfork: (m) => diag(
-    S(R(29.4, 27, 5.2, 27, 2.2), P.wood, { a: [1.6, 0], b: [1, 0] }) + G("translate(6.4 3) scale(.8)", [22.6, 28.4, 34.2].map((x) => S(`M${x - 2.2} 24V7Q${x - 2.2} 3.4 ${x} 2.4Q${x + 2.2} 3.4 ${x + 2.2} 7V24Z`, P.dmetal, { a: [1, 0], b: 0, sw: 2 })).join("") +
+    S(R(28.8, 27, 6.4, 27, 2.6), P.wood, { a: [1.8, 0], b: [1.2, 0] }) + G("translate(6.4 3) scale(.8)", [22.6, 28.4, 34.2].map((x) => S(`M${x - 2.2} 24V7Q${x - 2.2} 3.4 ${x} 2.4Q${x + 2.2} 3.4 ${x + 2.2} 7V24Z`, P.dmetal, { a: [1, 0], b: 0, sw: 2 })).join("") +
     S("M37.8 24V13Q38 6 43.4 1.6Q46 .8 46.4 3.2Q42.6 8 42.2 13.6V24Z", P.dmetal, { a: [1, 0], b: 0, sw: 2 }) +
     S("M19 21H45V26Q45 31.5 32 31.5Q19 31.5 19 26Z", P.dmetal, { a: [0, 2], b: 1 }) + S(R(30, 30, 4, 4, 1), P.dmetal, { a: 0, b: 0, sw: 1.8 })) +
     L("M27 54L25 62H39L37 54", INK, 4.4) + L("M27 54L25 62H39L37 54", m.b, 2.4) + S(R(24, 59.5, 16, 3.6, 1.6), P.wood, { a: 0, b: 0, sw: 2 }), 40),
 
-  tray: (m) => rot(
-    S(R(6, 12, 52, 40, 5), m, { a: [3, 3], b: 2 }) +
-    F(R(10, 16, 44, 32, 3), m.s, 1.6) +
-    F(R(12, 18, 22, 15, 2.5), m.h, 1.4) + F(R(36, 18, 16, 10, 2.5), m.h, 1.4) + F(R(12, 35, 14, 11, 2.5), m.h, 1.4) + F(C(43, 39, 6.5), m.h, 1.4) +
-    L("M15 22L20 27M38 21L41 24", "#fff", 1.6, .6) + L("M6 22V30M58 22V30", INK, 1.2, .4), -12),
 
   rollingpin: (m) => rot(
     S(R(3, 27, 12, 8, 4), P.dwood, { a: [0, 2], b: [0, 1] }) + S(R(49, 27, 12, 8, 4), P.dwood, { a: [0, 2], b: [0, 1] }) +
@@ -1017,26 +966,22 @@ const M = {
     (v === "dent" ? L("M44 41C46 40 48 42 50 41", INK, 1.6, .5) + fill(E(46, 41, 4, 2), INK, .15) : ""),
 
   halberd: (m) => diag(
-    S(R(30, 14, 4, 48, 2), P.wood, { a: [1.4, 0], b: [.8, 0] }) + S(R(29, 56, 6, 6, 1.5), P.dmetal, { a: 0, b: 0, sw: 1.8 }) +
+    S(R(29, 14, 6, 48, 2.6), P.wood, { a: [1.6, 0], b: [1, 0] }) + S(R(28, 56, 8, 6, 1.5), P.dmetal, { a: 0, b: 0, sw: 1.8 }) +
     S("M32 1L35 15H29Z", P.metal, { a: [1.4, 0], b: 0, sw: 2.2 }) +
-    S("M34 13C43 10 50 15 52 25C47 22 40 23 34 26Z", P.metal, { a: [1.6, 1.6], b: 1, inner: L("M36 15C42 14 47 17 49 22", "#fff", 1.2, .7) }) +
+    S("M34 11C45 7 54 14 56 27C50 23 41 24 34 28Z", P.metal, { a: [1.6, 1.6], b: 1, inner: L("M36 15C42 14 47 17 49 22", "#fff", 1.2, .7) }) +
     S("M30 15L20 10L23 16L30 21Z", P.metal, { a: 1, b: 0, sw: 2 }) +
     S(R(29, 12.5, 6, 15, 1.5), P.dmetal, { a: [1, 0], b: 0, sw: 2 }) +
     L("M30 29C26 33 27 38 25 41M32 29C30 34 32 38 30 42M34 29C33 34 35 37 34 41", INK, 3.6) + L("M30 29C26 33 27 38 25 41M32 29C30 34 32 38 30 42M34 29C33 34 35 37 34 41", m.b, 1.8) + S(R(28.5, 27.5, 7, 3.2, 1.4), P.gold, { a: 0, b: 0, sw: 1.6 }), 42),
 
   pike: (m, v) => diag(
     (v === "rainbow"
-      ? L("M32 22V62", INK, 7) + ["#ff4d5e", "#ff8a2b", "#ffd23d", "#45d483", "#4a7dff", "#9b5de5"].map((c, i) => L(`M32 ${22 + i * 6.7}V${28.7 + i * 6.7}`, c, 4, null, ' stroke-linecap="butt"')).join("") + L("M30.6 22V62", "#fff", 1, .5)
-      : S(R(30, 22, 4, 40, 2), P.wood, { a: [1.4, 0], b: [.8, 0] })) +
-    S("M32 1C37 8 38 15 32 23C26 15 27 8 32 1Z", P.metal, { a: [2, 0], b: [1.2, 0], inner: L("M32 4V21", P.metal.s, 1.4, .7) }) +
-    S(R(29.5, 21, 5, 6, 1.5), m === T.gold ? P.gold : P.dmetal, { a: [1, 0], b: 0, sw: 2 }) +
+      ? L("M32 22V62", INK, 9.6) + ["#ff4d5e", "#ff8a2b", "#ffd23d", "#45d483", "#4a7dff", "#9b5de5"].map((c, i) => L(`M32 ${22 + i * 6.7}V${28.7 + i * 6.7}`, c, 6.4, null, ' stroke-linecap="butt"')).join("") + L("M30 22V62", "#fff", 1.2, .55)
+      : S(R(28.8, 22, 6.4, 40, 2.6), P.wood, { a: [1.6, 0], b: [1, 0] })) +
+    S("M32 0C39 8 40 16 32 24C24 16 25 8 32 0Z", P.metal, { a: [2, 0], b: [1.2, 0], inner: L("M32 4V21", P.metal.s, 1.4, .7) }) +
+    S(R(28.2, 21, 7.6, 6, 1.6), m === T.gold ? P.gold : P.dmetal, { a: [1, 0], b: 0, sw: 2 }) +
     (v === "cloud" ? S(cloudD(32, 19, .95), P.white, { a: [0, 1.6], b: 0, sw: 2 }) + L("M24 6L27 10M41 6L38 10", "#ffd23d", 2) : "") +
     (v === "star" ? glow(32, 8, 12, "#fff3a0", .5) + S(star(32, 8, 8.5, 3.6, 5, -90), P.gold, { a: 1.4, b: 1, sw: 2 }) : ""), 42),
 
-  lance: (m, v) => diag(
-    S("M32 3L40 47H24Z", m, { a: [3.5, 0], b: [2, 0], inner: fill("M20 14L44 4V8L20 18Z M20 26L44 16V20L20 30Z M20 38L44 28V32L20 42Z", "#fff", .9) }) +
-    S(E(32, 47, 11, 3.6), P.metal, { a: [0, 1.2], b: 0, sw: 2.2 }) + S(R(29.5, 49, 5, 13, 2), P.dwood, { a: [1, 0], b: 0, sw: 2 }) +
-    (v === "star" ? glow(32, 6, 11, "#fff3a0", .55) + S(star(32, 6, 7.5, 3.2, 5, -90), P.gold, { a: 1, b: .8, sw: 2 }) : ""), 42),
 
   oar: (m) => diag(
     S(R(30, 0, 4, 46, 2), P.wood, { a: [1.4, 0], b: [.8, 0] }) + S(R(29, 0, 6, 8, 2.5), P.dwood, { a: [1, 0], b: 0, sw: 2 }) +
@@ -1045,23 +990,23 @@ const M = {
     `<circle cx="32" cy="22" r="11.6" fill="none" stroke="${P.dmetal.b}" stroke-width="2"/>` + dots([[32, 10.6], [43.4, 22], [32, 33.4], [20.6, 22]], .9, P.metal.h, .8) + S(C(32, 22, 3.6), P.metal, { a: 1, b: .8, sw: 2 }), 45),
 
   cane: (m) => diag(
-    rod("M33 60V18C33 7 21 7 21 15", P.dwood, 5.4) +
+    rod("M33 60V18C33 7 21 7 21 15", tone("black") === m ? pal("#3d4466", "#262b45", "#8c99c8") : P.dwood, 6.8) + S(C(21, 16, 3.4), P.metal, { a: .8, b: .6, sw: 2 }) +
     S(R(30, 28, 6, 4, 1.4), P.gold, { a: 0, b: 0, sw: 1.8 }) +
     L("M33 48L29 50L37 52L29 54L37 56L29 58L33 60", INK, 4.4) + L("M33 48L29 50L37 52L29 54L37 56L29 58L33 60", P.metal.b, 2) +
     S(R(29, 59, 8, 3, 1.4), P.dark, { a: 0, b: 0, sw: 1.8 }), 30),
 
   pole: (m, v) => {
     if (v === "bent") return diag(
-      rod("M31 61C31 50 35 42 33 30C31 20 34 12 32 4", P.dwood, 6.4) + F(E(32.5, 23, 1.8, 2.6), P.dwood.s, 1.2) + F(E(33.6, 44, 1.8, 2.6), P.dwood.s, 1.2) +
+      rod("M31 61C31 50 35 42 33 30C31 20 34 12 32 4", P.dwood, 7.6) + F(E(32.5, 23, 1.8, 2.6), P.dwood.s, 1.2) + F(E(33.6, 44, 1.8, 2.6), P.dwood.s, 1.2) +
       L("M29 12C23 14 23 21 30 20", INK, 3.6) + L("M29 12C23 14 23 21 30 20", T.green.b, 1.8) + S(R(28.6, 7, 8, 9, 2.5), T.brown, { a: [1, 0], b: 0, sw: 2.2, inner: L("M28 10H37M28 12.5H37", T.brown.s, 1) }) +
       S("M27.6 57L31 63L34.4 57Z", P.metal, { a: 0, b: 0, sw: 1.8 }), 38);
     const carbon = v === "carbon";
     return diag(
       L("M28 6C21 10 23 19 29 15", INK, 3.6) + L("M28 6C21 10 23 19 29 15", m.b, 1.8) +
       S(R(27, 1, 10, 16, 3.5), carbon ? P.rubber : T.tan, { a: [1.6, 0], b: [1, 0], inner: L("M26 5H38M26 8.5H38M26 12H38", INK, 1.2, .3) }) +
-      S(R(28.8, 16, 6.4, 22, 2), carbon ? P.rubber : m, { a: [1.6, 0], b: [1, 0], hw: 1.2, inner: carbon ? L("M28 20L36 25M28 26L36 31M28 32L36 37", "#8c99c8", 1.2, .7) : "" }) +
+      S(R(28, 16, 8, 22, 2.4), carbon ? P.rubber : m, { a: [1.8, 0], b: [1.2, 0], hw: 1.2, inner: carbon ? L("M28 20L36 25M28 26L36 31M28 32L36 37", "#8c99c8", 1.2, .7) : "" }) +
       S(R(28, 36, 8, 4, 1.4), m, { a: 0, b: 0, sw: 2 }) +
-      S(R(29.8, 39, 4.4, 17, 1.4), carbon ? P.rubber : P.metal, { a: [1.2, 0], b: 0, sw: 2 }) +
+      S(R(29, 39, 6, 17, 1.6), carbon ? P.rubber : P.metal, { a: [1.4, 0], b: [.8, 0], sw: 2 }) +
       S(E(32, 54, 7, 2.2), P.dark, { a: 0, b: 0, sw: 2 }) + S("M30 56L32 63L34 56Z", P.metal, { a: 0, b: 0, sw: 1.6 }), 40);
   },
 
@@ -1083,16 +1028,16 @@ const M = {
     TL("M11 51L53 19", P.wood.b, 3.4) + S(R(3, 56, 10, 4, 1.4), P.dwood, { a: 0, b: 0, sw: 1.8 }) + S(R(51, 56, 10, 4, 1.4), P.dwood, { a: 0, b: 0, sw: 1.8 }),
 
   clockhand: (m) => diag(
-    S("M32 1L40 15L34.5 13.6V20H29.5V13.6L24 15Z", m, { a: [2, 1], b: 1.2 }) +
+    S("M32 0L43 17L35.4 15.4V20H28.6V15.4L21 17Z", m, { a: [2, 1], b: 1.2 }) +
     S(C(32, 27, 7.5) + C(32, 27, 3.6), m, { ev: 1, a: 1.6, b: 1.2 }) +
-    S("M30.4 34H33.6V54H30.4Z", m, { a: [1, 0], b: 0, sw: 2 }) +
-    S(C(32, 57.5, 4.4), m, { a: 1.4, b: 1, sw: 2 }) + L("M26 23L22 19M38 23L42 19M27 33L24 37M37 33L40 37", m.b, 2) + L("M26 23L22 19M38 23L42 19M27 33L24 37M37 33L40 37", INK, 1, .5), 40),
+    S("M29 34H35V54H29Z", m, { a: [1.6, 0], b: [1, 0], sw: 2.2 }) +
+    S(C(32, 57.5, 5.4), m, { a: 1.4, b: 1, sw: 2.2 }) + L("M26 23L22 19M38 23L42 19M27 33L24 37M37 33L40 37", m.b, 2) + L("M26 23L22 19M38 23L42 19M27 33L24 37M37 33L40 37", INK, 1, .5), 40),
 
   whip: (m, v) => {
     const th = "M15 47C20 33 41 39 47 26C52 14 39 7 30 13C23 18 29 30 41 30";
     let thong;
     if (v === "rainbow") thong = L(th, INK, 6) + ["#ff4d5e", "#ff8a2b", "#ffd23d", "#45d483", "#4a7dff", "#9b5de5"].map((c, i) => `<path d="${th}" pathLength="60" fill="none" stroke="${c}" stroke-width="3.2" stroke-dasharray="10 50" stroke-dashoffset="${-i * 10}"/>`).join("");
-    else if (v === "comet") thong = glow(41, 30, 9, "#b8ecff", .6) + L(th, INK, 6) + L(th, "#7fe0ff", 3.2) + L(th, "#fff", 1.2, .8) + S(C(41, 30, 4.2), T.cyan, { a: 1, b: .8, sw: 2 }) + Sp(54, 44, 3.4) + Sp(8, 14, 2.6);
+    else if (v === "comet") thong = glow(41, 30, 10, "#b8ecff", .6) + L(th, INK, 7.4) + L(th, "#7fe0ff", 4.4) + L(th, "#fff", 1.2, .8) + S(C(41, 30, 4.2), T.cyan, { a: 1, b: .8, sw: 2 }) + Sp(54, 44, 3.4) + Sp(8, 14, 2.6);
     else thong = L(th, INK, 6) + L(th, m.s, 3.4) + L(th, m.b, 1.8, null, ' transform="translate(-.5 -.5)"') + L(th, INK, 3.4, .25, ' stroke-dasharray="1.2 2.6" stroke-linecap="butt"');
     let out = thong + L("M41 30L46 29", INK, 3.4) + L("M41 30L46 29", "#f3e3c3", 1.6) +
       G("rotate(32 12 52)", S(R(8, 44, 8, 19, 3.5), P.dmetal === m ? P.dark : P.dwood, { a: [2, 0], b: [1.2, 0], inner: L("M7 48L17 50M7 52L17 54M7 56L17 58", P.dwood.s, 1.4) }) + S(R(7, 42, 10, 4, 1.6), m === T.gold ? P.gold : P.gold, { a: 0, b: 0, sw: 1.8 }));
@@ -1102,7 +1047,7 @@ const M = {
   },
 
   crop: (m) => diag(
-    S(R(31, 8, 2, 40, 1), P.dark, { a: [.8, 0], b: 0, sw: 2 }) + S("M28.5 1H35.5V9H28.5Z", T.brown, { a: [1, 0], b: 0, sw: 2 }) +
+    S(R(30.2, 8, 3.6, 40, 1.6), P.dark, { a: [1, 0], b: 0, sw: 2 }) + S("M28.5 1H35.5V9H28.5Z", T.brown, { a: [1, 0], b: 0, sw: 2 }) +
     S(R(29, 46, 6, 15, 2.5), T.brown, { a: [1.6, 0], b: [1, 0], inner: L("M28 49L36 51M28 53L36 55M28 57L36 59", T.brown.s, 1.4) }) +
     L("M29 61C24 64 22 57 29 58", INK, 3.4) + L("M29 61C24 64 22 57 29 58", T.brown.b, 1.6) + S(R(28.4, 44.5, 7.2, 3, 1.2), P.gold, { a: 0, b: 0, sw: 1.6 }), 40) +
     G("rotate(-10 47 49)", S(R(36, 42, 22, 14, 1.4), P.paper, { a: 1.2, b: 0, sw: 2 }) + Tx(47, 52, "100/1", 6.4, T.red.s)),
@@ -1158,17 +1103,7 @@ const M = {
     S("M25.5 8H38.5V50C38.5 57.5 25.5 57.5 25.5 50Z", P.glass, { a: [2.6, 0], b: [1.6, 0], inner: fill("M0 22H64V64H0Z", "#1d1440") + fill(E(30, 34, 9, 6), m.b, .75) + fill(E(35, 44, 8, 5), "#ff6fb0", .6) + fill(E(29, 50, 7, 4), "#4cc3ff", .55) + [[29, 30], [35, 36], [30, 44], [34, 51], [28, 39]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r=".9" fill="#fff"/>`).join("") + Sp(33, 28, 2.4) }) +
     S(R(24, 6, 16, 4, 1.6), P.glass, { a: 0, b: 0, sw: 2 }) + S(R(26.5, 0, 11, 7, 2), T.tan, { a: [1.4, 0], b: 0, sw: 2 }) + Gl(28, 20, 1, 5, 0, .7), 32),
 
-  wreckingball: () =>
-    L("M31 26C33 18 40 18 42 12C44 6 50 4 55 5", INK, 5.4) + L("M31 26C33 18 40 18 42 12C44 6 50 4 55 5", "#f3f6fd", 3) + L("M32.5 22L35 23M37 18L40 19M42 13L45 14M47 7L49 9", INK, 1, .45) +
-    S(R(53, 2, 7, 4, 1.4), P.metal, { a: 0, b: 0, sw: 1.8 }) +
-    L("M27 26C27 21 35 21 35 26", INK, 5) + L("M27 26C27 21 35 21 35 26", P.dmetal.b, 2.4) +
-    S(C(31, 43, 17), P.dark, { a: 4, b: 2.6, hw: 2.4 }) + Gl(23, 35, 3.4, 5.4, 40, .55) + Gl(20.5, 40, .9, 1.6, 30, .7),
 
-  bungee: (m) =>
-    L("M44 22L47 18L43 15L48 11L44 8L49 5", INK, 4.8) + L("M44 22L47 18L43 15L48 11L44 8L49 5", m.b, 2.4) + L("M44 22L47 18L43 15L48 11L44 8L49 5", INK, 2.4, .35, ' stroke-dasharray="1.6 2.4"') +
-    L("M49 5C53 1 58 4 56 8C55 10 52 10 51 8", INK, 3.4) + L("M49 5C53 1 58 4 56 8C55 10 52 10 51 8", P.metal.b, 1.6) +
-    S("M34 30C38 36 50 40 60 38C54 44 44 46 36 44C44 50 50 56 54 62C44 58 34 54 28 48Z", T.orange, { a: 0, b: 0, sw: 2, inner: fill("M34 34C40 38 48 41 54 41C48 44 40 44 36 43Z", T.yellow.b) }) +
-    S("M12 28C16 22 26 20 32 24C38 28 40 36 36 42C32 48 22 50 16 46C10 42 8 34 12 28Z", T.coal, { a: 2.6, b: 1.8, inner: F(C(20, 32, 3), T.coal.s, 1.2) + F(C(29, 40, 2.4), T.coal.s, 1.2) + F(C(30, 28, 1.6), T.coal.s, 1) }) + L("M33 25L43 21", INK, 3.4) + L("M33 25L43 21", P.metal.b, 1.6),
 
   fireworkbag: (m) =>
     [[22, 26, -14, T.red], [32, 22, 0, T.blue], [42, 26, 14, T.green]].map(([x, y, a, q]) => G(`rotate(${a} ${x} 40)`, S(R(x - 4, y - 14, 8, 18, 1.5), q, { a: [2, 0], b: [1.2, 0], inner: fill(R(x - 4, y - 8, 8, 3, 0), "#fff", .9) }) + S(`M${x - 4.5} ${y - 13.5}L${x} ${y - 21}L${x + 4.5} ${y - 13.5}Z`, P.gold, { a: [1, 0], b: 0, sw: 2 }))).join("") +
@@ -1180,7 +1115,7 @@ const M = {
     ? [[18, 1], [46, -1]].map(([x, s]) => S(R(x - 3.4, 42, 6.8, 18, 3), P.dwood, { a: [1.4, 0], b: [.8, 0] }) + L(`M${x} 44V36L${x + s * 34} 14`, INK, 4.4) + L(`M${x} 44V36L${x + s * 34} 14`, P.gold.b, 2) + L(`M${x - .6} 43V36.4`, "#fff3a8", .8, .9)).join("") +
       L("M30 8C34 6 38 7 42 5M22 6C26 3 28 3 32 1", m.h, 1.8, .9) + Sp(32, 22, 3.6) + L("M4 62C16 54 26 60 36 52C44 46 54 50 62 44", m.b, 2, .6, ' stroke-dasharray="3 3"')
     : glow(32, 52, 14, m.h, .55) +
-      rod("M12 6C18 14 26 26 31 40", P.wood, 4.4) + rod("M52 6C46 14 38 26 33 40", P.wood, 4.4) + rod("M32 38V56", P.wood, 4.6) +
+      rod("M12 6C18 14 26 26 31 40", P.wood, 5.6) + rod("M52 6C46 14 38 26 33 40", P.wood, 5.6) + rod("M32 38V57", P.wood, 6) +
       F(E(20, 17, 1.4, 2), P.wood.s, 1) + F(E(44, 20, 1.4, 2), P.wood.s, 1) +
       L("M4 60C12 54 20 60 28 56M36 56C44 60 52 54 60 60", m.b, 2.2, .85, ' stroke-dasharray="3 3"') + Sp(32, 61, 3),
 
@@ -1296,9 +1231,6 @@ const M = {
     F(R(20, 31, 24, 21, 3), "#0f3a22", 2) + fill(R(22, 33, 20, 17, 2), "#1c6b3c") +
     F(C(33.4, 35.6, 2.6), "#b8ffd0", 1) + F("M32.4 39L28.6 45L30.6 46L32.8 42.4L33.6 46L30.8 50.8L33 51.6L36 46.4L36.4 42.4L38.8 45L40.4 43.6L36.4 39Z", "#b8ffd0", 1) + Gl(23, 9, 1, 3, 0, .5),
 
-  chip: (m) =>
-    glow(32, 32, 28, "#ffe36a", .55) + rot(S("M25 10Q25 6 29 6H35Q39 6 39 10L38 56Q38 60 34 60H30Q26 60 26 56Z", P.gold, { a: [4, 0], b: [2.4, 0], inner: fill("M24 6H40V11H24Z", "#fff3c4", .9) + L("M30 14C29.6 26 31 40 30.4 54", P.gold.h, 2, .7) + dots([[34, 22], [31, 34], [35, 44], [29, 48]], .7, "#fff", 0) + L("M36 18V30M27 38V46", P.gold.s, 1.4, .6) }), 35) +
-    S("M44 6L45 2L48 4.6L50 1.6L52 4.6L55 2L56 6Z", P.gold, { a: 0, b: 0, sw: 1.6 }) + Sp(12, 14, 4.4) + Sp(52, 52, 3.4) + Sp(14, 50, 2.4),
 
   slice: (m, v) => rot(
     S("M12 22C8 10 22 4 32 6C42 4 56 10 52 22C50 26 48 28 48 32V54Q48 58 44 58H20Q16 58 16 54V32C16 28 14 26 12 22Z", T.brown, { a: [3, 3], b: 0 }) +
@@ -1339,10 +1271,10 @@ const M = {
 
   bigkey: (m, v) => diag(
     (v === "cosmic" ? glow(32, 14, 18, "#a98bff", .5) : glow(32, 14, 14, m.h, .3)) +
-    S(R(29.4, 22, 5.2, 34, 1.5), m, { a: [1.6, 0], b: [1, 0] }) +
-    S("M34.6 44H44V48H40V52H44V56H34.6Z", m, { a: [1.4, 1], b: 0, sw: 2.2 }) +
+    S(R(28.6, 22, 6.8, 36, 1.8), m, { a: [1.8, 0], b: [1.2, 0] }) +
+    S("M35.4 42H47V47H42V51H47V57H35.4Z", m, { a: [1.4, 1], b: 0, sw: 2.2 }) +
     S(R(26, 22, 12, 4, 1.4), m, { a: [0, 1], b: 0, sw: 2 }) +
-    S(C(32, 13, 10.5) + C(24.6, 13, 2.4) + C(39.4, 13, 2.4) + C(32, 5.8, 2.4) + C(32, 20.2, 2.4), m, { ev: 1, a: 2, b: 1.4 }) +
+    S(C(32, 12.6, 12) + C(23.6, 12.6, 2.6) + C(40.4, 12.6, 2.6) + C(32, 4.4, 2.6) + C(32, 20.8, 2.6), m, { ev: 1, a: 2, b: 1.4 }) +
     (v === "cosmic" ? fill(C(32, 13, 4.2), "#20184a") + Sp(32, 13, 3) : F(C(32, 13, 3.6), T.red.b, 1.6)) + Gl(26, 8, 1.4, 3, 40, .8), 40),
 
   teacup: (m) =>
@@ -1415,21 +1347,7 @@ const M = {
     S(star(32, 28, 25, 20, 18, -90), m, { a: 2.6, b: 1.8, inner: [0, 20, 40, 60, 80, 100, 120, 140, 160].map((a) => `<path transform="rotate(${a} 32 28)" d="M32 4V52" stroke="${m.s}" stroke-width="1.2" opacity=".6"/>`).join("") }) +
     S(C(32, 28, 13), P.white, { a: 1.4, b: 0, sw: 2.2 }) + `<circle cx="32" cy="28" r="10.6" fill="none" stroke="${P.gold.b}" stroke-width="1.4"/>` + Tx(32, 27, v === "first" ? "1st" : "BEST", v === "first" ? 7 : 5.4, m.s) + Tx(32, 33.4, v === "first" ? "" : "IN SHOW", 3.6, INK),
 
-  lens: (m) =>
-    glow(28, 34, 26, "#fff3a0", .6) + fill("M34 30L64 10V34Z", "#fff3a0", .55) +
-    S("M6 50L20 6L50 22L40 58Z", P.glass, { a: [3, 3], b: 2, inner: [12, 18, 24, 30, 36].map((r) => `<circle cx="58" cy="44" r="${r * 1.25}" fill="none" stroke="${INK}" stroke-width="1.5" opacity=".45"/><circle cx="57.4" cy="43.4" r="${r * 1.25}" fill="none" stroke="#fff" stroke-width="1.2" opacity=".9"/>`).join("") }) +
-    Sp(48, 12, 4) + Sp(8, 18, 2.6) + S(R(44, 52, 14, 6, 2), P.gold, { a: 0, b: 0, sw: 1.8 }),
 
-  legring: (m) => M.pigeon(T.teal, "") +
-    S(R(24.4, 51.6, 7.6, 5.6, 1.8), m, { a: 0, b: 0, sw: 2, inner: fill(R(24, 53.6, 9, 1.6, 0), "#fff") }) +
-    S(R(4, 4, 15, 9, 1.5), P.gold, { a: 0, b: 0, sw: 1.6 }) + Tx(11.5, 10.6, "1st", 6, INK) + L("M50 44L58 40M52 50H61", INK, 1.8, .5),
-
-  rotor: (m) =>
-    S(E(32, 38, 26, 12), P.dmetal, { a: 0, b: 0 }) +
-    S(E(32, 34, 26, 12), m, { a: [0, 2], b: 0, inner: [...Array(26)].map((_, i) => { const a = i / 26 * Math.PI * 2; return `<path d="M${f(32 + Math.cos(a) * 22)} ${f(34 + Math.sin(a) * 10)}L${f(32 + Math.cos(a) * 26)} ${f(34 + Math.sin(a) * 12)}" stroke="${INK}" stroke-width="1" opacity=".6"/>`; }).join("") }) +
-    S(E(32, 30, 22, 10), T.cream, { a: [0, 1.6], b: 0, sw: 2, inner: Tx(32, 25, "A B C D", 4, INK) + Tx(32, 39, "Q R S", 4, INK) + Tx(13, 32, "Z", 4, INK) + Tx(51, 32, "H", 4, INK) }) +
-    S(E(32, 30, 9, 4.4), P.metal, { a: [0, 1.2], b: 0, sw: 2 }) + F(E(32, 30, 3, 1.5), INK, 1) +
-    dots([[24, 31], [40, 31], [32, 27]], 1.1, P.gold.b, .8) + L("M58 36L62 32M58 40H64", INK, 1.6, .5),
 
   penny: (m, v) =>
     (v === "ferry" ? "" : `<ellipse cx="32" cy="54" rx="26" ry="6" fill="none" stroke="${T.cyan.b}" stroke-width="2" opacity=".7"/><ellipse cx="32" cy="54" rx="16" ry="3.6" fill="none" stroke="${T.cyan.b}" stroke-width="2" opacity=".8"/>`) +
@@ -1438,13 +1356,6 @@ const M = {
       ? F("M18 34H46L42 40H22Z", T.bronze.s, 1.4) + L("M32 34V18L42 30H32", T.bronze.s, 1.8) + L("M20 26L30 36", T.bronze.h, 1.6) + dots([[16, 18], [48, 20]], 1, T.bronze.s, 0)
       : Tx(32, 28, "ONE", 6.4, T.copper.s) + Tx(32, 36, "PENNY", 5, T.copper.s) + Tx(32, 45, "1953", 5, T.copper.s)) + Gl(19, 19, 2, 5, 45, .7),
 
-  bridle: (m) =>
-    L("M22 6C14 14 14 30 20 40M42 6C50 14 50 30 44 40M20 40C26 42 38 42 44 40M22 6C28 2 36 2 42 6M18 18H46", INK, 5.6) +
-    L("M22 6C14 14 14 30 20 40M42 6C50 14 50 30 44 40M20 40C26 42 38 42 44 40M22 6C28 2 36 2 42 6M18 18H46", T.brown.b, 3) +
-    dots([[18, 18], [46, 18], [20, 40], [44, 40]], 2.2, P.metal.b, 1.4) +
-    S(C(20, 44, 5) + C(20, 44, 2.6), P.metal, { ev: 1, a: 1, b: 0, sw: 2 }) + S(C(44, 44, 5) + C(44, 44, 2.6), P.metal, { ev: 1, a: 1, b: 0, sw: 2 }) + L("M25 44H39", INK, 3.4) + L("M25 44H39", P.metal.b, 1.6) +
-    L("M18 48C14 56 18 62 26 62M46 48C50 56 46 62 38 62", INK, 4.4) + L("M18 48C14 56 18 62 26 62M46 48C50 56 46 62 38 62", T.brown.b, 2.2) +
-    S(drop(32, 54, 1.2), T.cyan, { a: 1, b: .6, sw: 2 }) + OV.waves(),
 
   witchbottle: (m) =>
     S("M26 4H38V10H26Z", T.tan, { a: [1, 0], b: 0, sw: 2 }) +
@@ -1455,12 +1366,6 @@ const M = {
     [[20, 46, -20], [30, 48, 10], [42, 44, 25]].map(([x, y, a]) => G(`rotate(${a} ${x} ${y})`, L(`M${x} ${y - 8}V${y + 4}`, INK, 2.4) + L(`M${x} ${y - 8}V${y + 4}`, P.metal.b, 1) + F(C(x, y - 8, 1.6), P.metal.b, 1))).join("") +
     TL("M40 6C44 2 50 4 52 8M46 4L48 8M50 6L54 6", T.green.b, 1.6),
 
-  harefoot: () =>
-    L("M32 2V11", INK, 3.6) + L("M32 2V11", P.metal.b, 1.6) + S(C(32, 3, 2.6), P.metal, { a: 0, b: 0, sw: 1.8 }) +
-    G("rotate(-16 32 36)",
-      S(fuzz(32, 38, 9, 21, 22, 2.2), pal("#c9ad88", "#957552", "#efdcc0"), { a: [3, 2], b: 1.8, inner: L("M28 22C27 32 27 42 28 52M36 22C37 32 37 42 36 52M32 20V54", "#957552", 1.1, .55) + fill(E(32, 54, 7, 5), "#efe2cc") }) +
-      L("M29 59L28 63M32 60V64M35 59L36 63", INK, 2.2) +
-      S(R(26.5, 10, 11, 9, 2.2), P.gold, { a: [1.4, 1], b: 0, sw: 2, inner: L("M26 14.5H38", P.gold.s, 1) })),
 
   tooth: (m) =>
     L("M10 10C18 18 22 16 26 12M54 10C46 18 42 16 38 12", INK, 3.4) + L("M10 10C18 18 22 16 26 12M54 10C46 18 42 16 38 12", T.brown.b, 1.6) +
@@ -1473,12 +1378,6 @@ const M = {
     S("M42 21L52 22L53 56H41Z", T.stone, { a: [3, 0], b: [1.6, 0], inner: L("M45 30L46 44M49 26V36", T.stone.s, 1.4, .7) }) +
     S("M8 13L56 12L57 22L7 23Z", T.stone, { a: [0, 3], b: [1.4, 1.4], inner: L("M14 16H24M36 17H48", T.stone.s, 1.4, .7) }) + Sp(56, 4, 3) + F("M26 56C27 52 30 52 31 56Z", T.green.b, 1.2),
 
-  astrolabe: (m) =>
-    S(C(32, 9, 4) + C(32, 9, 1.8), P.gold, { ev: 1, a: 0, b: 0, sw: 1.8 }) + S(R(29, 11, 6, 6, 1.5), P.gold, { a: 0, b: 0, sw: 1.8 }) +
-    S(C(32, 37, 24), P.gold, { a: 3, b: 2.2, inner: `<circle cx="32" cy="37" r="20" fill="${P.gold.s}"/>` + [...Array(24)].map((_, i) => `<path transform="rotate(${i * 15} 32 37)" d="M32 13V${i % 2 ? 15.5 : 17}" stroke="${INK}" stroke-width="1" opacity=".7"/>`).join("") }) +
-    L("M18 44C18 30 28 24 38 26C46 28 48 38 44 46", P.gold.h, 2) + `<circle cx="32" cy="37" r="9" fill="none" stroke="${P.gold.h}" stroke-width="1.8"/>` +
-    L("M16 46L22 40M44 26L48 22M28 28L26 24", P.gold.h, 1.8) + F(star(26, 24, 2.4, 1, 4, 0), "#fff", 0) +
-    S("M12 50L52 24L53 26.6L13 52.6Z", P.dmetal, { a: 0, b: 0, sw: 1.8 }) + F(C(32, 37, 2.6), P.dmetal.b, 1.4),
 
   lightbottle: (m) =>
     glow(32, 38, 26, "#fff3a0", .5) +
@@ -1510,12 +1409,6 @@ const M = {
     S(C(36, 38, 22), P.gold, { a: 3, b: 2.2 }) + S(C(36, 38, 17), P.white, { a: [-2, -2], b: 0, sw: 2, inner: [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((a) => `<path transform="rotate(${a} 36 38)" d="M36 23V${a % 90 ? 25 : 26.6}" stroke="${INK}" stroke-width="1.4"/>`).join("") }) +
     L("M36 38V28M36 38L43 41", INK, 2) + F(C(36, 38, 1.8), INK, 0) + `<circle cx="36" cy="38" r="20" fill="none" stroke="${m.h}" stroke-width="1.6" opacity=".8" stroke-dasharray="2 4"/>` + L("M2 44H8M4 52H10", m.b, 2, .9),
 
-  planisphere: (m) =>
-    S(C(32, 34, 25), T.navy, { a: 3, b: 2, inner: dots([[20, 26], [40, 22], [30, 36], [44, 42], [24, 46], [36, 50], [14, 36], [50, 30]], 1.2, "#fff", 0) + L("M20 26L30 36L44 42M40 22L50 30", "#cfe0ff", 1, .6) }) +
-    `<circle cx="32" cy="34" r="25" fill="none" stroke="${P.gold.b}" stroke-width="2.4" stroke-dasharray="1 2.6"/>` +
-    F("M32 34m-25 0a25 25 0 0 1 50 0Z", "none", 0) +
-    S("M12 34C12 50 22 58 32 58C42 58 52 50 52 34C46 44 40 46 32 46C24 46 18 44 12 34Z", T.cream, { a: 0, b: 0, sw: 2, inner: Tx(32, 54, "TONIGHT", 3.6, INK) }) +
-    S(C(32, 34, 3), P.gold, { a: 0, b: 0, sw: 1.6 }) + L("M32 4V12", INK, 3) + L("M32 4V12", P.metal.b, 1.4) + S(C(32, 4, 3), T.red, { a: .6, b: 0, sw: 1.6 }),
 
   heart: (m) =>
     glow(32, 36, 26, "#ff8a2b", .4) +
@@ -1523,10 +1416,6 @@ const M = {
     S(star(38, 36, 9, 6.6, 10, -90) + C(38, 36, 3), P.gold, { ev: 1, a: 1, b: .6, sw: 1.8 }) + S(star(24, 40, 6, 4.4, 8, -90) + C(24, 40, 2), P.gold, { ev: 1, a: .8, b: 0, sw: 1.6 }) +
     S("M32 6C34 10 38 12 38 16C38 19 35 21 32 21C29 21 26 19 26 16C26 13 29 12 30 9C31 11 31 11 32 12C31 10 31 8 32 6Z", T.orange, { a: .8, b: 0, sw: 1.8 }),
 
-  keystone: (m) =>
-    S(cloudD(14, 50, .9), P.white, { a: 0, b: 0, sw: 2 }) + S(cloudD(52, 52, .8), P.white, { a: 0, b: 0, sw: 2 }) +
-    S("M14 8H50L42 50H22Z", T.stone, { a: [3, 3], b: 2, inner: L("M20 14L24 30M44 16L40 34", T.stone.s, 1.4, .6) + fill("M14 8H50V12H14Z", T.stone.h, .6) }) +
-    S(star(32, 26, 7, 3, 5, -90), P.gold, { a: 1, b: .6, sw: 1.8 }) + Sp(56, 10, 3) + Sp(8, 26, 2.4),
 
   hourglass: (m) =>
     S(R(14, 4, 36, 6, 2), P.dwood, { a: [0, 1.6], b: 0 }) + S(R(14, 54, 36, 6, 2), P.dwood, { a: [0, 1.6], b: 0 }) +
@@ -1540,12 +1429,6 @@ const M = {
     G("rotate(35 40 26)", S("M40 2C48 8 50 20 44 34L40 46L36 34C30 20 32 8 40 2Z", P.white, { a: [2, 1], b: 1.2, inner: L("M40 6V44M40 12L45 10M40 18L46 16M40 24L45 22M40 12L35 10M40 18L34 16", P.white.s, 1, .8) }) + F("M38.4 44L40 52L41.6 44Z", INK, 1.2)) +
     Sp(56, 50, 3),
 
-  chime: (m) =>
-    L("M32 1V9", INK, 2.2) + S(C(32, 3, 2), P.gold, { a: 0, b: 0, sw: 1.4 }) +
-    S("M14 30C14 16 22 8 32 8C42 8 50 16 50 30C50 32 14 32 14 30Z", P.glass, { a: [3, 2], b: 2, inner: L("M18 22C22 18 26 18 30 20C34 22 38 22 46 18", m.b, 2.4) + dots([[22, 26], [32, 25], [42, 26]], 1.8, T.red.b, 1) + L("M20 16C22 13 25 11 28 10.6", "#fff", 2, .9) }) +
-    L("M32 30V38", INK, 1.6) + S(C(32, 37, 2.4), P.gold, { a: 0, b: 0, sw: 1.4 }) +
-    G("rotate(-8 32 50)", S(R(25, 38, 14, 24, 1), m, { a: [1.6, 1], b: 0, sw: 2, inner: L("M28 44H36M28 48H34M28 52H36", INK, 1.2, .4) + fill(drop(32, 57, .6), "#fff", .8) })) +
-    L("M8 26C4 30 4 38 8 42M56 26C60 30 60 38 56 42", INK, 2, .5) + Sp(10, 8, 2.8) + Sp(54, 54, 2.4),
 
   soup: (m) =>
     S(E(32, 34, 27, 10), pal("#c9a46a", "#8a6a3a", "#ead0a0"), { a: 0, b: 0 }) +
@@ -1600,12 +1483,6 @@ const M = {
     L("M20 42C20 52 26 58 32 58M44 42C44 52 38 58 32 58", INK, 3.6) + L("M20 42C20 52 26 58 32 58M44 42C44 52 38 58 32 58", T.yellow.b, 1.6) + S(R(29, 55, 6, 5, 1.5), P.dark, { a: 0, b: 0, sw: 1.8 }) +
     Tx(46, 9, "↺", 9, T.red.b, { stroke: INK, sw: 1 }),
 
-  kneepad: (m) =>
-    L("M6 20C14 16 50 16 58 20M6 46C14 50 50 50 58 46", INK, 8.4) + L("M6 20C14 16 50 16 58 20M6 46C14 50 50 50 58 46", P.dark.b, 5) +
-    F(R(2, 16, 7, 8, 2), P.dmetal.b, 1.6) + F(R(55, 42, 7, 8, 2), P.dmetal.b, 1.6) +
-    S("M32 4C46 4 52 16 52 30C52 46 44 60 32 60C20 60 12 46 12 30C12 16 18 4 32 4Z", P.dark, { a: [3, 2], b: 1 }) +
-    S("M32 8C42 8 47 18 47 30C47 43 41 54 32 54C23 54 17 43 17 30C17 18 22 8 32 8Z", m, { a: [3, 3], b: 2.2, inner: L("M18 24C26 21 38 21 46 24M18 36C26 33 38 33 46 36", m.s, 1.8, .8) + L("M24 46L30 41M36 16L42 20", "#fff", 1.6, .7) }) +
-    Gl(24, 16, 2, 5, 30, .8),
 
   peakcap: (m) =>
     S("M8 30C8 20 18 14 32 14C46 14 56 20 56 30Z", P.white, { a: [4, 2], b: 2 }) +
@@ -1623,14 +1500,6 @@ const M = {
     [20, 27, 34, 41].map((x, i) => S(R(x - 1, 31, 7, 13, 1.5), P.rubber, { a: 0, b: 0, sw: 1.6 }) + Tx(x + 2.5, 40, ["1", "9", "7", "4"][i], 6, "#fff")).join("") +
     S(R(18, 46, 28, 4, 1), P.rubber, { a: 0, b: 0, sw: 1.8 }),
 
-  deliverybag: (m, v) =>
-    (v === "sun" ? glow(32, 34, 30, "#ffb347", .45) : v === "flames" ? [[14, 14], [32, 8], [50, 14]].map(([x, y]) => S(`M${x} ${y - 8}C${x + 3} ${y - 3} ${x + 7} ${y} ${x + 6} ${y + 6}H${x - 6}C${x - 7} ${y} ${x - 3} ${y - 3} ${x} ${y - 8}Z`, T.orange, { a: 0, b: 0, sw: 2, inner: fill(drop(x, y + 3, .7), T.yellow.b) })).join("") : "") +
-    (v === "flail" ? L("M10 62L14 52M16 48L20 40", INK, 4.4) + G("rotate(-60 12 58)", S(R(8, 52, 8, 14, 3), P.dwood, { a: 1, b: 0, sw: 2 })) + L("M14 50C16 42 18 36 20 30", INK, 3.4) + L("M14 50C16 42 18 36 20 30", P.metal.b, 1.6, null, ' stroke-dasharray="2 1.4"') : "") +
-    (v === "armour" ? L("M18 16C16 30 16 44 18 56M46 16C48 30 48 44 46 56", INK, 5) + L("M18 16C16 30 16 44 18 56M46 16C48 30 48 44 46 56", P.dark.b, 3) : TL("M22 18C22 8 42 8 42 18", P.dark.b, 3)) +
-    S("M10 22L22 14H58L46 22Z", m, { a: 0, b: 0, sw: 2.2, inner: fill("M10 22L22 14H58L46 22Z", "#fff", .25) + L("M14 20L24 15M50 18L56 15", m.s, 1.4) }) +
-    S("M46 22L58 14V48L46 58Z", dk(m), { a: [1, 0], b: 0, inner: L("M52 20V52", dk(m).s, 1.4, .6) }) +
-    S(R(10, 22, 36, 36, 3), m, { a: [0, 3], b: [1.4, 1.4], inner: L("M10 30H46", INK, 1.6, .3) + L("M14 26H42", m.h, 1.2, .5) }) +
-    (v === "sun" ? emb("sun", 28, 42, 1.3) : v === "flames" ? emb("bolt", 28, 42, 1.2) : S(R(19, 35, 18, 12, 2), P.white, { a: 0, b: 0, sw: 1.8, inner: fill(R(19, 35, 18, 4, 0), m.s) }) + L("M22 42H34M22 45H30", INK, 1.2, .4) + L("M24 26C26 22 30 22 32 26", "#fff", 1.6, .7)),
 
   curtainrobe: (m, v, o) =>
     M.robe(m, "", Object.assign({ pat: "drops", nobelt: 1, trim: "white" }, o || {})) +
@@ -1642,11 +1511,6 @@ const M = {
     glow(26, 30, 5, m.h, .9) + glow(38, 30, 5, m.h, .9) + F(E(26, 30, 2.4, 1.4), m.h, 0) + F(E(38, 30, 2.4, 1.4), m.h, 0) +
     L("M48 8C52 6 54 10 58 8M50 14C54 12 56 16 60 14", m.h, 1.8, .9) + Tx(32, 42, "~", 8, m.h),
 
-  sausageroll: (m) =>
-    S(E(14, 36, 6, 11), P.meat, { a: 0, b: 0, sw: 2.2, inner: fill(E(14, 36, 3.6, 7), pal("#d88a6a", "#a85a3a", "#f0b090").b) }) +
-    S("M14 25H50C56 25 58 31 58 36C58 41 56 47 50 47H14Z", P.oat, { a: [0, 3], b: [1.4, 1.4], inner: L("M24 26L20 46M32 26L28 46M40 26L36 46M48 26L44 46", P.oat.s, 2, .8) + L("M16 29H54", P.oat.h, 1.6, .7) + dots([[22, 30], [36, 32], [46, 30]], .7, "#fff", 0) }) +
-    F(E(14, 36, 6, 11), "none", 2.2) + F(E(14, 36, 3.4, 7), pal("#e0a080", "#a85a3a", "#f0b090").b, 1.6) + L("M12 32C13 34 13 38 12 40", "#a85a3a", 1.2) +
-    dots([[24, 54], [30, 56], [40, 55]], 1.2, P.oat.b, 1) + L("M4 54C10 56 54 56 60 54", INK, 1.6, .25) + Sp(52, 14, 3) + Sp(8, 18, 2.4),
 
   wristband: (m) =>
     `<ellipse cx="30" cy="36" rx="22" ry="12" fill="none" stroke="${INK}" stroke-width="12"/>` +
@@ -1822,6 +1686,7 @@ const EMB = {
   paw: () => F(E(0, 2, 3.6, 3), INK, 0) + dots([[-4, -2], [-1.4, -4.6], [1.4, -4.6], [4, -2]], 1.4, INK, 0),
   heart: () => F("M0 5.5C-7 1 -6.5 -5.5 -3 -5.5C-1.4 -5.5 -.4 -4.4 0 -3.4C.4 -4.4 1.4 -5.5 3 -5.5C6.5 -5.5 7 1 0 5.5Z", T.red.b, 1.5),
   trefoil: () => EMB.rad(),
+  horseshoe: () => TL("M-5 6V-1A5 5 0 0 1 5 -1V6", P.gold.b, 3.2) + fill(C(-5, 1, .7) + C(5, 1, .7) + C(-3.6, -4.2, .7) + C(3.6, -4.2, .7), INK),
   wave: () => L("M-7 0Q-3.5 -4 0 0T7 0M-7 4Q-3.5 0 0 4T7 4", T.cyan.b, 1.8),
   plough: () => dots([[-7, -1], [-4, -3], [-1, -2], [2, 0], [3, 4], [7, 4], [7, -0.6]], 1.4, P.gold.h, 1) + L("M-7 -1L-4 -3L-1 -2L2 0L3 4L7 4L7 -.6L2 0", P.gold.b, .8, .7),
 };
@@ -1845,7 +1710,6 @@ const PAT = {
   battenburg: () => { let s = ""; for (let x = 0; x < 64; x += 7) s += `M${x} ${(x / 7) % 2 ? 30 : 37}h7v7h-7Z`; return fill(s, T.yellow.b); },
   hex: (m) => { let s = ""; for (let r = 0; r < 7; r++) for (let c = 0; c < 6; c++) { const x = c * 11 + (r % 2) * 5.5, y = 8 + r * 9.5; s += poly([0, 60, 120, 180, 240, 300].map((a) => [x + Math.cos(a * Math.PI / 180) * 5.6, y + Math.sin(a * Math.PI / 180) * 5.6])); } return L(s, INK, 1.4, .45) + fill(s, m.h, .12); },
   scales: (m) => { let s = ""; for (let r = 0; r < 9; r++) for (let c = -1; c < 9; c++) { const x = c * 8 + (r % 2) * 4, y = 12 + r * 6; s += `M${x} ${y}a4 4 0 0 0 8 0`; } return L(s, m.s, 1.4, .8); },
-  rings: (m) => { let s = ""; for (let r = 0; r < 14; r++) for (let c = 0; c < 17; c++) s += C(c * 4 + (r % 2) * 2, 6 + r * 4, 1.6); return `<path d="${s}" fill="none" stroke="${m.s}" stroke-width="1.1" opacity=".85"/>`; },
   crinkle: (m) => L("M14 18L20 24L16 30L22 36M40 16L36 24L42 30L38 38M18 44L26 48L22 54M42 44L48 50L44 56M28 28L34 32", "#fff", 1.6, .8) + L("M16 22L22 28M38 20L44 26M24 50L30 46M30 36L36 40", INK, 1.2, .3),
   knit: (m) => { let s = ""; for (let x = 8; x < 60; x += 5) s += `M${x} 8v52`; return L(s, m.s, 1, .45); },
   stripes: (m, g) => { let s = ""; for (let x = 4; x < 64; x += 7) s += `M${x} 0h2.6v64h-2.6Z`; return fill(s, (tone(g.pc) || P.white).b, .9); },
@@ -1891,14 +1755,14 @@ const GARB = {
   cardigan: { len: 53, collar: "vneck", close: "buttons", pk: "patch", rib: 1, pat: "knit" },
   blazer: { len: 55, collar: "lapel", close: "buttons2", pk: "flap", hanky: 1 },
   smoking: { len: 55, collar: "shawl", close: "belt", pk: "patch" },
-  gown: { len: 61, collar: "shawl", close: "belt", pk: "patch" },
+  gown: { len: 61, collar: "shawl", close: "belt", pk: "patch", flare: 1 },
   pyjamas: { len: 51, collar: "shirt", close: "buttons", pk: "chest", piping: 1 },
   rugby: { len: 51, collar: "shirt", close: "placket", pat: "hoops" },
   jumper: { len: 51, collar: "crew", rib: 1 },
   shell: { len: 54, collar: "hood", close: "zip", pk: "chestzip", slim: 1 },
   donkey: { len: 55, collar: "lapel", close: "buttons", pk: "flap", yoke: 1 },
-  trench: { len: 59, collar: "lapel", close: "open", belt: 1 },
-  mail: { len: 58, sl: "short", collar: "crew", pat: "rings" },
+  trench: { len: 59, collar: "lapel", close: "open", belt: 1, flare: 1 },
+  mail: { len: 60, collar: "hood", coif: 1, pat: "rings" },
   hivis: { len: 56, sl: "none", collar: "vee", close: "zip", pat: "hivis" },
   singlet: { len: 54, sl: "none", collar: "scoop", bib: 1 },
   waistcoat: { len: 52, sl: "none", collar: "vee", close: "buttons", pk: "welt", points: 1, v: 30 },
@@ -1927,7 +1791,7 @@ function garment(m, v, o) {
   if (sl === "none") body = g.points ? `M24 6L32 ${+g.v || 14}L40 6L46 6C46 14 49 19 52 22V${len - 6}L35 ${len}L32 ${len - 4}L29 ${len}L12 ${len - 6}V22C15 19 18 14 18 6Z` : `M24 6L32 ${+g.v || 14}L40 6L46 6C46 14 49 19 52 22V${len - 2}Q52 ${len} 50 ${len}H14Q12 ${len} 12 ${len - 2}V22C15 19 18 14 18 6Z`;
   else if (sl === "short") body = `M24 6L32 12L40 6L51 9L59 24L51 29L48 25V${len - 2}Q48 ${len} 46 ${len}H18Q16 ${len} 16 ${len - 2}V25L13 29L5 24L13 9Z`;
   else if (g.slim) body = `M24 6L32 12L40 6L50 9C54 14 56 27 57 42L50 43.5L48 31V${len - 2}Q48 ${len} 46 ${len}H18Q16 ${len} 16 ${len - 2}V31L14 43.5L7 42C8 27 10 14 14 9Z`;
-  else body = `M24 6L32 12L40 6L51 9C55 14 57 27 59 42L51 44L49 31V${len - 2}Q49 ${len} 47 ${len}H17Q15 ${len} 15 ${len - 2}V31L13 44L5 42C7 27 9 14 13 9Z`;
+  else body = `M24 6L32 12L40 6L51 9C55 14 57 27 59 42L51 44L49 31${g.flare ? `L53 ${len - 2}Q53 ${len} 51 ${len}H13Q11 ${len} 11 ${len - 2}L15 31` : `V${len - 2}Q49 ${len} 47 ${len}H17Q15 ${len} 15 ${len - 2}V31`}L13 44L5 42C7 27 9 14 13 9Z`;
   let inner = (g.pat ? PAT[g.pat](m, g) : "") + (g.pat2 ? PAT[g.pat2](m, g) : "") + (sl === "long" ? L("M15 31L16.5 19M49 31L47.5 19", INK, 1.6, .35) : "");
   if (g.puff) inner += L("M9 22Q12 23 14 22M55 22Q52 23 50 22", m.h, 1.6, .6);
   if (g.wax) inner += L("M20 20Q24 30 21 44M42 18Q45 30 41 46M28 36Q32 40 36 36", "#fff", 1.6, .35);
@@ -1936,7 +1800,7 @@ function garment(m, v, o) {
   if (g.bib) inner += fill(R(21, 26, 22, 15, 1.5), "#fff") + `<text x="32" y="37.6" font-family="Arial Black,Arial,sans-serif" font-weight="900" font-size="9" text-anchor="middle" fill="${INK}">${g.num || 27}</text>` + dots([[23, 28], [41, 28], [23, 39], [41, 39]], .7, "#bbb", .6);
   if (g.ins) inner += g.ins;
   let out = "";
-  if (g.collar === "hood" || g.collar === "fur") out += S("M18 17C15.5 7 22 1 32 1C42 1 48.5 7 46 17C42 13 22 13 18 17Z", tr, { a: [2, 1.5], b: 1.4 });
+  if (g.collar === "hood" || g.collar === "fur") out += S("M18 17C15.5 7 22 1 32 1C42 1 48.5 7 46 17C42 13 22 13 18 17Z", tr, { a: [2, 1.5], b: 1.4, inner: g.coif ? PAT.rings(tr) : "" });
   out += S(body, m, { a: [4, 2], ink: g.ink, inner });
   if (g.rib && sl === "long") out += S(R(15, len - 5, 34, 5, 1.5), tr, { a: [0, 1.4], b: 0, sw: 2.2, inner: L(`M19 ${len - 5}v5M23 ${len - 5}v5M27 ${len - 5}v5M31 ${len - 5}v5M35 ${len - 5}v5M39 ${len - 5}v5M43 ${len - 5}v5`, tr.s, 1) }) +
     S("M5 42L13 44L13.9 39.6L5.7 37.6Z", tr, { a: 0, b: 0, sw: 2 }) + S("M59 42L51 44L50.1 39.6L58.3 37.6Z", tr, { a: 0, b: 0, sw: 2 });
@@ -1979,6 +1843,8 @@ function garment(m, v, o) {
   if (g.studs2) out += dots([[16, 12], [48, 12], [17, 16], [47, 16]], 1, P.metal.h, 1);
   if (g.emb) out += emb(g.emb, +g.ex || 39, +g.ey || 22, +g.es || 1);
   if (g.emb2) out += emb(g.emb2, +g.ex2 || 24, +g.ey2 || 40, +g.es2 || 1);
+  if (g.elbow && sl === "long") out += F(E(9.6, 33, 2.6, 4.4), T.brown.b, 1.6, .95) + F(E(54.4, 33, 2.6, 4.4), T.brown.b, 1.6, .95);
+  if (g.tag) out += L("M53 40L55 45", INK, 1.2) + G("rotate(16 56 50)", S("M50 46L52.6 43.4H62V54H50Z", P.paper, { a: 1, b: 0, sw: 1.8 }) + Tx(56.4, 51.6, g.tag, 5, T.red.s));
   if (g.add) out += g.add;
   return out;
 }
@@ -2008,12 +1874,14 @@ Object.assign(OV, {
 
 const _book = (m, v) => {
     const thick = v === "dict" || v === "volk" ? 7 : 4;
+    const [X, Y, W, H] = v === "atlas" ? [7, 13, 46, 37] : v === "ledger" ? [14, 3, 31, 56] : [12, 7, 34, 47];
     const one = (q, deco, r) => rot(
-      S(R(12 + thick, 10, 34, 46, 2), P.paper, { a: [0, 1.5], b: 0, inner: L(`M${44 + thick} 13V53M${41 + thick} 13V53`, INK, 1.2, .3) }) +
-      (v === "first" ? S(R(40, 38, 8, 22, 1), P.paper, { a: 0, b: 0, sw: 1.8, inner: L("M42 46H46M42 49H46M42 52H45", T.red.b, 1, .9) }) : F("M37 55V62L39.5 59.5L42 62V55Z", T.red.b, 1.8)) +
-      S(R(12, 7, 34, 47, 3), q, { a: [3.5, 3], inner: fill(R(12, 7, 6, 47, 0), q.s) + L("M18 7V54", INK, 1.6, .35) }) + deco, r == null ? -8 : r);
-    const corners = F("M38 7H43Q46 7 46 10V15Z", P.gold.b, 2) + F("M46 46V51Q46 54 43 54H38Z", P.gold.b, 2);
-    if (v === "ledger") return one(m, F(R(22, 15, 18, 10, 1.5), P.paper.b, 2) + L("M25 19H37M25 22H33", INK, 1.6, .4) + S(R(40, 26, 10, 9, 2), P.gold, { a: 1.2, b: .8, sw: 2 }) + F(C(45, 30.5, 1.4), INK, 1));
+      S(R(X + thick, Y + 3, W, H - 1, 2), P.paper, { a: [0, 1.5], b: 0, inner: L(`M${X + W + thick - 2} ${Y + 6}V${Y + H - 1}M${X + W + thick - 5} ${Y + 6}V${Y + H - 1}`, INK, 1.2, .3) }) +
+      (v === "first" ? S(R(40, 38, 8, 22, 1), P.paper, { a: 0, b: 0, sw: 1.8, inner: L("M42 46H46M42 49H46M42 52H45", T.red.b, 1, .9) }) : F(`M${X + 25} ${Y + H - 1}V${Y + H + 6}L${X + 27.5} ${Y + H + 3.5}L${X + 30} ${Y + H + 6}V${Y + H - 1}Z`, T.red.b, 1.8)) +
+      S(R(X, Y, W, H, 3), q, { a: [3.5, 3], inner: fill(R(X, Y, 6, H, 0), q.s) + L(`M${X + 6} ${Y}V${Y + H}`, INK, 1.6, .35) }) + deco, r == null ? -8 : r);
+    const corners = F(`M${X + W - 8} ${Y}H${X + W - 3}Q${X + W} ${Y} ${X + W} ${Y + 3}V${Y + 8}Z`, P.gold.b, 2) + F(`M${X + W} ${Y + H - 8}V${Y + H - 3}Q${X + W} ${Y + H} ${X + W - 3} ${Y + H}H${X + W - 8}Z`, P.gold.b, 2);
+    if (v === "ledger") return one(m, corners + F(R(23, 10, 17, 10, 1.5), P.paper.b, 2) + L("M26 14H37M26 17H33", INK, 1.6, .4) + Tx(31.5, 34, "£", 12, P.gold.b, { stroke: INK, sw: 2 }) +
+      S(R(36, 36, 16, 8, 1.6), T.brown, { a: [0, 1.4], b: 0, sw: 2 }) + S(R(42, 34.4, 8, 11, 2), P.gold, { a: 1.2, b: .8, sw: 2 }) + F(C(46, 39.6, 1.4), INK, 1) + L("M17 52H41", P.gold.b, 1.4, .8));
     if (v === "dict") return one(m, corners + Tx(32, 28, "A–Z", 9, P.gold.b, { stroke: INK, sw: 2 }) + L("M22 34H42M22 38H38", P.gold.b, 1.6, .8)) + rot([14, 22, 30, 38].map((y) => F(R(51, y, 4, 5, 1.5), "#fff", 1.2)).join(""), -8);
     if (v === "volk") return one(m, corners + Tx(32, 40, "K", 22, P.gold.b, { stroke: INK, sw: 2.4 }) + L("M22 15H42", P.gold.b, 1.6));
     if (v === "cipher") return one(m, F(R(21, 14, 22, 22, 1.5), P.paper.b, 1.8) + L("M28.3 14V36M35.6 14V36M21 21.3H43M21 28.6H43", INK, 1, .4) + fill("M23 16h3v3h-3Z M37 23h3v3h-3Z M30 30h3v3h-3Z", INK, .75) + Tx(32, 46, "SECRET", 5, T.red.b));
@@ -2025,7 +1893,11 @@ const _book = (m, v) => {
     if (v === "notes") return one(m, dots([[13, 12], [13, 18], [13, 24], [13, 30], [13, 36], [13, 42], [13, 48]], 1.6, P.metal.b, 1.2) + L("M22 16C26 13 28 19 32 15C36 12 38 18 42 15M22 22C25 20 30 24 34 21", INK, 1.2, .6) + at(32, 34, 1.2, EMB.stars()) +
       G("rotate(10 46 18)", S(R(41, 13, 10, 9, .5), T.yellow, { a: 0, b: 0, sw: 1.6 })) + G("rotate(-8 47 40)", S(R(42, 36, 10, 9, .5), T.pink, { a: 0, b: 0, sw: 1.6 })) + L("M23 44L27 48M27 44L23 48", T.red.b, 1.8));
     if (v === "jacket") return one(m, corners + S("M32 20L39 30L32 40L25 30Z", P.gold, { a: 2, b: 1.4 }) + fill("M12 54L46 7L46 15L18 54Z", "#fff", .3) + L("M14 52L44 10", "#fff", 1.4, .7));
-    if (v === "mace") return S(Cap(10, 62, 22, 50, 3.2), P.dwood, { a: 1, b: 0, sw: 2 }) + one(m, corners + Tx(32, 30, "DICT", 7.4, P.gold.b, { stroke: INK, sw: 2 }) + L("M22 36H42", P.gold.b, 1.6));
+    if (v === "mace") {
+      const spike = (x, y, a) => G(`rotate(${a} ${x} ${y})`, S(`M${x - 3} ${y + 1}L${x} ${y - 7}L${x + 3} ${y + 1}Z`, P.metal, { a: 0, b: [.8, 0], sw: 1.8 }));
+      return rod("M7 62L22 47", P.dwood, 6.4) + S(R(17, 47, 10, 6, 2), P.gold, { a: 0, b: 0, sw: 2 }) +
+        one(m, corners + Tx(31, 31, "A–Z", 9, P.gold.b, { stroke: INK, sw: 2 }) + L("M22 37H40", P.gold.b, 1.6) + [[19, 7, 0], [29, 7, 0], [39, 7, 0], [12, 16, -90], [12, 28, -90], [50, 19, 90], [50, 31, 90], [50, 43, 90]].map(([x, y, a]) => spike(x, y, a)).join(""));
+    }
     const main = one(m, corners + S("M32 20L39 30L32 40L25 30Z", P.gold, { a: 2, b: 1.4 }) + F(C(32, 30, 2.6), T.red.b, 1.6));
     if (v === "stack") return G("translate(5 -3) rotate(10 32 32)", one(T.mustard, corners, 0)) + main;
     return main;
@@ -2070,26 +1942,7 @@ const _suit = (m, v, o) => {
 
 OV.web = (x, y) => L(`M${x - 10} ${y - 10}L${x + 6} ${y + 6}M${x - 10} ${y + 2}L${x + 6} ${y - 4}M${x - 3} ${y - 10}V${y + 8}M${x - 8} ${y - 4}Q${x - 3} ${y - 2} ${x + 2} ${y - 6}M${x - 7} ${y + 2}Q${x - 2} ${y} ${x + 4} ${y + 2}`, "#6d7a95", 1.2, .9);
 
-const _helmet = (m, v) =>
-    (v === "beacon" ? glow(33, 9, 12, "#ffb34d", .4) + S(R(30, 12, 6, 5, 1), P.metal, { a: 0, b: 0, sw: 2 }) + S(C(33, 8.5, 6.5), T.orange, { a: 2, b: 1.5 }) + Gl(31, 6.5, 1.4, 1, -30, .9) : "") +
-    S("M10 41C10 23 20 13 34 13C48 13 56 23 56 38V42H10Z", m, {
-      a: [4, 3], ink: v === "beacon",
-      inner: v === "beacon"
-        ? fill("M0 22H64V27H0Z M0 32H64V37H0Z", INK, .85)
-        : fill("M31 13H38L40 42H33Z", m.h, .55) + F(R(17, 25, 9, 5, 2.5), P.dark.b, 1.6) + F(R(43, 25, 8, 5, 2.5), P.dark.b, 1.6) + F(R(32, 20, 6, 4, 2), P.dark.b, 1.4),
-    }) +
-    S(R(6, 39, 54, 8, 4), dk(m), { a: [0, 2], b: [0, 1.4] }) + L("M15 47C15 54 22 58 30 58", INK, 2.2) + S(R(28, 55, 6, 5, 1.5), P.dark, { a: 0, b: 0, sw: 1.8 }),
-  _aura = (m, v) =>
-    glow(32, 32, 30, m.b, .3) +
-    `<ellipse cx="32" cy="32" rx="27" ry="9" transform="rotate(-20 32 32)" fill="none" stroke="${INK}" stroke-width="5"/><ellipse cx="32" cy="32" rx="27" ry="9" transform="rotate(-20 32 32)" fill="none" stroke="${m.h}" stroke-width="2.2"/>` +
-    S(C(32, 32, 15.5), m, { a: 3.4, b: 2.2, inner: v === "eyes" || v === "shush" || v === "stars5" ? "" : L("M32 32a2 2 0 0 1 4 0a4 4 0 0 1 -8 0a6 6 0 0 1 12 0a8 8 0 0 1 -16 0a10 10 0 0 1 20 0", "#fff", 2.2, .6) }) +
-    (v === "eyes" ? [25, 39].map((x) => F(`M${x - 5.6} 31C${x - 3} 27 ${x + 3} 27 ${x + 5.6} 31C${x + 3} 35 ${x - 3} 35 ${x - 5.6} 31Z`, "#fff", 1.6) + L(`M${x - 4} 30L${x - 2} 31M${x + 4} 32L${x + 2} 31`, T.red.b, .9) + F(C(x, 31, 2), INK, 0) + L(`M${x - 5} 36C${x - 2} 38 ${x + 2} 38 ${x + 5} 36`, "#3a2350", 1.8)).join("") : "") +
-    (v === "shush" ? at(32, 32, 1.7, EMB.shush()) : "") +
-    (v === "stars5" ? [-2, -1, 0, 1, 2].map((i) => S(star(32 + i * 6.4, 32 - (2 - Math.abs(i)) * 1.6, 3.8, 1.6, 5, -90), P.gold, { a: 0, b: 0, sw: 1.4 })).join("") : "") +
-    G("rotate(-20 32 32)", L("M5 32A27 9 0 0 0 59 32", INK, 5) + L("M5 32A27 9 0 0 0 59 32", m.h, 2.2)) +
-    (v === "zzz" || v === "eyes" ? [[44, 3, 7], [53, 12, 5]].map(([x, y, s]) => TL(`M${x} ${y}H${x + s}L${x} ${y + s}H${x + s}`, "#fff", 2)).join("") : "") +
-    (v === "hush" ? L(C(32, 32, 20.5), "#fff", 1.6, .8, ' stroke-dasharray="3 4"') : "") + Sp(10, 12, 3.6) + Sp(55, 50, 3),
-  _sign = (m, v) => {
+const _sign = (m, v) => {
     const post = S(R(29, 34, 6, 28, 3), P.white, { a: [2, 0], b: 0, inner: fill("M29 41L35 37V42L29 46Z M29 51L35 47V52L29 56Z", INK, .85) });
     let face;
     if (v === "swirl") face = L("M32 22a2 2 0 0 1 4 0a4 4 0 0 1 -8 0a6 6 0 0 1 12 0a8 8 0 0 1 -16 0a10 10 0 0 1 20 0a12 12 0 0 1 -24 0a14 14 0 0 1 28 0", m.b, 4.2);
@@ -2117,6 +1970,519 @@ const fuzz = (cx, cy, rx, ry, n, d) => {
 };
 
 /* ------------------------------------------------------------------ */
+/* Season gear (s2 onwards, added at runtime by game.js)                 */
+/* Every season issues a Walking Pole, a Trail Jacket and a Route Map;   */
+/* the season's name picks an emblem (tag, patch, map pin) and a colour. */
+/* ------------------------------------------------------------------ */
+const ring2 = (cx, cy, r, col, w) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${INK}" stroke-width="${w + 2.4}"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="${w}"/>`;
+const street = (extra) => L("M0 7.5V-2", INK, 3.6) + L("M0 7.5V-2", P.dmetal.b, 1.6) + F("M-4.2 -2H4.2L2.6 -7H-2.6Z", "#fff3a0", 1.3) + F(R(-5, -3, 10, 1.8, .8), P.dmetal.b, 1.1) + (extra || "");
+Object.assign(EMB, {
+  rung: () => TL("M-4 -3.5H4M-4 .5H4M-4 4.5H4", P.wood.h, 1.6) + TL("M-4 -7.5V7.5M4 -7.5V7.5", P.wood.b, 2),
+  drop: () => F(drop(0, -1.2, 1.55), T.cyan.b, 1.5) + Gl(-1.8, 1.4, .9, 1.8, 20, .9),
+  mushroom: () => F("M-2.6 0H2.6L3 6.5Q0 7.8 -3 6.5Z", "#f3e3c3", 1.4) + F("M-7.5 .5C-7.5 -5 -3.6 -7.5 0 -7.5C3.6 -7.5 7.5 -5 7.5 .5Z", T.red.b, 1.5) + fill(C(-3.6, -2.6, 1.2) + C(1, -5, 1.1) + C(3.9, -1.6, 1), "#fff"),
+  anchor: () => ring2(0, -5.6, 1.9, P.dmetal.b, 1.4) + TL("M0 -3.6V6.5M-6 2.5C-5 7.2 5 7.2 6 2.5M-3.4 -1.4H3.4", P.dmetal.b, 1.7),
+  tide: () => F("M-7.5 4.2Q-5 2.7 -2.5 4.2T2.5 4.2T7.5 4.2V7.5H-7.5Z", T.cyan.b, 1.3) + F(R(-2, -7.5, 4, 13, .8), "#fff", 1.3) + L("M-2 -4.5H.6M-2 -1.5H.6M-2 1.5H.6", T.red.b, 1.1),
+  copy: () => F(R(-6.5, -7, 9, 11.5, 1), "#fff", 1.4) + F(R(-2.5, -4.5, 9, 11.5, 1), "#fff", 1.4) + L("M-.5 -1.5H4.5M-.5 1H3", INK, 1, .5) + L("M0 3.6L4.4 7M4.4 3.6L0 7", T.red.b, 1.6),
+  nugget: () => F("M-6 2C-7 -2 -4 -6 0 -6C4 -6 7 -3 6.5 1C6 5 2 6.5 -1 6C-4 5.5 -5.5 4.5 -6 2Z", P.gold.b, 1.5) + L("M-4 -1C-3 -3.6 -1 -4.4 1 -4.2", P.gold.h, 1.4) + fill(C(2.4, 2, 1) + C(-2, 3, .8), P.gold.s) + Sp(5, -6, 2.6),
+  ark: () => F("M-4.4 1V-3L0 -6.4L4.4 -3V1Z", T.tan.b, 1.3) + F("M-7.5 1H7.5L5 6.5H-5Z", P.wood.b, 1.4) + fill(C(-1.8, -2, .9) + C(1.8, -2, .9), INK),
+  whirl: () => L("M0 0a1.4 1.4 0 0 1 2.8 0a2.8 2.8 0 0 1 -5.6 0a4.2 4.2 0 0 1 8.4 0a5.6 5.6 0 0 1 -11.2 0", INK, 3.6) + L("M0 0a1.4 1.4 0 0 1 2.8 0a2.8 2.8 0 0 1 -5.6 0a4.2 4.2 0 0 1 8.4 0a5.6 5.6 0 0 1 -11.2 0", T.blue.b, 1.6),
+  lanternout: () => L("M0 -4.4C-2 -6 2 -7 0 -8.6", "#9aa3b8", 1.4) + F(R(-4, -2, 8, 8, 1.2), "#3a4160", 1.3) + F(R(-5, -3.6, 10, 2.2, 1), P.dmetal.b, 1.1) + F(R(-5, 5.4, 10, 2.2, 1), P.dmetal.b, 1.1) + L("M-1.6 -.4V4", "#5f6b98", 1),
+  lights: () => L("M-8 -5Q0 1 8 -5", INK, 1.2) + [[-5.5, -2.6, T.red.b], [-1.8, -1.2, T.yellow.b], [1.8, -1.2, T.green.b], [5.5, -2.6, T.cyan.b]].map(([x, y, c]) => F(E(x, y + 3, 1.7, 2.4), c, 1.1)).join(""),
+  office: () => L("M-2.5 -3V-5.6H2.5V-3", INK, 1.6) + F(R(-7.5, -3, 15, 10, 1.8), T.brown.b, 1.4) + L("M-7.5 1H7.5", INK, 1, .5) + F(R(-1.3, -.2, 2.6, 2.4, .4), P.gold.b, 1),
+  iou: () => F(R(-7.5, -4.5, 15, 9, 1), "#fff", 1.4) + Tx(0, 2.1, "IOU", 5.4, T.red.s),
+  horns: () => TL("M-2 5C-5.4 3 -7.4 -2 -5.4 -7.5M2 5C5.4 3 7.4 -2 5.4 -7.5", "#eadcb8", 2.4) + L("M-6.6 -1.6L-4.6 -2.4M-6.8 1.4L-4.4 .4M6.6 -1.6L4.6 -2.4M6.8 1.4L4.4 .4", "#a8906a", .9),
+  boot: () => F("M-4 -7.5H3V2C3 3 4 3.5 6 4C7.6 4.6 7.6 7.5 6 7.5H-4Z", T.green.b, 1.5) + L("M-4 -4.5H3", INK, 1, .5) + fill(R(-4, 6, 11.4, 1.5, 0), INK, .55),
+  sleep: () => F(crescent(-1.4, 1, 6.2), T.yellow.b, 1.4) + Tx(5, -2.4, "z", 6.4, "#4a5479"),
+  updown: () => F("M-3 -7.5H3V0H6.5L0 7.5L-6.5 0H-3Z", T.red.b, 1.4) + Tx(0, -1.8, "UP", 4.2, "#fff"),
+  notes: () => fill(E(-4.6, 4.6, 2.6, 1.9) + E(3.6, 3.1, 2.6, 1.9), INK) + L("M-2.2 4.2V-5.4M6 2.8V-6.8", INK, 1.5) + L("M-2.2 -5.4L6 -6.8", INK, 2.6),
+  swap: () => L("M-2 -8.4V-7M-8.4 -1.5H-7M-6.6 -6.1L-5.6 -5.1M2.6 -6.1L1.6 -5.1", T.orange.b, 1.4) + F(C(-2, -1.5, 4.4), T.yellow.b, 1.4) + F(cloudD(2.4, 2.6, .44), "#fff", 1.3),
+  hourgone: () => F(C(0, 0, 7), "#fff", 1.5) + fill("M0 0L0 -5.6A5.6 5.6 0 0 1 4.85 -2.8Z", "#22346a") + L("M0 0L-3.4 1.8M0 0L-1.6 -4", INK, 1.4),
+  fish: () => F("M4.5 0L8 -4.2V4.2Z", T.blue.b, 1.4) + F("M-7.5 0C-4.5 -5 3 -5 5.2 0C3 5 -4.5 5 -7.5 0Z", T.blue.b, 1.4) + fill(C(-3.8, -1, 1), INK) + L("M-1 -3C0 -1 0 1 -1 3", T.blue.h, 1),
+  lamp2: () => street(Tx(5, 7, "2", 6.4, T.red.s)),
+  lampLast: () => L("M-7 -6.4L-5 -5.4M7 -6.4L5 -5.4M0 -9.6V-8.4", T.orange.b, 1.4) + street(),
+  underlamp: () => fill("M-2.6 -2H2.6L7.5 7.5H-7.5Z", "#fff3a0", .7) + street(),
+  sign: () => L("M-1 7.5V-6.5", INK, 3.6) + L("M-1 7.5V-6.5", P.wood.b, 1.6) + F("M-6.5 -6.6H4L7.5 -4.4L4 -2.2H-6.5Z", P.wood.h, 1.3) + F("M-6.5 -.6H3.5V3.8H-6.5L-8 1.6Z", P.wood.h, 1.3),
+  ticks: () => F(R(-6, -7.5, 12, 15, 1.2), "#fff", 1.4) + L("M-3.6 -3.6L-2.4 -2.4L-.4 -4.9M-3.6 .9L-2.4 2.1L-.4 -.4M-3.6 5.3L-2.4 6.5L-.4 4", T.green.s, 1.3) + L("M1.6 -3.6H4M1.6 .9H4M1.6 5.3H4", INK, 1.1, .5),
+  nobody: () => `<g fill="none" stroke="${INK}" stroke-width="1.4" stroke-dasharray="1.6 1.3"><circle cx="0" cy="-4.2" r="2.8"/><path d="M-6 7.5C-6 1.5 -3 -.4 0 -.4C3 -.4 6 1.5 6 7.5"/></g>`,
+  sofa: () => F("M-6.5 -1.6C-6.5 -6.4 6.5 -6.4 6.5 -1.6V2H-6.5Z", T.rose.b, 1.4) + F(R(-6, .2, 12, 4, 1), T.rose.h, 1.3) + F(R(-8.4, -1.4, 3, 6.6, 1.2), T.rose.s, 1.2) + F(R(5.4, -1.4, 3, 6.6, 1.2), T.rose.s, 1.2) + L("M-6 5.4V7.4M6 5.4V7.4", INK, 1.4),
+  glass: () => F(R(-6.5, -7.5, 13, 15, 1), P.glass.b, 1.4) + L("M-1 -7.5L.5 -2L-3 1L-1 7.5M.5 -2L6.5 -.6M-3 1L-6.5 2.4", INK, 1, .7) + L("M-4.4 -5L-2.4 -6", "#fff", 1.2),
+  stitch: () => L("M-7.5 6.5H7.5", INK, 1.3, .8, ' stroke-dasharray="2.2 1.4"') + L("M-5 4C-2 -1 1 3 4.5 -3.5", T.red.b, 1.5) + G("rotate(40)", F(R(-1, -8, 2, 13, 1), P.metal.b, 1.1) + fill(E(0, -5.6, .45, 1.2), INK)),
+  hand: () => F("M-4.6 7.5V1L-6.6 -2.6C-7.2 -3.8 -5.8 -4.8 -4.9 -3.8L-3.6 -2.3V-6.4C-3.6 -7.7 -1.8 -7.7 -1.8 -6.4V-7.5C-1.8 -8.8 0 -8.8 0 -7.5V-7C0 -8.3 1.8 -8.3 1.8 -7V-5.8C1.8 -7 3.6 -7 3.6 -5.8V2.4C3.6 5 2.4 7.5 0 7.5Z", P.skin.b, 1.3) + L("M-1.8 -6.4V-1.6M0 -7.2V-1.6M1.8 -6.4V-1.6", P.skin.s, .9),
+  ballot: () => G("rotate(-10)", F(R(-3.6, -8.6, 7, 8.4, .6), "#fff", 1.2) + L("M-1.6 -6.4L1.6 -3.2M1.6 -6.4L-1.6 -3.2", T.red.b, 1.3)) + F(R(-7, -1, 14, 8.6, 1.2), T.navy.b, 1.4) + L("M-4 1.4H4", INK, 1.6) + fill(R(-3, 3.6, 6, 2, .5), "#fff", .8),
+  flake: () => TL("M0 -7V7M-6 -3.5L6 3.5M-6 3.5L6 -3.5", "#dff4ff", 1.4) + L("M-1.6 -5.4L0 -4L1.6 -5.4M-1.6 5.4L0 4L1.6 5.4", "#dff4ff", 1.1),
+});
+const SEASON_THEMES = [
+  ["first rung", "rung", "tan"], ["rising damp", "drop", "teal"], ["spore", "mushroom", "red"], ["long hush", "shush", "purple"],
+  ["moorings", "anchor", "navy"], ["low water", "tide", "sky"], ["copy err", "copy", "slate"], ["gold rush", "nugget", "gold"],
+  ["two by two", "ark", "brown"], ["undertow", "whirl", "blue"], ["lanterns out", "lanternout", "coal"], ["halfway rung", "rung", "orange"],
+  ["hundred lights", "lights", "yellow"], ["head office", "office", "steel"], ["old debts", "iou", "olive"], ["krampus", "horns", "maroon"],
+  ["boot fair", "boot", "green"], ["sleepers", "sleep", "void"], ["wrong way", "updown", "pink"], ["chorus", "notes", "plum"],
+  ["weather swap", "swap", "lime"], ["missing hour", "hourgone", "mustard"], ["deep water", "fish", "cyan"], ["second lamp", "lamp2", "copper"],
+  ["kit's way", "sign", "khaki"], ["register", "ticks", "rose"], ["nobody left", "nobody", "stone"], ["long sofa", "sofa", "camel"],
+  ["glass floor", "glass", "ice"], ["stitch", "stitch", "tweed"], ["under the lamp", "underlamp", "bronze"], ["all hands", "hand", "grass"],
+  ["stillness", "flake", "white"], ["last rungs", "rung", "rust"], ["the vote", "ballot", "black"], ["last lamp", "lampLast", "gold"],
+  ["frozen|frost|ice|snow", "flake", "ice"], ["lamp|lantern|light", "underlamp", "yellow"], ["water|sea|tide|shore", "fish", "teal"], ["ladder", "rung", "tan"],
+];
+// A luggage tag, map pin or chest patch carrying a season emblem.
+const tag = (x, y, e) => G(`rotate(-14 ${x} ${y})`, S(`M${x - 9} ${y - 5}L${x - 5} ${y - 9}H${x + 9}V${y + 9}H${x - 9}Z`, P.paper, { a: 1.6, b: 0, sw: 2 }) + F(C(x - 5.4, y - 5.4, 1.4), P.metal.b, 1.1)) + emb(e, x + 1.2, y + 1.2, .78);
+const pin = (x, y, e) => S(`M${x} ${y + 15}C${x - 3} ${y + 10} ${x - 10} ${y + 6} ${x - 10} ${y}A10 10 0 1 1 ${x + 10} ${y}C${x + 10} ${y + 6} ${x + 3} ${y + 10} ${x} ${y + 15}Z`, T.red, { a: 2, b: 1.4 }) + F(C(x, y, 7.4), "#fff", 1.8) + emb(e, x, y, .82);
+const patch = (x, y, e, q) => S(C(x, y, 7.2), q || P.white, { a: 1, b: 0, sw: 1.8 }) + `<circle cx="${x}" cy="${y}" r="5.6" fill="none" stroke="${INK}" stroke-width=".9" stroke-dasharray="1.2 1.2" opacity=".5"/>` + emb(e, x, y, .66);
+
+Object.assign(M, {
+  // Trekking pole: wrist strap, grip, coloured upper section, flick-lock, alloy lower section, basket, carbide tip. v = 0 cork, 1 foam + snow basket, 2 derby handle.
+  tpole: (m, v, o) => {
+    v = +v || 0;
+    const grip = v === 1 ? P.rubber : pal("#c9945a", "#956232", "#ecc08a");
+    const top = v === 2
+      ? TL("M27 9C20 9 19 21 28 19", m.b, 3) + S("M18 6C18 2 22 1 32 2C42 1 46 3 46 7C46 10 42 10 38 10V22H26V10C21 10 18 9 18 6Z", P.dwood, { a: [2, 2], b: 1.4, inner: L("M22 5H42", P.dwood.h, 1.4, .6) })
+      : TL("M27 6C18 7 17 21 27.5 18", m.b, 3) + S(R(25.5, 2, 13, 20, 5), grip, { a: [2, 0], b: [1.4, 0], inner: L("M24 8H40M24 11.5H40M24 15H40", grip.s, 1.4, .8) + (v === 1 ? fill(R(24, 0, 16, 5, 0), m.b) : "") });
+    const basket = v === 1
+      ? S(E(32, 52, 10.5, 3.4), P.rubber, { a: [0, 1.2], b: 0, inner: L("M23 52H41", "#8c99c8", 1, .6) }) + F(E(32, 51.4, 3, 1), "#55607f", 1.2)
+      : S(E(32, 52, 7, 2.4), P.dark, { a: 0, b: 0, sw: 2 });
+    return diag(
+      S(R(29.2, 38, 5.6, 16, 1.6), P.metal, { a: [1.6, 0], b: [1, 0], hw: 1.2 }) +
+      S(R(28.4, 21, 7.2, 18, 2), m, { a: [2, 0], b: [1.2, 0], inner: fill(R(28, 30, 8, 2.4, 0), "#fff", .85) }) +
+      S(R(27.2, 20, 9.6, 3.4, 1.2), P.dark, { a: 0, b: 0, sw: 2 }) +
+      S(R(27, 36, 10, 4.6, 1.5), P.dark, { a: 0, b: 0, sw: 2 }) + S("M37 35.4L42 37.6V39.4L37 40.4Z", m, { a: 0, b: 0, sw: 1.8 }) +
+      top + basket + S("M30 54H34L33.2 59.5L32 63L30.8 59.5Z", P.dmetal, { a: 0, b: 0, sw: 1.8 }), 40) +
+    L("M30 37C36 40 40 42 44 44", INK, 1.6) + tag(49, 48, o.emb || "rung");
+  },
+
+  // Trail jacket: hooded shell with a colour block (v: 0 yoke, 1 chest band, 2 two-tone hem) and the season patch on the chest.
+  trailjacket: (m, v, o) => {
+    v = +v || 0;
+    const b = tone(o.block) || dk(m);
+    const blk = v === 1 ? "M0 28L64 20V27L0 35Z" : v === 2 ? "M0 41H64V64H0Z" : "M0 0H64V20C50 23 14 23 0 20Z";
+    return garment(m, "shell", { pk: "slant", ins: fill(blk, b.b) + fill(v === 1 ? "M0 35L64 27V28.4L0 36.4Z" : "M0 0H0Z", "#fff", .8), add: patch(41, 27, o.emb || "rung") });
+  },
+
+  // Route map: three folded panels, contours, a dashed route and a big pin carrying the season emblem.
+  routemap: (m, v, o) => {
+    v = +v || 0;
+    const st = [[11, 50], [12, 46], [10, 42]][v % 3], route = `M${st[0]} ${st[1]}` + ["C17 44 24 47 28 38C32 30 38 30 42 26", "C20 50 24 40 30 42C36 44 38 32 42 28", "C16 38 20 46 27 44C34 42 33 30 42 27"][v % 3];
+    return S("M5 16L22 11V53L5 58Z", P.paper, { a: [0, 2], b: [1.4, 1.4], inner: fill("M0 0H64V22L5 22Z", m.b) + fill("M5 21.5L22 16.5V18L5 23Z", "#fff", .9) }) +
+      S("M22 11L41 16V58L22 53Z", dk(P.paper), { a: [0, 2], b: 0, inner: L(E(31, 40, 6, 4) + E(31, 40, 2.8, 1.8), T.brown.b, 1.2, .7) }) +
+      S("M41 16L59 11V53L41 58Z", P.paper, { a: [0, 2], b: [1.4, 1.4], inner: L(E(51, 42, 6, 4.4) + E(51, 42, 3, 2), T.brown.b, 1.2, .7) + fill(E(50, 26, 5, 3), T.cyan.b, .8) }) +
+      L("M5 36C10 33 15 38 22 34C28 31 34 35 41 33C47 31 53 34 59 31", T.cyan.b, 2.2, .85) +
+      F(E(13, 30, 3.4, 2.4), T.green.b, 1.4, .95) +
+      `<path d="${route}" fill="none" stroke="#ff4d5e" stroke-width="2.4" stroke-dasharray="3 3" stroke-linecap="round"/>` +
+      F(C(st[0], st[1], 2.2), "#fff", 1.6) + pin(46, 14, o.emb || "rung");
+  },
+
+  // --- named season pieces ---
+  icicle: (m) => diag(
+    S("M32 2C35 14 39 28 40.5 40C41 44 39 46 36 46L34.6 50L32.6 46.6L30.4 50L29 46C25 46 23 44 23.5 40C25 28 29 14 32 2Z", T.ice, { a: [3, 0], b: [1.8, 0], inner: L("M30 12C29 22 28 32 28 42", "#fff", 1.8, .9) + L("M35 18C36 26 37 34 37 40", T.ice.s, 1.4, .7) }) +
+    S(R(27, 47, 10, 15, 3), T.brown, { a: [2, 0], b: [1.2, 0], inner: L("M26 50L38 53M26 54L38 57M26 58L38 61", T.brown.s, 1.6) }) +
+    G("rotate(8 38 28)", S(R(31, 22, 15, 11, 1), P.paper, { a: [1.2, 1.2], b: 0, sw: 1.8, inner: Tx(36, 30.6, "£", 7.4, T.red.s) + L("M40 26H44M40 29H44", INK, 1, .5) }) + F(C(33.6, 24.6, 1.2), P.metal.b, 1)), 38) + Sp(52, 50, 3.2) + Sp(10, 14, 2.4),
+
+  snowcoat: (m) => garment(m, "parka", { pat: "quilt", pk: "flap", add:
+    F("M6 16C9 9 16 9 23 6.5L24 10C19 13 13 14 9 19Z", "#fff", 2) + F("M58 16C55 9 48 9 41 6.5L40 10C45 13 51 14 55 19Z", "#fff", 2) +
+    F("M17 58L19 62L21 58Z M30 60L32 63.6L34 60Z M43 58L45 62L47 58Z", "#e8f8ff", 1.4) + at(52, 50, .8, EMB.flake()) }),
+
+  thermos: (m) =>
+    OV.steam() + TL("M45 26C53 26 53 44 45 44", P.dark.b, 3) +
+    S(R(19, 22, 26, 38, 5), m, { a: [4, 1.4], b: [1.6, 1.2], inner: L("M22 28C21.4 38 21.4 48 22 56", m.h, 2, .7) + fill(R(19, 34, 26, 14, 0), P.white.b) + fill(R(19, 34, 26, 2, 0), m.s, .6) }) +
+    emb("flake", 32, 41, .85) +
+    S(R(18, 18, 28, 6, 2), P.dark, { a: [0, 1.4], b: 0, sw: 2.2 }) +
+    S("M19 9H45L44 19H20Z", P.metal, { a: [3, 0], b: [1.4, 0], inner: L("M19 12H45", P.metal.s, 1.2, .7) }) + S(E(32, 9, 13, 3), P.metal, { a: 0, b: 0, sw: 2.2, inner: fill(E(32, 9.6, 10.4, 2), "#9fd9c8") }),
+
+  lanternpole: (m) =>
+    rod("M10 62L44 9C46 6 51 6 52 10C53 13 51 16 48 16", P.dwood, 5.2) +
+    L("M48 16V22", INK, 1.8) + glow(45, 36, 17, "#7fffe0", .55) +
+    S(R(40, 22, 10, 3.2, 1.4), P.dmetal, { a: 0, b: 0, sw: 1.8 }) +
+    S("M38 25H52L50 45H40Z", pal("#2a3a55", "#1a2438", "#4a6080"), { a: 0, b: 0, sw: 2.4, inner: fill("M40.4 27H49.6L48.4 43H41.6Z", "#c9fff2") + S(drop(45, 37, 1.25), pal("#5fffd2", "#20c9a8", "#ffffff"), { a: .8, b: 0, sw: 1.4, inner: F(E(43.6, 38, .7, 1), INK, .1) + F(E(46.4, 38, .7, 1), INK, .1) }) + L("M45 27V43", INK, 1.2, .5) }) +
+    S(R(37, 44, 16, 4, 1.6), P.dmetal, { a: 0, b: 0, sw: 1.8 }) + Sp(56, 30, 3) + Sp(30, 30, 2.2),
+
+  oilskin: (m) => garment(m, "coat", { close: "studs", collar: "cord", pk: "flap", pat2: "drops", add:
+    G("rotate(-8 25 44)", F(R(18, 37, 13, 13, 0), "#ff2bd6", 2) + fill("M18 37h3.25v3.25h-3.25Z M24.5 37h3.25v3.25h-3.25Z M21.25 40.25h3.25v3.25h-3.25Z M27.75 40.25h3.25v3.25h-3.25Z M18 43.5h3.25v3.25h-3.25Z M24.5 43.5h3.25v3.25h-3.25Z M21.25 46.75h3.25v3.25h-3.25Z M27.75 46.75h3.25v3.25h-3.25Z", "#120a20")) }),
+
+  handbell: (m) => rot(
+    S(R(28.5, 2, 7, 18, 3.4), P.dwood, { a: [2, 0], b: [1.2, 0] }) + S(R(26, 18, 12, 4, 1.6), P.gold, { a: 0, b: 0, sw: 2 }) +
+    S(C(32, 57, 4), P.dmetal, { a: 1, b: 0, sw: 2 }) +
+    S("M32 21C24 21 21 28 21 36C21 44 17 48 12 51H52C47 48 43 44 43 36C43 28 40 21 32 21Z", P.gold, { a: [4, 2], b: 2.4, inner: L("M18 44H46", P.gold.s, 2, .6) }) +
+    S(R(10, 49.5, 44, 6, 3), dk(P.gold), { a: [0, 1.6], b: 0 }) + Gl(26, 31, 2, 5, 14, .8), -18) +
+    L("M51 18C55 22 55 30 52 34M56 13C61 20 61 32 57 38", INK, 2.4) + L("M8 30C5 34 5 40 8 44", INK, 2.2, .6),
+
+  rung: (m) => diag(
+    S("M14 4H50L48 8L51 11L47 13H17L13 11L16 8Z", P.wood, { a: [0, 2.4], b: [0, 1.4], inner: L("M18 7H44M20 10H40", P.wood.s, 1.2, .6) }) +
+    S("M14 52H50L47 55L51 57L48 61H16L13 58L17 55Z", P.wood, { a: [0, 2.4], b: [0, 1.4], inner: L("M18 56H44", P.wood.s, 1.2, .6) }) +
+    S(R(26.5, 12, 11, 41, 5), P.wood, { a: [3, 0], b: [1.6, 0], inner: L("M30 16C29.4 26 30.6 36 30 50M35 20V30", P.wood.s, 1.3, .7) + fill(R(26, 26, 12, 13, 0), "#fff", .9) + Tx(32, 36.4, "40", 8, T.red.s) }), 45),
+
+  upholstery: (m) => {
+    const d = "M7 9H57V44L52 47L55 51L49 53L50 58L43 56L40 60L35 56L30 59L27 55H7Z";
+    let tufts = "", btn = "";
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { const x = 13 + c * 12.6 + (r % 2) * 6.3, y = 16 + r * 11; if (x < 56) btn += `<circle cx="${f(x)}" cy="${y}" r="2" fill="${m.s}" stroke="${INK}" stroke-width="1.2"/>`; }
+    for (let k = -4; k < 8; k++) tufts += `M${k * 12.6} 5L${k * 12.6 + 56} 61M${k * 12.6 + 56} 5L${k * 12.6} 61`;
+    return S(d, m, { a: [3, 3], b: 2, inner: L(tufts, m.s, 1.4, .75) + L(tufts, m.h, .8, .4, ' transform="translate(-1 -1)"') + btn +
+      fill("M40 22H57V27H44Z M46 33H57V36H48Z", "#3cf2ff", .85) + fill("M38 27H57V30H41Z", "#ff3cc8", .85) + fill(R(48, 40, 4, 4, 0), "#3cf2ff") + fill(R(52, 14, 3, 3, 0), "#ff3cc8") }) +
+      [12, 20, 28, 36, 44, 52].map((x) => F(C(x, 9, 1.8), P.gold.b, 1.2)).join("") + F(R(58, 30, 4, 4, 0), "#3cf2ff", 1.2) + F(R(59, 20, 3, 3, 0), "#ff3cc8", 1);
+  },
+
+  slotcoin: (m) =>
+    S(R(5, 38, 54, 22, 4), P.dmetal, { a: [0, 2.4], b: [0, 1.4], inner: dots([[10, 54], [54, 54]], 1.4, P.metal.b, 1) }) +
+    S(R(12, 40, 40, 6, 3), pal("#151a2e", "#0b1024", "#2a3150"), { a: 0, b: 0, sw: 2 }) + glow(32, 42, 12, "#ffd25a", .5) +
+    S(C(32, 24, 19), P.gold, { a: 3, b: 2.2, inner: `<circle cx="32" cy="24" r="14.6" fill="none" stroke="${P.gold.s}" stroke-width="1.6"/>` + fill(R(29.8, 13.6, 4.4, 7.4, .8) + R(21.4, 26, 7.4, 4.4, .8) + R(35.2, 26, 7.4, 4.4, .8), INK) }) +
+    S("M5 43H59V56Q59 60 55 60H9Q5 60 5 56Z", P.dmetal, { a: [0, 2], b: [0, 1.2], inner: fill(R(5, 43, 54, 2.4, 0), "#0b1024", .8) + dots([[10, 53], [54, 53]], 1.4, P.metal.b, 1) }) +
+    Gl(22, 15, 2, 5, 40, .8) + Sp(56, 10, 3.4) + Sp(9, 20, 2.4),
+});
+
+// Season items have no row in ITEM_ART: the name picks the object, the season's name picks emblem and colour.
+// Any future season piece falls through the same keyword table, so it is never drawn as a generic blade or gem.
+const SEASON_OBJECTS = [
+  ["thermos|flask|\\btea\\b|cocoa", "thermos", "teal"], ["lantern", "lanternpole", ""], ["bell", "handbell", ""], ["rung|ladder", "rung", ""],
+  ["coin|token|penny|socket", "slotcoin", ""], ["icicle|spike|shard", "icicle", ""], ["upholster|cushion|throne|chair", "upholstery", "maroon"],
+  ["oilskin|sou.?wester|waterproof", "oilskin", "yellow"], ["snow|shelter|parka|duvet", "snowcoat", "navy"],
+  ["map|chart|atlas|guide", "routemap", ""], ["pole|staff|stick|cane|crook|spear|lance", "tpole", ""],
+  ["coat|jacket|cloak|mantle|vest|anorak|armour|kit\\b", "trailjacket", ""],
+];
+const SLOT_SEASON = { weapon: "tpole", armour: "trailjacket", trinket: "routemap" };
+function seasonResolve(item) {
+  const id = typeof item === "string" ? item : item.id, n = +id.slice(1).split("-")[0] || 0;
+  const name = (typeof item === "object" && item.name) || "", slot = (typeof item === "object" && item.slot) || id.split("-")[1];
+  const th = SEASON_THEMES.find(([k]) => new RegExp(k, "i").test(name)) || SEASON_THEMES[(n * 7) % 36];
+  const ob = /(walking pole|trail jacket|route map)$/i.test(name) ? null : SEASON_OBJECTS.find(([k]) => new RegExp(k, "i").test(name));
+  const motif = ob ? ob[1] : SLOT_SEASON[slot] || "routemap";
+  return { motif, tint: (ob && ob[2]) || th[2], variant: String(n % 3), o: { emb: th[1], block: n % 2 ? "white" : "" }, ov: [] };
+}
+
+/* ------------------------------------------------------------------ */
+/* Redraws after the art review: each one keeps the named detail big    */
+/* ------------------------------------------------------------------ */
+// A gear-toothed ellipse (enigma rotor thumbwheel).
+const gearE = (cx, cy, rx, ry, n, d) => {
+  const pts = [];
+  for (let i = 0; i < n * 4; i++) { const a = (i / (n * 4)) * Math.PI * 2, k = i % 4 < 2 ? 1 : 1 - d; pts.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * k]); }
+  return poly(pts);
+};
+// Annular sector, for arch stones and rings. Angles in degrees, 0 = east, clockwise (SVG y-down).
+const sector = (cx, cy, r0, r1, a0, a1) => {
+  const p = (r, a) => `${f(cx + Math.cos(a * Math.PI / 180) * r)} ${f(cy + Math.sin(a * Math.PI / 180) * r)}`;
+  return `M${p(r1, a0)}A${r1} ${r1} 0 0 1 ${p(r1, a1)}L${p(r0, a1)}A${r0} ${r0} 0 0 0 ${p(r0, a0)}Z`;
+};
+// Shaded hose: ink, body, ribs, glint.
+const hose = (d, q, w) => L(d, INK, w + 3) + L(d, q.b, w) + L(d, q.s, w, .9, ` stroke-dasharray="1.2 2.2" stroke-linecap="butt"`) + L(d, q.h, 1.1, .7, ` transform="translate(-1 -1)"`);
+// A chunky outlined chain from (x0,y0) to (x1,y1).
+const chainLinks = (x0, y0, x1, y1, n, q) => {
+  let s = ""; const dx = (x1 - x0) / n, dy = (y1 - y0) / n, a = Math.atan2(dy, dx) * 180 / Math.PI;
+  for (let i = 0; i < n; i++) {
+    const x = f(x0 + dx * (i + .5)), y = f(y0 + dy * (i + .5)), rx = f(Math.hypot(dx, dy) * .62);
+    s += i % 2 ? G(`rotate(${f(a)} ${x} ${y})`, S(R(x - rx, y - 1.8, rx * 2, 3.6, 1.8), q, { a: 0, b: 0, sw: 2 }))
+      : `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="3.6" transform="rotate(${f(a)} ${x} ${y})" fill="none" stroke="${INK}" stroke-width="5.4"/><ellipse cx="${x}" cy="${y}" rx="${rx}" ry="3.6" transform="rotate(${f(a)} ${x} ${y})" fill="none" stroke="${q.b}" stroke-width="2.4"/>`;
+  }
+  return s;
+};
+// Bust for the auras: shoulders, neck, head and hair. h = hair colour.
+const bust = (m, h) =>
+  S("M9 64C9 52 18 46 32 46C46 46 55 52 55 64Z", m, { a: [3, 2], b: 1.6 }) + S(R(27.5, 38, 9, 10, 3), P.skin, { a: [1.6, 0], b: 0, sw: 2 }) +
+  S(C(32, 29, 13.5), P.skin, { a: 2.4, b: 1.6 }) +
+  S("M18.6 30C17 18 23 14.6 32 14.6C41 14.6 47 18 45.4 30C44 24 40 21 34 21.6C30 22 26 21 23 19.6C21 22 19.6 25 18.6 30Z", h, { a: [1.6, 1.6], b: 1.2, sw: 2.2 });
+const haloRing = (m) => glow(32, 30, 32, m.h, .5) + `<circle cx="32" cy="29" r="22" fill="none" stroke="${m.h}" stroke-width="6" opacity=".35"/><circle cx="32" cy="29" r="22" fill="none" stroke="#fff" stroke-width="1.8" opacity=".9"/>` +
+  L([0, 45, 90, 135, 180, 225, 270, 315].map((a) => { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); return `M${f(32 + c * 25)} ${f(29 + s * 25)}L${f(32 + c * 29)} ${f(29 + s * 29)}`; }).join(""), m.h, 2, .9);
+
+Object.assign(M, {
+  // Bag for Life with the tins standing proud of the top.
+  sack: (m) => {
+    const tin = (x, y, a, q) => G(`rotate(${a} ${x + 7} ${y + 12})`, S(R(x, y + 2, 14, 24, 2), P.metal, { a: [2.6, 0], b: [1.4, 0], inner: fill(R(x, y + 8, 14, 11, 0), q.b) + fill(R(x, y + 8, 14, 2, 0), q.h, .8) + L(`M${x} ${y + 5}H${x + 14}M${x} ${y + 22}H${x + 14}`, P.metal.s, 1.2) }) +
+      S(E(x + 7, y + 2.4, 7, 2.4), P.metal, { a: 0, b: 0, sw: 2, inner: fill(E(x + 7, y + 2.6, 5, 1.5), P.metal.s, .6) }) + F(E(x + 9.6, y + 2.2, 2, 1), P.metal.h, 1.1));
+    return TL("M17 30C17 13 46 13 46 30", dk(m).b, 3.4) +
+      tin(31, 3, 12, T.red) + tin(13, 6, -14, T.yellow) + tin(22, 1, -2, T.blue) +
+      S("M48 28L55 31L52 58L46 60Z", dk(m), { a: 1.6, b: 1 }) +
+      S("M9 27H49L46 60H12Z", m, { a: [4, 3], inner: L("M9 32H49", m.s, 2, .5) }) +
+      S(C(28.5, 45, 7.5), P.white, { a: 1.6, b: 1.2, sw: 2 }) + F("M28.5 49C25 46 24 43.6 25.4 42C26.6 40.8 28 41.4 28.5 42.6C29 41.4 30.4 40.8 31.6 42C33 43.6 32 46 28.5 49Z", m.b, 1.6) +
+      TL("M13 29C13 10 41 10 41 29", m.s, 3.4);
+  },
+
+  // Spork: a real spoon bowl with three short tines cut into its tip.
+  spork: (m) => rot(
+    S("M28.8 28H35.2L35.8 57Q35.8 61 32 61Q28.2 61 28.2 57Z", m, { a: [2.4, 0], b: [1.4, 0], hw: 1.4 }) + `<circle cx="32" cy="56" r="1.7" fill="${INK}"/>` +
+    S("M32 33C24 33 20 26 20 18C20 12 21.6 7.4 23.6 4.6H26.4L27.4 9.8H29.8L30.4 3.8H33.6L34.2 9.8H36.6L37.6 4.6H40.4C42.4 7.4 44 12 44 18C44 26 40 33 32 33Z", m, {
+      a: 3, b: 2,
+      inner: S("M32 30C26.6 30 24 25 24 19C24 15.4 25 12.6 26.4 11H37.6C39 12.6 40 15.4 40 19C40 25 37.4 30 32 30Z", dk(m), { a: [-2.4, -2.4], b: 0, sw: 1.4, norim: 1 }) }) +
+    Gl(28, 20, 1.6, 4.4, 0, .85), 45),
+
+  // Protein flapjack: a lumpy oat slab with a bite out of it, half out of its wrapper.
+  bar: (m) => {
+    const top = "M8 27C9 24 12 22 14 21.6C16 19 19 20 20 18C22 15.6 26 17 27 15.6L54 15C56 16 57 18 56 20L44 27C40 28.4 34 26.6 30 28C24 29.4 18 27 14 28.6C12 29.4 9 29 8 27Z";
+    return S("M44 27L56 20V40L45 50Z", dk(P.oat), { a: 1.4, b: 1, inner: [[50, 30], [48, 40], [52, 36]].map(([x, y]) => F(E(x, y, 1.6, 1), P.oat.b, 1, .8)).join("") }) +
+      S("M8 27C12 29.4 18 27 22 28.6C26 30 30 27.6 36 28.4C40 29 42 27.6 44 27L45 50C40 51 36 49.4 30 50.4C24 51.4 18 49.4 12 50.6C10 51 8.4 50 8.4 48Z", P.oat, { a: [0, 3], b: [0, 1.6],
+        inner: [[14, 34], [22, 39], [31, 33], [38, 42], [18, 45], [28, 45], [36, 36], [12, 40]].map(([x, y]) => F(E(x, y, 2.1, 1.3), P.oat.s, 1, .75)).join("") + fill("M8 33Q26 36 45 33V36Q26 39 8 36Z", "#c47a1c", .25) }) +
+      S(top, P.oat, { a: [0, 1.4], b: 0, sw: 2.2, inner: [[16, 23], [24, 21], [33, 20], [41, 19], [48, 18], [29, 24], [37, 24]].map(([x, y]) => F(E(x, y, 2.2, 1.1), P.oat.h, 1, .9)).join("") }) +
+      S("M38 14.8L57 14C59 14 60 16 59 18L57 41L46 51L44 27Z", m, { a: [2, 1], b: 1, inner: fill("M36 22L64 12V18L36 28Z", "#fff", .92) + Tx(52, 22, "PROTEIN", 3.6, m.s, { rot: -22 }) }) +
+      F("M57 14L62 9L64 12L60 17Z", m.h, 1.6) + dots([[10, 56], [17, 58], [25, 56]], 1.3, P.oat.b, 1);
+  },
+
+  // Cloak laid flat, seen from above: hood, collar, clasp at the neck, folds fanning to the hem.
+  cloak: (m, v, o) => {
+    o = o || {};
+    const edge = o.edge === "tatter" ? "M60 52L56 55L54 51L50 56L47 52L43 57L40 53L36 58L32 54L28 58L24 53L21 57L17 52L14 56L10 51L8 55L4 52"
+      : o.edge === "leaf" ? "M60 52Q58 58 53 56Q51 61 46 58Q43 63 38 59Q35 63 32 59Q29 63 26 59Q21 63 18 58Q13 61 11 56Q6 58 4 52"
+        : "M60 52Q32 63 4 52";
+    const d = "M21 9Q32 15 43 9L47 12C52 24 57 38 60 52" + edge.slice(6) + "C7 38 12 24 17 12Z";
+    let inner = L("M26 16L15 54M30 17L26 58M34 17L38 58M38 16L49 54", m.s, 2, .75) + L("M27.5 16L18 52M35.5 16L44 55", m.h, 1.2, .45) + (o.pat ? PAT[o.pat](m, o) : "") + (o.pat2 ? PAT[o.pat2](m, o) : "");
+    if (o.hem) inner += L(edge, tone(o.hem).b, 4.4, null, ' transform="translate(0 -2.2)"');
+    let out = S("M20.5 11C19 5 25 1.5 32 1.5C39 1.5 45 5 43.5 11Q32 17 20.5 11Z", dk(m), { a: [1.6, 1.6], b: 1.2, inner: fill("M25 10C25 6 28 4 32 4C36 4 39 6 39 10Q32 13.4 25 10Z", INK, .35) });
+    out += S(d, m, { a: [4, 2], inner, ink: o.ink });
+    if (o.fur) out += [[19, 12], [22.5, 14.6], [26.5, 16], [30.5, 16.6], [34.5, 16.4], [38.5, 15.4], [42.4, 13.6], [45, 11]].map(([x, y]) => F(C(x, y, 3), "#e9dcc4", 1.4)).join("");
+    else out += S("M21 9Q32 15 43 9L44.6 12Q32 19 19.4 12Z", dk(m), { a: [0, 1.2], b: 0, sw: 2 });
+    out += o.clasp ? F(C(26, 14, 2.4), P.gold.b, 1.4) + F(C(38, 14, 2.4), P.gold.b, 1.4) + L("M26 14Q32 18 38 14", P.gold.b, 1.2) + emb(o.clasp, 32, 17, .82)
+      : L("M26 14Q32 18 38 14", INK, 3) + L("M26 14Q32 18 38 14", P.gold.h, 1.2) + S(C(26, 14, 3.2), P.gold, { a: .8, b: .6, sw: 1.8 }) + S(C(38, 14, 3.2), P.gold, { a: .8, b: .6, sw: 1.8 });
+    if (o.emb) out += emb(o.emb, +o.ex || 40, +o.ey || 44, +o.es || 1);
+    if (o.ghost) out += op(F("M44 62C44 54 47 49 51 49C55 49 58 54 58 62L55.5 60L53 62L50.5 60L48 62L46 60Z", "#e8fbff", 1.8) + fill(C(49.4, 54.6, 1) + C(53.4, 54.6, 1), INK), .85);
+    if (o.tag) out += L("M38 16L47 24", INK, 1.2) + G("rotate(16 50 28)", S("M44 24L47 21H56V33H44Z", P.paper, { a: 1, b: 0, sw: 1.8 }) + Tx(50.6, 30.2, o.tag, 5.2, T.red.s));
+    return out;
+  },
+
+  // Auras: a glowing halo round a head, with the named cue on the face.
+  aura: (m, v) => {
+    let face = "";
+    if (v === "eyes" || v === "void") {
+      const deep = v === "void";
+      face = [26.4, 37.6].map((x) => fill(`M${x - 4.6} 32.2Q${x} ${deep ? 39.6 : 37.6} ${x + 4.6} 32.2Q${x} 35 ${x - 4.6} 32.2Z`, deep ? "#4b2a7a" : "#8a5bb8", .85) +
+        L(`M${x - 4.2} 33.6Q${x} ${deep ? 37.8 : 36.4} ${x + 4.2} 33.6`, "#4b2a7a", 1.2, .9) +
+        F(`M${x - 4} 29.6C${x - 2} 26.4 ${x + 2} 26.4 ${x + 4} 29.6C${x + 2} 32.4 ${x - 2} 32.4 ${x - 4} 29.6Z`, "#fff", 1.4) +
+        (deep ? L(`M${x} 29.6m-1.6 0a1.6 1.6 0 1 0 3.2 0a.9 .9 0 1 0 -1.8 0`, INK, .9) : fill(C(x + (x < 32 ? .8 : -.8), 29.8, 1.2), INK)) +
+        L(`M${x - 3.4} 28.6L${x - 1.6} 29.4M${x + 3.4} 30.6L${x + 1.8} 30`, T.red.b, .8) +
+        fill(`M${x - 4.4} 29.4C${x - 2} 26 ${x + 2} 26 ${x + 4.4} 29.4C${x + 2} 28.2 ${x - 2} 28.2 ${x - 4.4} 29.4Z`, P.skin.s)).join("") +
+        L("M27.6 39.4Q29.8 38.4 32 39.4T36.4 39.4", "#8f4a3a", 1.6);
+    } else if (v === "stars5") {
+      face = L("M23.4 30Q26.4 26.6 29.4 30M34.6 30Q37.6 26.6 40.6 30", INK, 1.8) + F("M26.4 36H37.6Q36.6 41.6 32 41.6Q27.4 41.6 26.4 36Z", "#fff", 1.4) + fill(E(23, 34, 2, 1.2) + E(41, 34, 2, 1.2), "#ff8fa8", .7);
+    } else if (v === "shush") {
+      face = L("M23 27.4L29 26.6M35 26.6L41 25.2", INK, 1.8) + fill(C(27.4, 30.6, 1.3) + C(37.6, 30.6, 1.3), INK) + F(E(32, 37.6, 2.4, 1.6), "#c95a5a", 1.2) +
+        S("M24 48C24 43 27 41 31 41H34C37 41 39 43 39 46C39 50 36 52 32 52C28 52 24 51 24 48Z", P.skin, { a: [1.6, 1.6], b: 1, sw: 2, inner: L("M27 45H36M27 48H35", P.skin.s, 1, .8) }) +
+        S("M30.4 43V33.4C30.4 32.2 31.2 31.6 32 31.6C32.8 31.6 33.6 32.2 33.6 33.4V43Z", P.skin, { a: [1, 0], b: [.8, 0], sw: 2 }) + F(R(30.9, 32.2, 2.2, 2, .9), P.skin.h, .8);
+    }
+    const top = v === "stars5" ? [-2, -1, 0, 1, 2].map((i) => { const a = (-90 + i * 30) * Math.PI / 180; return S(star(32 + Math.cos(a) * 22, 29 + Math.sin(a) * 22, 5.6, 2.4, 5, -90), P.gold, { a: .8, b: .5, sw: 1.8 }); }).join("") : "";
+    return haloRing(m) + bust(m, v === "shush" ? T.brown : v === "stars5" ? T.tan : T.black) + face + top +
+      (v === "eyes" || v === "void" ? L("M47 49C45 46 49 45 47 42M51 49C49 46 53 45 51 42", "#fff", 1.6, .85) + TL("M54 52C59 52 59 58 54 58", P.white.b, 1.8) + S("M43 50H55V58Q55 62 51 62H47Q43 62 43 58Z", P.white, { a: [1.4, 0], b: 0, sw: 2, inner: fill(E(49, 50.6, 6, 1.4), T.brown.s) }) : "") +
+      (v === "shush" ? at(51, 10, 1.05, EMB.shh()) : "") + Sp(9, 11, 3.6) + Sp(56, 52, 3);
+  },
+
+  // Magnet taped to the end of a long stick.
+  magnet: (m, v) => {
+    const moon = v === "moon";
+    return (moon ? S(C(54, 9, 7.5), T.cream, { a: 1.6, b: 0, inner: F(C(51.5, 7.5, 1.6), T.cream.s, 1) + F(C(56, 11.5, 2), T.cream.s, 1) }) + L("M46 16L42 20M50 20L48 24M42 12L38 14", "#b8ecff", 2, .9)
+      : S(C(55, 9, 5.2), P.gold, { a: 1.2, b: .8, sw: 2, inner: L("M53 7.4H57", P.gold.s, 1) }) + L("M47 14L45 16M50 17L49 19.6M45 10.6L42.6 11.4", T.cyan.b, 2.2, .9)) +
+      rot(rod("M32 63V34", P.wood, 6.4) + S(R(28, 33, 8, 9, 2), P.white, { a: [1.4, 0], b: 0, sw: 2, inner: L("M27 36L37 38M27 39.4L37 41.4", P.white.s, 1) }) +
+        S("M18 10V20C18 29 24 34 32 34C40 34 46 29 46 20V10H37V20C37 23 35 25 32 25C29 25 27 23 27 20V10Z", m, { a: [3, 3], b: 2.2 }) +
+        S(R(17, 3, 11, 8, 2), P.metal, { a: [2, 1.4], b: 1.2 }) + S(R(36, 3, 11, 8, 2), P.metal, { a: [2, 1.4], b: 1.2 }), 32);
+  },
+
+  // Helmet with a Belisha beacon on top: hard-hat shell, peak, chin strap, striped post and an amber globe.
+  helmet: (m, v) => {
+    const shell = m === T.gold ? P.gold : P.white;
+    return glow(32, 9, 15, "#ffb34d", .6) + L("M20 4L16 1M44 4L48 1M14 12H10M50 12H54", "#ffb34d", 2.2) +
+      S(R(28.6, 14, 6.8, 10, 1), P.white, { a: [1, 0], b: 0, sw: 2, inner: fill("M28 16H36V18.6H28Z M28 21H36V23.6H28Z", INK) }) +
+      S(C(32, 9.6, 7.4), T.orange, { a: 2, b: 1.6 }) + Gl(29.4, 7, 2, 1.4, -30, .9) +
+      L("M15 44C15 52 22 57 31 57", INK, 4.2) + L("M15 44C15 52 22 57 31 57", P.dark.b, 2) +
+      S("M11 44C11 30 20 22 32 22C44 22 53 30 53 42V45H11Z", shell, { a: [4, 3], b: 2.4, inner: fill("M29 22H35V45H29Z", shell.s, .45) + fill("M0 36H64V39.6H0Z", INK, .85) }) +
+      S("M4 44Q32 40 58 44L60 48Q32 52 6 50Z", dk(shell), { a: [0, 1.6], b: [0, 1] }) + S(R(28, 54, 7, 5, 1.6), P.dark, { a: 0, b: 0, sw: 1.8 });
+  },
+
+  // Jousting lance: long spiral-striped taper, a big funnel vamplate, grip and a star on the point.
+  lance: (m, v) => diag(
+    S("M32 2L38.6 42H25.4Z", m, { a: [3, 0], b: [1.6, 0], inner: fill("M22 14L42 8V11.6L22 17.6Z M22 24L42 18V21.6L22 27.6Z M22 34L42 28V31.6L22 37.6Z", "#fff", .9) }) +
+    S("M14 47Q32 29 50 47Q32 54 14 47Z", P.metal, { a: [0, 2], b: [1.4, 1], inner: L("M22 44Q32 37 42 44", P.metal.s, 1.2, .7) }) +
+    S(R(28.6, 47, 6.8, 9, 2), P.dwood, { a: [1.4, 0], b: 0, sw: 2, inner: L("M28 50H36M28 53H36", P.dwood.s, 1.2) }) + S(R(27.4, 55.6, 9.2, 6, 2.6), m, { a: [1.4, 0], b: 0, sw: 2 }) +
+    (v === "star" ? glow(32, 6, 12, "#fff3a0", .6) + S(star(32, 6, 8, 3.4, 5, -90), P.gold, { a: 1, b: .8, sw: 2 }) : ""), 42),
+
+  // Cafeteria tray turned riot shield: tall, thick, curved, with the lunch still in it.
+  tray: (m) => rot(
+    S("M47 7L53 9V57L47 60Z", dk(m), { a: 0, b: 0, sw: 2.2 }) +
+    S(R(11, 6, 37, 54, 5), m, { a: [3, 3], b: 2,
+      inner: S(R(15, 10, 29, 20, 3), dk(m), { a: [-1.6, -1.6], b: 0, sw: 1.4, norim: 1 }) + S(R(15, 33, 13, 23, 3), dk(m), { a: [-1.6, -1.6], b: 0, sw: 1.4, norim: 1 }) + S(R(31, 33, 13, 23, 3), dk(m), { a: [-1.6, -1.6], b: 0, sw: 1.4, norim: 1 }) +
+        dots([[19, 40], [22, 43], [19, 46], [23, 49], [20, 52]], 1.8, T.green.b, 1.1) + F("M20 15C24 13 30 16 31 20C32 24 26 26 22 24C18 22 17 17 20 15Z", T.red.b, 1.4) +
+        G("rotate(-20 38 44)", F(R(34, 36, 4, 15, 1), P.gold.b, 1.2) + F(R(39, 37, 4, 13, 1), P.gold.b, 1.2)) + L("M14 9L20 9", "#fff", 1.6, .6) }) +
+    S(R(7, 26, 5, 14, 2), P.dark, { a: 0, b: 0, sw: 2 }), -10),
+
+  // A fat golden chip on a wooden chip fork, crowned.
+  chip: (m) =>
+    glow(32, 34, 30, "#ffe36a", .55) +
+    rot(S("M24 13C24 8.6 26.6 7 30 7.4L36 8C39 8.4 40.6 10.6 40.4 14L39.6 50C39.4 54.6 36.6 57 33 56.6L27.6 56C24.6 55.6 23.2 53.4 23.4 50Z", P.gold, { a: [4, 2], b: [2.2, 1.4],
+      inner: fill("M20 6H44V13H20Z", "#d9821c", .85) + fill("M20 52H44V60H20Z", "#d9821c", .8) + L("M29 16C28.4 28 29.6 38 28.8 48", P.gold.h, 2.4, .8) + dots([[35, 22], [32, 33], [36, 41], [30, 46], [34, 15]], .8, "#fff", .4) + L("M36.4 18V28M33 36V44", P.gold.s, 1.4, .55) }), 30) +
+    G("rotate(-25 46 18)", S(R(43.6, 4, 4.8, 22, 1.4), P.wood, { a: [1.4, 0], b: 0, sw: 2, inner: L("M44 8H48", P.wood.s, 1) }) + F("M44.4 26V30M46 26V31M47.6 26V30", "none", 1.8)) +
+    S("M14 12L15 6L18.6 9.6L21 4.4L23.4 9.6L27 6L28 12Z", P.gold, { a: 0, b: 0, sw: 1.8 }) + Sp(54, 50, 3.4) + Sp(10, 50, 2.6),
+
+  // Breadstick sceptre: a seeded breadstick dressed in gold collars, an orb and a cross.
+  bread: (m, v) => diag(
+    S("M27.6 14C27.2 24 28 34 27.4 44C27 50 28 55 28.2 58Q32 62 35.8 58C36 52 36.8 46 36.4 40C36 32 36.8 22 36.4 14Z", T.tan, { a: [2.6, 0], b: [1.6, 0], inner: dots([[30.4, 20], [33.8, 26], [30.6, 32], [34, 37], [30.4, 48], [33.4, 54]], .8, "#fff8e8", .4) + L("M29.6 18C29.2 30 29.8 40 29.4 52", T.tan.h, 1.4, .7) }) +
+    S(R(26, 22, 12, 5, 1.8), P.gold, { a: [0, 1.4], b: 0, sw: 2 }) + S(R(25.6, 41, 12.8, 5, 1.8), P.gold, { a: [0, 1.4], b: 0, sw: 2 }) +
+    S(R(26, 11, 12, 5, 1.8), P.gold, { a: [0, 1.4], b: 0, sw: 2 }) +
+    glow(32, 6, 12, "#fff3a0", .55) + S(C(32, 6.4, 6.2), P.gold, { a: 1.6, b: 1.2 }) + S(R(30.6, -3.6, 2.8, 6.4, .6), P.gold, { a: 0, b: 0, sw: 1.4 }) + S(R(28, -1.6, 8, 2.4, .6), P.gold, { a: 0, b: 0, sw: 1.4 }) +
+    S(C(32, 60.6, 3.2), P.gold, { a: .6, b: 0, sw: 1.6 }) + F(C(29.4, 43.4, 1.2), T.red.b, .8) + F(C(34.6, 43.4, 1.2), T.cyan.b, .8), 40) + Sp(10, 14, 3) + Sp(54, 50, 2.6),
+
+  // Sausage roll: flaky layered pastry, a big cut end of meat, flakes everywhere.
+  sausageroll: (m) => rot(
+    S("M18 22H50C56 22 59 28 59 35C59 42 56 48 50 48H18Z", P.oat, { a: [0, 3], b: [1.4, 1.4],
+      inner: L("M26 23C24 30 24 40 26 47M34 23C32 30 32 40 34 47M42 23C40 30 40 40 42 47M50 23C48 30 48 40 50 47", P.oat.s, 2, .8) + L("M18 27C30 25 44 25 56 27M18 43C30 45 44 45 56 43", "#fff", 1.4, .55) + dots([[30, 30], [46, 32], [38, 40]], .7, "#fff", .4) }) +
+    S(E(18, 35, 9, 13), P.oat, { a: 0, b: 0, sw: 2.2, inner: `<ellipse cx="18" cy="35" rx="7" ry="10.6" fill="none" stroke="${P.oat.s}" stroke-width="1.4"/><ellipse cx="18" cy="35" rx="5.6" ry="8.6" fill="none" stroke="${P.oat.h}" stroke-width="1.2"/>` }) +
+    S(E(18, 35, 4.6, 7), pal("#d27a60", "#9c4a34", "#f2a88c"), { a: 1, b: .8, sw: 1.8, inner: dots([[17, 32], [19.6, 36], [16.6, 39]], .6, "#f6c2a8", .3) }) +
+    F("M50 12L54 10L55 13L51 15Z", P.oat.h, 1.4) + F("M8 55L12 53L13 57L9 58Z", P.oat.h, 1.4) + F("M40 56L43 54L44 57Z", P.oat.h, 1.2) + F("M58 54L61 53L61 56Z", P.oat.h, 1.2) +
+    dots([[24, 58], [30, 59], [46, 59]], 1, "#8b8d85", 1) + L("M4 60C14 62 50 62 62 60", INK, 1.6, .25), -14) + Sp(54, 18, 3) + Sp(10, 16, 2.4),
+
+  // Knee pad with proper straps: two webbing bands, a buckle and a velcro tab.
+  kneepad: (m) =>
+    S("M2 14H62V24H2Z", P.dark, { a: [0, 2], b: 0, inner: L("M2 16.4H62M2 21.6H62", "#8c99c8", .9, .6, ' stroke-dasharray="1.6 1.4"') }) +
+    S("M2 40H62V50H2Z", P.dark, { a: [0, 2], b: 0, inner: L("M2 42.4H62M2 47.6H62", "#8c99c8", .9, .6, ' stroke-dasharray="1.6 1.4"') }) +
+    S(R(51, 11, 9, 16, 2), P.metal, { a: 1, b: .6, sw: 2, inner: fill(R(53.4, 14, 4, 10, 1), INK) }) + S(R(1, 38, 12, 14, 2), m, { a: 0, b: 0, sw: 2, inner: L("M3 41V49M6 41V49M9 41V49", m.s, 1, .7) }) +
+    S("M32 3C46 3 53 15 53 30C53 46 45 61 32 61C19 61 11 46 11 30C11 15 18 3 32 3Z", P.dark, { a: [3, 2], b: 1 }) +
+    S("M32 8C42 8 47.6 18 47.6 30C47.6 43 41.6 55 32 55C22.4 55 16.4 43 16.4 30C16.4 18 22 8 32 8Z", m, { a: [3, 3], b: 2.2, inner: L("M17 23C25 20 39 20 47 23M17 37C25 34 39 34 47 37", m.s, 2, .8) + L("M24 46L30 41M36 15L42 19", "#fff", 1.6, .7) }) +
+    Gl(24, 16, 2, 5, 30, .8),
+
+  // Racing ring: the pigeon itself, wearing an oversized numbered band on its leg.
+  legring: (m) => G("translate(0 -5)", M.pigeon(T.teal, "")) +
+    S(E(28.2, 54.4, 7.4, 2.8), dk(m), { a: 0, b: 0, sw: 2 }) +
+    S("M20.8 46V54.4A7.4 2.8 0 0 0 35.6 54.4V46Z", m, { a: [1.6, 0], b: [1, 0], inner: Tx(28.2, 53.2, "26", 6, "#fff") }) +
+    S(E(28.2, 46, 7.4, 2.8), m, { a: 0, b: 0, sw: 2, inner: fill(E(28.2, 46.4, 5.4, 1.7), dk(m).s) }) + F("M26.9 46.6V44.6H29.5V46.6Z", "#ff8a6b", 1.2) +
+    S(R(4, 3, 15, 9, 1.5), P.gold, { a: 0, b: 0, sw: 1.6 }) + Tx(11.5, 9.6, "1st", 6, INK),
+
+  // Lighthouse lens shard: a broken wedge of glass with bold concentric Fresnel ridges.
+  lens: (m) =>
+    glow(30, 34, 26, "#fff3a0", .6) + fill("M34 30L64 10V34Z", "#fff3a0", .55) +
+    S("M6 50L20 6L50 22L40 58Z", P.glass, { a: [3, 3], b: 2,
+      inner: [8, 14, 20, 26, 32, 38].map((r) => `<circle cx="46" cy="44" r="${r}" fill="none" stroke="#5fb4dc" stroke-width="3.4"/><circle cx="46" cy="44" r="${r - 1.6}" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="46" cy="44" r="${r + 1.8}" fill="none" stroke="${INK}" stroke-width="1" opacity=".45"/>`).join("") }) +
+    Sp(48, 12, 4) + Sp(8, 18, 2.6),
+
+  // Enigma rotor: alphabet ring, contact pins and a deeply toothed thumbwheel.
+  rotor: (m) =>
+    S(E(32, 40, 26, 12), P.dmetal, { a: 0, b: 0 }) +
+    S(gearE(32, 34, 28, 13.4, 22, .14), m, { a: [0, 2.4], b: [0, 1.2] }) +
+    S(E(32, 32, 21, 9.6), T.cream, { a: [0, 1.6], b: 0, sw: 2, inner: Tx(32, 27.4, "A B C D", 4.4, INK) + Tx(32, 40.6, "Q R S", 4.4, INK) + Tx(15, 33.6, "Z", 4.4, INK) + Tx(49, 33.6, "H", 4.4, INK) }) +
+    S(E(32, 32, 11, 5), P.metal, { a: [0, 1.2], b: 0, sw: 2 }) + F(E(32, 32, 3.4, 1.6), INK, 1) +
+    dots([[23.6, 32], [40.4, 32], [32, 28], [32, 36], [26, 29.2], [38, 29.2], [26, 34.8], [38, 34.8]], 1.1, P.gold.b, .8) + L("M60 30L63 26M60 36H64", INK, 1.6, .5),
+
+  // Kelpie's bridle, worn by the water horse itself: a knight-piece head, mane of waves, leather straps and a bit ring.
+  bridle: (m) => {
+    const water = pal("#6fd8cc", "#2f9a9a", "#c8fff6");
+    const head = "M38 3L44 12C52 16 57 26 57 38C57 48 55 56 54 62H30C30 54 32 48 34 43C30 46 24 47 20 46C16 46 13 47 11 46C7 45 5 42 6 38C7 34 10 31 14 28C20 22 26 15 31 10L34 9Z";
+    return S(head, water, { a: [3, 2], b: 2, inner: fill("M44 12C52 16 57 26 57 38C57 48 55 56 54 62H64V0H40Z", dk(water).b) + L("M47 16C51 22 53 28 53 34M50 32C53 38 54 44 54 50", water.h, 1.6, .9) +
+        `<circle cx="29" cy="35" r="7.6" fill="none" stroke="${water.s}" stroke-width="1.6"/>` + L("M8 42.6C10 43.6 12.6 43.8 15 43.4", water.s, 1.4) }) +
+      S("M31.6 11L33.6 3.4L37.8 10.4Z", water, { a: 0, b: 0, sw: 2 }) + S("M31 13C27.6 10 28.6 6.4 32 6.6C32.6 9.4 32.4 11.4 31 13Z", dk(water), { a: 0, b: 0, sw: 1.6 }) +
+      F(C(29, 20, 2.2), INK, 1) + fill(C(28.2, 19.2, .8), "#fff") + F(E(9.4, 36.6, 1.5, 1.1), INK, .1) +
+      L("M40 13L14 43M40 13L30 13.6M40 13L37 37M9.6 31L22 40.6", INK, 5.4) + L("M40 13L14 43M40 13L30 13.6M40 13L37 37M9.6 31L22 40.6", T.brown.b, 2.8) +
+      dots([[40, 13], [30, 13.6], [18.4, 37.8]], 1.6, P.metal.b, 1.2) +
+      S(C(14, 44, 3.8) + C(14, 44, 1.8), P.metal, { ev: 1, a: .6, b: 0, sw: 2 }) +
+      L("M14.6 47.6C16 54 20 58 26 62", INK, 4.6) + L("M14.6 47.6C16 54 20 58 26 62", T.brown.b, 2.2) +
+      S(drop(6, 52, .85), T.cyan, { a: .6, b: 0, sw: 1.6 }) + OV.waves();
+  },
+
+  // Hare's foot keyring: a furry hind foot, broad at the toes, with claws, a metal cap at the heel and a ring.
+  harefoot: () => G("rotate(-30 32 34)",
+    S("M27.6 14C26.6 22 23.4 32 23.2 41C23 45 22 49 23 52.6Q24.4 58 27.2 56.2Q28.6 60.2 31.2 57.6Q33.2 60.8 35.6 57.6Q38.2 60.2 39.8 56.2Q42.2 57.6 41.8 52.4C42.2 48 41.2 44 41 40C40.6 32 37.6 22 36.6 14Z", pal("#c9ad88", "#957552", "#efdcc0"), { a: [3, 2], b: 1.8,
+      inner: fill("M22 44C25 47 29 48 32 48C35 48 39 47 42 44V64H22Z", "#efe2cc") + L("M27.6 49V56M31.4 49.6V57.6M35.6 49.6V57.6M39.4 49V56", "#957552", 1.3, .85) + L("M30 18C29.4 26 28.6 34 28.4 42M34.6 20C35 28 35.4 34 35.6 40", "#957552", 1.1, .55) }) +
+    L("M24.4 30L22.2 29M23.6 38L21 37.6M40 31L42.2 30M40.4 39L43 38.6M26 22L24 20.6M38 22L40 20.6", "#957552", 1.6) +
+    F("M25.4 56L23.4 60L27.4 57.6Z M30.4 58.6L30 62.6L32.4 59Z M35 58.6L36 62.6L37.2 58.4Z M39.8 56.4L42 60.2L41.8 55.4Z", "#3a3040", 1.1) +
+    S(R(26, 8, 12, 8, 2.2), P.gold, { a: [1.4, 1], b: 0, sw: 2, inner: L("M25 11.6H39", P.gold.s, 1) })) +
+    L("M27.6 7L25.8 3.4", INK, 3.4) + L("M27.6 7L25.8 3.4", P.metal.b, 1.4) + ring2(19, 6, 4.6, P.gold.b, 1.6),
+
+  // Astrolabe: throne and shackle, the mater's degree ring, the lacy rete and a slim rule.
+  astrolabe: (m) =>
+    ring2(32, 6, 3.6, P.gold.b, 1.6) + S("M26 10H38L36 16H28Z", P.gold, { a: [0, 1], b: 0, sw: 1.8 }) +
+    S(C(32, 37, 24), P.gold, { a: 3, b: 2.2, inner: `<circle cx="32" cy="37" r="19.6" fill="${P.gold.s}"/>` + [...Array(36)].map((_, i) => `<path transform="rotate(${i * 10} 32 37)" d="M32 13V${i % 3 ? 15.4 : 17.4}" stroke="${INK}" stroke-width="1" opacity=".7"/>`).join("") }) +
+    `<circle cx="32" cy="37" r="9" fill="none" stroke="${INK}" stroke-width="3.6"/><circle cx="32" cy="37" r="9" fill="none" stroke="${P.gold.h}" stroke-width="1.6"/>` +
+    `<circle cx="32" cy="33" r="13" fill="none" stroke="${INK}" stroke-width="3.6"/><circle cx="32" cy="33" r="13" fill="none" stroke="${P.gold.h}" stroke-width="1.6"/>` +
+    [[20, 26, 30], [44, 27, -30], [22, 46, 120], [43, 45, -120]].map(([x, y, a]) => `<path transform="translate(${x} ${y}) rotate(${a})" d="M0 -5C2 -2 2 2 0 4C-2 2 -2 -2 0 -5Z" fill="${P.gold.h}" stroke="${INK}" stroke-width="1.3"/>`).join("") +
+    G("rotate(-14 32 37)", S("M11 35.4H53V38.6H11Z", P.dmetal, { a: 0, b: 0, sw: 1.8 }) + S(R(14, 32, 3, 10, .6), P.dmetal, { a: 0, b: 0, sw: 1.4 }) + S(R(47, 32, 3, 10, .6), P.dmetal, { a: 0, b: 0, sw: 1.4 })) +
+    S(C(32, 37, 2.8), P.dmetal, { a: 0, b: 0, sw: 1.6 }) + F(star(32, 22.6, 2.4, 1, 4, 0), "#fff", .1),
+
+  // Planisphere: the square card cover with its oval window, the starry dial turning underneath, a brooch bar on top.
+  planisphere: (m) =>
+    S(C(32, 34, 26), T.navy, { a: 2, b: 1.4, inner: [...Array(24)].map((_, i) => `<path transform="rotate(${i * 15} 32 34)" d="M32 8.6V12" stroke="#fff" stroke-width="1.2" opacity=".8"/>`).join("") }) +
+    S(R(13, 15, 38, 38, 4) + E(32, 31, 13, 10), T.cream, { ev: 1, a: [2, 2], b: 1.4, inner: L("M18 46H46", INK, 1.2, .35) + Tx(32, 49.6, "TONIGHT", 3.8, INK) }) +
+    fill(E(32, 31, 13, 10), "#1d2a5c") + dots([[24, 28], [30, 25], [37, 27], [40, 33], [28, 35], [34, 36]], .9, "#fff", .1) + L("M24 28L30 25L37 27L40 33M28 35L34 36", "#cfe0ff", 1, .7) +
+    F(E(32, 31, 13, 10), "none", 2) + S(C(32, 31, 2), P.gold, { a: 0, b: 0, sw: 1.4 }) +
+    S(R(18, 4, 28, 5, 2.5), P.gold, { a: [0, 1.4], b: 0, sw: 2 }) + S(C(46, 6.5, 2.6), P.gold, { a: 0, b: 0, sw: 1.6 }),
+
+  // Keystone at the crown of a stone arch, holding it all up above the clouds.
+  keystone: (m) => {
+    let arch = "";
+    for (let i = 0; i < 7; i++) {
+      if (i === 3) continue;
+      const a0 = 180 + i * (180 / 7), a1 = a0 + 180 / 7 - 1.4;
+      arch += S(sector(32, 50, 17, 29, a0, a1), pal("#8e9088", "#64665f", "#bcbdb4"), { a: 1.4, b: 1, sw: 2 });
+    }
+    return glow(32, 20, 16, "#fff3a0", .45) + arch +
+      S("M28.2 33.4H35.8L39.4 15H24.6Z", T.stone, { a: [2.4, 2], b: 1.6, inner: fill("M0 15H64V18H0Z", T.stone.h, .7) }) +
+      S(star(32, 23, 4.6, 2, 5, -90), P.gold, { a: .8, b: 0, sw: 1.6 }) +
+      S(cloudD(13, 54, .95), P.white, { a: 0, b: [0, 1], sw: 2 }) + S(cloudD(51, 55, .9), P.white, { a: 0, b: [0, 1], sw: 2 }) + Sp(56, 10, 3) + Sp(8, 24, 2.4);
+  },
+
+  // Wind chime with its wish slip: glass bell, clapper, a paper tag with a star and a tick.
+  chime: (m) =>
+    L("M32 1V8", INK, 2.2) + S(C(32, 3, 2), P.gold, { a: 0, b: 0, sw: 1.4 }) +
+    S("M12 30C12 15 20 7 32 7C44 7 52 15 52 30C52 33 12 33 12 30Z", P.glass, { a: [3, 2], b: 2, inner: L("M16 22C21 17 26 18 30 21C34 24 40 22 48 17", m.b, 2.6) + fill(C(22, 26, 2) + C(32, 25.4, 2) + C(42, 26, 2), T.red.b) + L("M18 16C20 12.6 24 10.4 28 10", "#fff", 2.2, .9) }) +
+    L("M32 31V37", INK, 1.6) + S(C(32, 36.4, 2.6), P.gold, { a: 0, b: 0, sw: 1.4 }) +
+    G("rotate(-8 32 50)", S(R(23, 38, 18, 24, 1.2), m, { a: [1.6, 1], b: 0, sw: 2, inner: fill(R(23, 38, 18, 4, 0), dk(m).b) }) + S(star(32, 47, 5.4, 2.4, 5, -90), P.gold, { a: .6, b: 0, sw: 1.6 }) + L("M27.6 56.4L30.4 59L36.4 53", "#fff", 2.6) + L("M27.6 56.4L30.4 59L36.4 53", T.green.s, 1.4)) +
+    L("M7 24C3 28 3 36 7 40M57 24C61 28 61 36 57 40", INK, 2, .55) + Sp(9, 8, 2.8) + Sp(55, 52, 2.4),
+
+  // Wrecking ball hung from a shoelace: steel ball, shackle plate with two eyelets, laced and tied in a bow.
+  wreckingball: () =>
+    TL("M33 20C35 13 42 12 46 9C50 6 53 4 57 3", "#f3f6fd", 2.6) + S(R(55, 1, 7, 4, 1.4), P.dmetal, { a: 0, b: 0, sw: 1.6, norim: 1 }) +
+    S(C(30, 43, 18.5), P.dmetal, { a: 4, b: 2.6, hw: 2.4, inner: fill("M0 41H64V45H0Z", P.dmetal.s, .8) + dots([[16, 43], [23, 43], [30, 43], [37, 43], [44, 43]], 1.1, P.metal.b, .8) }) +
+    S("M21 22H39Q41 22 41 24V29Q41 31 39 31H21Q19 31 19 29V24Q19 22 21 22Z", P.metal, { a: [0, 1.6], b: 0, sw: 2.2 }) +
+    ring2(25, 26.5, 2, P.gold.b, 1.4) + ring2(35, 26.5, 2, P.gold.b, 1.4) +
+    TL("M25 26.5L33 20M35 26.5L28 19.4", "#f3f6fd", 2) +
+    TL("M30.6 19.8C27 15 23 17 25.6 20.4C27 22 29.6 21 30.6 19.8C34 15.4 38.6 17 36 20.6C34.6 22.2 32 21 30.6 19.8", "#f3f6fd", 1.8) + TL("M28 21L25 27M33 21L36 26", "#f3f6fd", 1.8) +
+    Gl(22, 36, 3, 5, 40, .5) + L("M8 30C5 36 5 46 8 52M4 34C2 40 2 46 4 50", INK, 2, .4),
+
+  // Meteor on a bungee: hook, a striped elastic cord stretched taut and wavy, the rock straining with its trail.
+  bungee: (m) => {
+    const cord = "M50 14C46 17 47 20 43 22C39 24 40 27 36 29C33 30.6 33 32 30 33";
+    return S("M8 46C4 50 2 56 4 62C10 58 14 56 20 54Z M14 52C10 56 10 60 12 64C16 60 20 58 24 56Z", T.orange, { a: 0, b: 0, sw: 2, inner: fill("M8 50C6 54 6 58 6 60C10 57 14 55 18 54Z", T.yellow.b) }) +
+      S(fuzz(23, 44, 13, 12, 9, 1.6), T.coal, { a: 2.6, b: 1.8, inner: F(C(19, 40, 3), T.coal.s, 1.2) + F(C(28, 48, 2.4), T.coal.s, 1.2) + F(C(27, 38, 1.6), T.coal.s, 1) + L("M14 48L19 46L22 50M30 41L33 44", "#ff8a2b", 1.6, .95) }) +
+      ring2(31, 33, 2.6, P.metal.b, 1.4) +
+      L(cord, INK, 7.6) + L(cord, m.b, 4.6) + L(cord, T.red.b, 4.6, null, ' stroke-dasharray="2.2 2.4" stroke-linecap="butt"') + L(cord, "#fff", 1, .5, ' transform="translate(-.8 -.8)"') +
+      L("M38 18L41 15M45 26L48 23M34 24L36 21.6", INK, 1.6, .5) +
+      TL("M50 14C50 8 58 6 58 11C58 14 55 15 54 13", P.metal.b, 2) + TL("M31 33C29 31 30 29 32 29", P.metal.b, 1.6) + Sp(56, 40, 3) + Sp(44, 54, 2.4);
+  },
+
+  // Thermal delivery backpack: cube with zip lid, carry handle, reflective band and shoulder straps.
+  deliverybag: (m, v) => {
+    const bag = (q) =>
+      S("M46 22L58 14V48L46 58Z", dk(q), { a: [1, 0], b: 0, inner: L("M50 18C54 28 54 42 50 52M55 16C58 28 58 40 55 50", INK, 3.4, .55) + L("M50 18C54 28 54 42 50 52", P.dark.b, 2) }) +
+      S("M10 22L22 14H58L46 22Z", q, { a: 0, b: 0, sw: 2.2, inner: fill("M10 22L22 14H58L46 22Z", "#fff", .25) + L("M14 21.4L24 15M47 21.4L57 15", INK, 1, .4) }) +
+      TL("M27 18.6C28 14 36 14 37 18.6", P.dark.b, 2.4) +
+      S(R(10, 22, 36, 36, 3), q, { a: [0, 3], b: [1.4, 1.4], inner: L("M10 26.6H46", INK, 1.6, .45) + L("M11 26.6H45", P.metal.b, .9, .9, ' stroke-dasharray="1 1.2"') + fill("M10 44H46V49H10Z", "#e6ecf5") + fill("M10 45.4H46V46.4H10Z", "#fff") }) +
+      S(R(39, 25, 3, 5, 1), P.metal, { a: 0, b: 0, sw: 1.2 });
+    let out = "";
+    if (v === "sun") out += glow(32, 34, 30, "#ffb347", .45);
+    if (v === "flames") out += [[16, 12], [30, 8], [44, 11], [54, 8]].map(([x, y]) => S(`M${x} ${y - 8}C${x + 3} ${y - 3} ${x + 7} ${y} ${x + 6} ${y + 6}H${x - 6}C${x - 7} ${y} ${x - 3} ${y - 3} ${x} ${y - 8}Z`, T.orange, { a: 0, b: 0, sw: 2, inner: fill(drop(x, y + 3, .7), T.yellow.b) })).join("");
+    if (v === "flail") return rod("M6 62L18 50", P.dwood, 6) + S(R(13.4, 46, 8, 6, 1.6), P.metal, { a: 0, b: 0, sw: 1.8 }) + chainLinks(19, 47, 34, 32, 4, P.metal) +
+      G("translate(23 -2) scale(.66)", bag(m) + S(R(19, 34, 18, 7, 2), P.white, { a: 0, b: 0, sw: 2 })) + L("M4 40L10 38M2 48H8", INK, 2, .4);
+    out += bag(m);
+    if (v === "armour") out += TL("M18 22V58M38 22V58", P.dark.b, 3.4) + TL("M14 36H44", P.dark.b, 3) + S(R(25, 32, 8, 8, 1.6), P.metal, { a: 0, b: 0, sw: 1.8, inner: fill(R(27.4, 34.4, 3.2, 3.2, .4), INK) }) + TL("M18 22C18 10 38 10 38 22", P.dark.b, 3.4);
+    else out += v === "sun" ? emb("sun", 28, 36, 1.2) : v === "flames" ? F("M22 32H34L29 36H34L24 42L27 37H22Z", T.yellow.b, 1.6) : S(R(19, 30, 18, 11, 2), P.white, { a: 0, b: 0, sw: 1.8, inner: L("M22 35.4H34M22 38H30", INK, 1.2, .45) });
+    return out;
+  },
+
+  // Exoskeleton made of vacuums: canister chest, ribbed hoses over the shoulders, nozzles for hands.
+  vacexo: (m) =>
+    hose("M22 22C14 18 8 24 8 34C8 42 8 48 10 52", P.dark, 5) + hose("M42 22C50 18 56 24 56 34C56 42 56 48 54 52", P.dark, 5) +
+    S("M2 52H17L15 59H4Z", T.red, { a: [0, 1.6], b: 0, sw: 2, inner: L("M4 57H15", INK, 1.6, .6) }) + S("M51 50H57L58 62H52Z", T.red, { a: [1, 0], b: 0, sw: 2 }) +
+    S(R(18, 14, 28, 44, 8), T.red, { a: [3.6, 2], b: 2.2, inner: fill(R(18, 26, 28, 8, 0), P.dark.b) + fill(R(18, 44, 28, 3, 0), "#fff", .5) }) +
+    S(E(32, 14.6, 13, 4), P.dark, { a: 0, b: 0, sw: 2.2, inner: fill(E(32, 14, 9, 2.4), "#55607f") }) +
+    S(R(26, 6, 12, 7, 3), P.dark, { a: 0, b: 0, sw: 2 }) + S(C(32, 30, 3.2), P.metal, { a: .8, b: 0, sw: 1.6 }) +
+    S(R(15, 20, 8, 6, 2), P.metal, { a: 0, b: 0, sw: 1.8 }) + S(R(41, 20, 8, 6, 2), P.metal, { a: 0, b: 0, sw: 1.8 }) + L("M20 56V62M44 56V62", INK, 3) + dots([[22, 62], [42, 62]], 1.8, P.dark.b, 1.4),
+
+  // The first ever door, cut down into a breastplate: arched top, arm holes, planks, strap hinges, ring handle.
+  doorplate: (m) => {
+    const d = "M14 60V31C18 29 19 23 18 17C20 9 26 4 32 4C38 4 44 9 46 17C45 23 46 29 50 31V60Z";
+    return TL("M21 9C19 2 15 1 12 4M43 9C45 2 49 1 52 4", P.dark.b, 3) +
+      S(d, T.brown, { a: [4, 2], b: 2, inner: L("M23 0V64M32 0V64M41 0V64", T.brown.s, 2, .9) + L("M19 30C20 38 19 46 20 54M36 20C37 30 36 40 37 50", T.brown.h, 1.2, .5) + F(E(27, 44, 1.4, 2.4), T.brown.s, 1) }) +
+      [22, 48].map((y) => S(`M14 ${y - 2.4}H34L37 ${y}L34 ${y + 2.4}H14Z`, P.dark, { a: 0, b: 0, sw: 1.8, inner: dots([[18, y], [24, y], [30, y]], .9, P.metal.b, .6) })).join("") +
+      ring2(43, 37, 3.4, P.gold.b, 1.6) + S(C(43, 33, 1.8), P.gold, { a: 0, b: 0, sw: 1.4 }) + F("M42.2 42H43.8L44.4 46H41.6Z", INK, .1);
+  },
+});
+
+// Mail rings big enough to read at 64px, and a coif hood for hauberks.
+PAT.rings = (m) => { let s = ""; for (let r = 0; r < 12; r++) for (let c = 0; c < 15; c++) s += C(c * 4.6 + (r % 2) * 2.3, 5 + r * 4.6, 2); return `<path d="${s}" fill="none" stroke="${INK}" stroke-width="1.5" opacity=".55"/><path d="${s}" fill="none" stroke="${m.h}" stroke-width=".8" transform="translate(-.5 -.5)"/>`; };
+PAT.hail = () => [[20, 22], [42, 30], [26, 44], [44, 50], [36, 18]].map(([x, y]) => F(C(x, y, 2.4), "#f4fbff", 1.2) + fill(C(x - .7, y - .7, .7), "#fff")).join("");
+PAT.columns = (m) => [[18, 28], [40, 34], [28, 46], [46, 50], [16, 50]].map(([x, y]) => fill(`M${x - 1.6} ${y + 5}V${y - 3}H${x + 1.6}V${y + 5}Z M${x - 3} ${y + 5}H${x + 3}V${y + 7}H${x - 3}Z M${x - 2.4} ${y - 3}H${x + 2.4}V${y - 4.4}H${x - 2.4}Z M${x} ${y - 4.4}V${y - 7}`, m.s, .9) + `<circle cx="${x}" cy="${y - 7.6}" r="1.4" fill="${m.s}"/>`).join("");
+PAT.stonering = () => `<ellipse cx="32" cy="42" rx="15" ry="8" fill="#2f7a4a" opacity=".45"/>` + [...Array(9)].map((_, i) => { const a = (i / 9 + .03) * Math.PI * 2, x = 32 + Math.cos(a) * 15, y = 41 + Math.sin(a) * 8; return F(R(f(x - 2.2), f(y - 7), 4.4, 9, 1.4), T.stone.b, 1.3); }).join("") + F(R(28.4, 33, 7.2, 3, 1), T.stone.h, 1.2) + F(R(28.6, 35.6, 2.4, 6, .6), T.stone.b, 1.2) + F(R(33, 35.6, 2.4, 6, .6), T.stone.b, 1.2);
+PAT.slats = (m) => L("M0 26H64M0 34H64M0 42H64M0 50H64", m.s, 2.6, .9) + L("M0 24.6H64M0 32.6H64M0 40.6H64M0 48.6H64", m.h, 1, .5);
+PAT.footsteps = () => [[30, 54, -10], [36, 47, 10], [29, 40, -10], [35, 33, 10], [28.6, 26, -10]].map(([x, y, a], i) => `<path transform="translate(${x} ${y}) rotate(${a}) scale(.32${i % 2 ? "" : " .32"})" d="${FOOT}" fill="#fff" opacity=".8"/>`).join("");
+PAT.galaxycrumbs = () => L("M32 40a2 2 0 0 1 4 0a5 5 0 0 1 -10 0a8 8 0 0 1 16 0a11 11 0 0 1 -22 0", "#d9c6ff", 1.8, .55) + PAT.crumbs();
+
+/* ------------------------------------------------------------------ */
 /* Item -> art table. "motif tint [variant] [key:value ...] [+overlay[@corner] ...]"
    motif = drawing (M), tint = colour (T), variant picks the motif's version,
    key:value tunes it (garments: pat, emb, pk, collar...), +overlay adds stars, glow, ghost etc. */
@@ -2131,7 +2497,7 @@ const ITEM_ART = {
   "flapjack-brick": "bar red", "forty-keys": "keyring red", "laminated-clover": "clover green",
   // bouncer
   "eternal-clipboard": "clipboard brown", "velvet-rope-whip": "rope red", "last-orders-bell": "bell gold bracket",
-  "judgement-bomber": "jacket black bomber", "door-puffer": "puffer black", "no-entry-lanyard": "lanyard red",
+  "judgement-bomber": "jacket black bomber emb:eye ex:40 ey:23 es:.75", "door-puffer": "puffer black", "no-entry-lanyard": "lanyard red",
   "permanent-stamp": "handstamp purple", "eyes-torch": "torch black", "unbreakable-radio": "radio yellow",
   // menace
   "brakeless-scooter": "scooter red e", "wheelie-bin-ram": "bin green", "cone-lance": "cone orange",
@@ -2139,7 +2505,7 @@ const ITEM_ART = {
   "stuck-horn": "horn red", "nitro-squash": "bottle orange", "speeding-tickets": "ticket red stack",
   // mad scientist
   "probably-fine-beaker": "beaker green", "jump-lead-nunchucks": "battery red", "microwave-ray-gun": "microwave white",
-  "scorched-lab-coat": "jacket white labcoat pat:soot", "tinfoil-onesie": "suit steel foil", "vacuum-exo": "plate steel vac",
+  "scorched-lab-coat": "jacket white labcoat pat:soot", "tinfoil-onesie": "suit steel foil", "vacuum-exo": "vacexo red",
   "pocket-bunsen": "flame orange", "shed-rock": "glowrock green", "pickled-brain": "jar green",
   // chaos gremlin
   "mystery-fireworks": "fireworkbag purple", "3am-kebab-skewer": "skewer red", "bad-decision-hammer": "hammer red +nail@br",
@@ -2155,7 +2521,7 @@ const ITEM_ART = {
   "chain-glasses": "glasses brown", "infinite-library-card": "card blue infinity", "late-returns-ledger": "book black ledger",
   // pigeon king
   "chip-of-command": "chips red", "breadstick-sceptre": "bread tan crown", "angry-pigeons": "pigeon purple angry",
-  "feathered-duffel": "jacket camel duffel pat:feathers", "statue-crown": "crown stone stone", "crumb-cloak": "cloak purple crumbs",
+  "feathered-duffel": "jacket camel duffel pat:feathers", "statue-crown": "crown stone stone", "crumb-cloak": "cloak purple pat:crumbs hem:tan",
   "pigeon-union-card": "card orange pigeon", "gravel-crust": "slice tan gravel", "one-eyed-advisor": "pigeon teal patch",
   // rogue courier
   "delivery-bag-flail": "deliverybag teal flail", "haste-lock-chain": "chain orange", "order-ticket-doom": "receipt red",
@@ -2177,12 +2543,12 @@ const ITEM_ART = {
   "shoelace-wrecking-ball": "wreckingball black", "fever-dream-pyjamas": "jacket pink pyjamas pat:moons", "screaming-gnome": "gnome red",
   "rainbow-crossing-pike": "pike purple rainbow", "lighthouse-hivis": "jacket hivis hivis +beam", "whistle-of-ages": "whistle gold ages",
   "card-catalogue-cannon": "catalogue brown", "silent-reading-robes": "robe blue emb:book", "never-returned-first-edition": "book brown first",
-  "trafalgar-flock": "flock black column", "monument-mantle": "cloak stone pat:stones clasp:crown", "the-golden-chip": "chip gold",
+  "trafalgar-flock": "flock black column", "monument-mantle": "cloak stone pat:columns clasp:crown", "the-golden-chip": "chip gold",
   "midnight-surge-pricing": "banknote green", "thermal-cube-armour": "deliverybag teal armour", "lost-in-transit": "parcel tan",
   "hundred-heist-glove": "glove purple velvet", "invisible-raincoat": "jacket ice anorak +ghost", "bank-of-england-key": "bigkey gold",
-  "ley-line-rod": "dowsing green", "stone-circle-cloak": "cloak green pat:stones", "certain-tea-leaves": "teacup green",
+  "ley-line-rod": "dowsing green", "stone-circle-cloak": "cloak green pat:stonering clasp:mistletoe", "certain-tea-leaves": "teacup green",
   // season 1 set
-  "s1-trekking-pole": "pole brown bent", "s1-waxed-jacket": "jacket olive waxed", "s1-os-map": "map green wrong",
+  "s1-trekking-pole": "pole brown bent", "s1-waxed-jacket": "jacket olive waxed pat2:drops", "s1-os-map": "map green wrong",
 
   // ascendant
   "never-blinked-clipboard": "clipboard gold eye", "kebab-siege-bomber": "jacket maroon bomber emb:kebab ex:40 ey:25", "unwashable-hand-stamp": "handstamp blue foam",
@@ -2191,10 +2557,10 @@ const ITEM_ART = {
   "house-party-mallet": "hammer purple mallet +confetti", "never-went-to-bed-onesie": "suit blue dino spike:yellow emb:moon ex:40 ey:26", "3am-fridge-magnet": "fridge white",
   "stopped-a-tank-lollipop": "sign red tank", "school-run-hivis": "jacket hivis hivis emb:star ex:40 ey:25", "long-service-badge": "medal red forty",
   "reading-room-atlas": "book green atlas +ghost", "shushed-storm-cardigan": "jacket purple cardigan emb:storm ex:24 ey:28 es:1.2", "county-date-stamp": "datestamp green county",
-  "market-square-uprising": "flock red flag", "clock-tower-bench-cloak": "cloak brown clasp:clock pat:feathers", "legendary-dropped-roll": "sausageroll tan",
+  "market-square-uprising": "flock red flag", "clock-tower-bench-cloak": "cloak brown pat:slats pat2:feathers clasp:clock", "legendary-dropped-roll": "sausageroll tan",
   "phantom-delivery-receipt": "receipt teal ghost", "ring-road-ghost-rider-bag": "deliverybag black flames", "cemetery-shortcut": "map stone cemetery",
   "high-street-highwayman-glove": "glove black gauntlet", "town-clock-thief-coat": "jacket navy coat emb:clock ex:41 ey:42 es:.9", "market-day-wallet": "wallet purple",
-  "retail-park-wise-woman-wand": "wand purple twig", "midnight-car-boot-cloak": "cloak plum +p50@br", "always-a-pound-scratchcard": "card gold scratch",
+  "retail-park-wise-woman-wand": "wand purple twig", "midnight-car-boot-cloak": "cloak plum pat:moons tag:50p ghost:1", "always-a-pound-scratchcard": "card gold scratch",
   // celestial
   "two-star-velvet-rope": "starrope red", "event-horizon-door": "plate black hole", "big-bang-earpiece": "earpiece black bang",
   "comet-tail-scooter": "scooter cyan comet", "saturn-skid-leathers": "jacket orange leathers emb:saturn ex:24 ey:40 es:1.2", "moon-speeding-ticket": "ticket cyan stack +moon@tr",
@@ -2202,31 +2568,31 @@ const ITEM_ART = {
   "bungee-meteor": "bungee yellow", "cosmic-bad-idea-pyjamas": "jacket navy pyjamas pat:stars", "wormhole-rubber-duck": "duck yellow +cosmic +swirl@tl",
   "moon-stop-sign": "sign red moon", "alpha-centauri-hivis": "jacket hivis hivis +cosmic +stars", "shooting-star-sweets": "candy yellow stars",
   "dewey-decimal-stars": "bookrow navy stars", "silent-void-robes": "robe void pat:starfield trim:purple belt:purple", "milky-way-library-card": "card purple galaxy",
-  "lunar-flock": "flock white moon", "milky-way-crumb-mantle": "cloak void crumbs pat:starfield", "suns-own-chip": "chips red sun",
+  "lunar-flock": "flock white moon", "milky-way-crumb-mantle": "cloak void pat:starfield pat2:galaxycrumbs", "suns-own-chip": "chips red sun",
   "interstellar-surcharge": "receipt cyan planet", "small-sun-thermal-bag": "deliverybag orange sun", "galactic-rider-app": "phone black galaxy",
   "moon-pull-magnet": "magnet cyan moon", "dark-side-hoodie": "hoodie slate half emb:moon", "black-hole-dice": "dice purple void",
   "pound-shop-star-staff": "staff gold star", "mercury-retrograde-hat": "wizhat navy +retro@tr", "galaxy-shuffled-tarot": "cards cyan star",
   // eternal
-  "end-of-time-guest-list": "guestlist gold time", "first-door-armour": "plate brown planks", "stamp-of-creation": "handstamp gold star +stars",
+  "end-of-time-guest-list": "guestlist gold time", "first-door-armour": "doorplate brown", "stamp-of-creation": "handstamp gold star +stars",
   "big-bang-scooter": "scooter red bang", "infinite-static-shell-suit": "jacket gold track pc:purple pat2:lightning +stars", "last-traffic-cone": "cone orange +gold +sparkle",
   "universe-microwave": "microwave black universe", "original-experiment-coat": "jacket white labcoat emb:atom ex:24 ey:24 +gold", "primordial-soup": "soup green",
-  "reality-hammer": "hammer gold +cracks", "never-slept-ever-aura": "aura void eyes +cosmic +stars", "snack-before-time": "crisps purple +stars",
+  "reality-hammer": "hammer gold +cracks", "never-slept-ever-aura": "aura void void +cosmic +stars", "snack-before-time": "crisps purple +stars",
   "time-stopping-lollipop": "sign gold clock", "first-beacon-helmet": "helmet gold beacon +gold", "green-man-of-creation": "crossing green +stars",
   "book-before-words": "book gold runes", "aura-of-the-first-shush": "aura gold shush", "universe-overdue-notice": "overdue red +stars",
   "the-first-pigeon": "flock gold halo", "every-statue-crown": "crown gold stone", "crumb-of-all-bread": "crumb tan",
   "bill-for-everything": "receipt black long", "first-order-bag": "deliverybag gold +gold", "end-of-time-notification": "phone purple hourglass",
   "first-light-fingers": "pinch gold light", "universe-disguise-moustache": "moustache black +cosmic +stars", "spare-key-to-existence": "bigkey steel cosmic",
-  "wished-universe-wand": "wand gold galaxy", "first-hedge-cloak": "cloak green pat:leaves clasp:leaf", "shows-everything-ball": "orb purple crystal +stars",
+  "wished-universe-wand": "wand gold galaxy", "first-hedge-cloak": "cloak green pat:leaves clasp:leaf edge:leaf", "shows-everything-ball": "orb purple crystal +stars",
 
   // open market
   "m-bin-lid-of-reckoning": "binlid red", "m-doorstop-with-intent": "doorstop steel", "m-selfie-stick-extended": "selfie green",
   "m-laminated-bus-timetable": "timetable red", "m-lucky-fish-slice": "fishslice yellow", "m-builders-tabard": "jacket orange hivis pk:chest",
-  "m-double-lined-parka": "jacket olive parka", "m-shell-suit-swishy": "jacket teal track pc:pink", "m-charity-shop-tweed": "jacket tweed blazer pat:tweed",
+  "m-double-lined-parka": "jacket olive parka", "m-shell-suit-swishy": "jacket teal track pc:pink", "m-charity-shop-tweed": "jacket tweed blazer pat:tweed tag:£3",
   "m-novelty-christmas-jumper": "jacket red jumper pat:xmas", "m-wristband-from-a-gig": "wristband red", "m-plaster-on-the-knee": "plaster tan",
   "m-fidget-spinner": "spinner green", "m-gold-star-sticker": "sticker gold", "m-four-leaf-clover-laminated": "clover green tag",
   "m-garden-fork-bent": "gardenfork red", "m-riot-shield-tray": "tray steel", "m-hockey-stick-taped": "hockeystick green",
   "m-encyclopaedia-volume-k": "book purple volk", "m-raffle-prize-rolling-pin": "rollingpin yellow", "m-welders-apron": "apron brown",
-  "m-motorbike-leathers": "jacket black leathers pat:racing", "m-running-club-vest": "jacket green singlet", "m-professors-cardigan": "jacket brown cardigan pens:1",
+  "m-motorbike-leathers": "jacket black leathers pat:racing", "m-running-club-vest": "jacket green singlet", "m-professors-cardigan": "jacket brown cardigan pens:1 elbow:1",
   "m-lucky-rugby-shirt": "jacket green rugby pc:yellow", "m-medal-from-sports-day": "medal blue", "m-whistle-on-a-lanyard": "whistle red lanyard",
   "m-stopwatch-cracked": "stopwatch green", "m-pocket-calculator": "calculator purple", "m-bingo-dabber": "dabber pink",
   "m-sledgehammer-from-the-shed": "hammer rust +web@br", "m-lollipop-sign-reinforced": "sign red rivets", "m-carbon-walking-pole": "pole blue carbon",
@@ -2240,18 +2606,18 @@ const ITEM_ART = {
   "m-lottery-winners-dressing-gown": "jacket purple gown pat:coins trim:gold", "m-prize-bulls-rosette": "rosette red", "m-lighthouse-lens-shard": "lens cyan",
   "m-pigeon-racing-ring": "legring red", "m-enigma-rotor": "rotor steel", "m-wishing-well-penny": "penny brown",
   "m-hammer-of-the-green-man": "hammer green bark", "m-shield-oar-of-the-last-viking": "oar red", "m-spring-heeled-jacks-cane": "cane black",
-  "m-merlins-lecture-notes": "book blue notes", "m-black-dogs-lead": "lead black", "m-giants-causeway-plate": "plate stone pat:hex",
-  "m-armour-of-the-lambton-worm": "plate green pat:scales", "m-wild-hunt-riding-cloak": "cloak maroon clasp:antler", "m-druids-mistletoe-robe": "robe white emb:mistletoe trim:green belt:green ink:1",
+  "m-merlins-lecture-notes": "book blue notes", "m-black-dogs-lead": "lead black", "m-giants-causeway-plate": "plate stone pat:hex cut:hex",
+  "m-armour-of-the-lambton-worm": "plate green pat:scales cut:scale", "m-wild-hunt-riding-cloak": "cloak maroon clasp:antler fur:1 edge:tatter", "m-druids-mistletoe-robe": "robe white emb:mistletoe trim:green belt:green ink:1",
   "m-selkies-sealskin-coat": "jacket slate coat pat:spots", "m-kelpies-bridle": "bridle teal", "m-witch-bottle-from-a-chimney": "witchbottle brown",
   "m-will-o-the-wisp-in-a-jar": "jar cyan wisp", "m-merlins-spectacles": "glasses gold +glow +stars", "m-hares-foot-of-the-moor": "harefoot tan",
   "m-hammer-from-the-first-forge": "hammer orange smith", "m-hadrians-gatepost": "gatepost stone", "m-ley-line-divining-rod": "dowsing teal l",
   "m-book-of-the-long-count": "book brown tally", "m-wheel-of-the-last-ferryman": "shipwheel brown", "m-sutton-hoo-helm-and-mail": "suttonhoo bronze",
-  "m-mail-of-the-round-table": "jacket steel mail emb:table ex:32 ey:30 es:1.3", "m-cloak-of-the-long-walkers": "cloak green pat:road", "m-robe-of-the-standing-stones": "robe stone pat:stones trim:green",
+  "m-mail-of-the-round-table": "jacket steel mail emb:table ex:32 ey:30 es:1.3", "m-cloak-of-the-long-walkers": "cloak green pat:road pat2:footsteps edge:tatter hem:khaki", "m-robe-of-the-standing-stones": "robe stone pat:stones trim:green",
   "m-fools-motley-of-fortune": "motley red pc:yellow", "m-tooth-of-the-lambton-worm": "tooth bone", "m-stone-from-stonehenge-small": "trilithon stone",
   "m-bell-from-a-drowned-church": "bell bronze drowned", "m-astrolabe-of-the-long-count": "astrolabe gold", "m-coin-from-the-ferryman": "penny bronze ferry",
   "m-thunderclap-mallet": "hammer blue mallet +bolt@br", "m-cloudbreaker-pike": "pike sky cloud", "m-jet-stream-fan": "handfan cyan",
-  "m-weather-station-almanac": "book orange almanac", "m-rainbows-end-whip": "whip gold rainbow", "m-stormfront-plate": "plate slate emb:storm",
-  "m-hailstone-hauberk": "jacket ice mail", "m-slipstream-suit": "suit cyan skin pc:white", "m-aurora-scholars-robe": "robe navy pat:aurora",
+  "m-weather-station-almanac": "book orange almanac", "m-rainbows-end-whip": "whip gold rainbow", "m-stormfront-plate": "plate slate emb:storm cut:jag",
+  "m-hailstone-hauberk": "jacket ice mail pat2:hail", "m-slipstream-suit": "suit cyan skin pc:white", "m-aurora-scholars-robe": "robe navy pat:aurora",
   "m-cloud-nine-smoking-jacket": "jacket sky smoking pat:clouds trim:navy", "m-lightning-in-a-bottle": "lightbottle yellow", "m-kite-line-to-heaven": "kite red",
   "m-swifts-feather": "feather slate", "m-barometer-brooch": "barometer gold", "m-sunbeam-through-cloud": "sunbeam yellow",
   "m-meteorite-maul": "hammer orange maul", "m-polestar-lance": "lance navy star", "m-comet-tail-whip": "whip cyan comet",
@@ -2262,7 +2628,7 @@ const ITEM_ART = {
   "m-hammer-that-struck-midnight": "hammer black clock", "m-gate-of-the-last-morning": "fivebar wood", "m-hand-of-the-first-clock": "clockhand gold",
   "m-ledger-of-every-step": "book maroon steps", "m-thread-of-fate-frayed": "spool red", "m-armour-of-the-unmoving-hour": "plate gold emb:hourglass es:1.6",
   "m-shell-of-the-world-turtle": "turtleshell green", "m-coat-of-the-endless-road": "jacket brown coat pat:road close:none", "m-robe-woven-from-tomorrow": "robe purple pat:clocks emb:sun",
-  "m-mantle-of-the-last-lucky-break": "cloak grass clasp:clover hem:gold", "m-heart-of-the-long-count": "heart red", "m-keystone-of-the-sky": "keystone stone",
+  "m-mantle-of-the-last-lucky-break": "cloak grass clasp:clover hem:gold emb:horseshoe ex:32 ey:42 es:1.3", "m-heart-of-the-long-count": "heart red", "m-keystone-of-the-sky": "keystone stone",
   "m-hourglass-of-spare-seconds": "hourglass cyan", "m-the-final-footnote": "quill red", "m-wish-that-came-true": "chime pink",
 };
 const SLOT_MOTIF = { weapon: "blade", armour: "plate", trinket: "gem" };
@@ -2283,23 +2649,24 @@ function parseRow(row) {
 function resolve(item) {
   const id = typeof item === "string" ? item : (item && item.id) || "";
   if (ITEM_ART[id]) return parseRow(ITEM_ART[id]);
+  if (/^s\d+-/.test(id) && !/^s1-/.test(id)) return seasonResolve(item);
   // Gear added later without a row: drawn from what it looks like, coloured by its style.
   if (item && item.look && LOOK_MOTIF[item.look]) return { motif: LOOK_MOTIF[item.look], tint: STYLE_TINT[item.market] || "gold", variant: item.look === "vest" ? "hivis" : "", o: {}, ov: [] };
   const slot = (item && item.slot) || "trinket";
   return { motif: SLOT_MOTIF[slot] || "gem", tint: TINT_ORDER[hash(id) % TINT_ORDER.length], variant: "", o: {}, ov: [] };
 }
-function art(motif, tint, size, variant, o, ov) {
+function artRaw(motif, tint, size, variant, o, ov) {
   const fn = M[motif] || M.gem, q = T[tint] || P[tint] || T.gold;
   let body = fn(q, variant || "", o || {});
   if (ov && ov.length) body = overlay(body, ov, q);
   size = size || 64;
   return `<svg ${NS} viewBox="0 0 64 64" width="${size}" height="${size}" focusable="false" aria-hidden="true">${body}</svg>`;
 }
+const art = (...a) => uniq(artRaw(...a));
 const artCache = {};
 function item(it, size) {
   const r = resolve(it), key = (typeof it === "string" ? it : (it && it.id) || "") + "|" + (size || 64);
-  if (artCache[key]) return artCache[key];
-  return (artCache[key] = art(r.motif, r.tint, size, r.variant, r.o, r.ov));
+  return uniq(artCache[key] || (artCache[key] = artRaw(r.motif, r.tint, size, r.variant, r.o, r.ov)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -2317,7 +2684,7 @@ function coin(size) {
     `<path transform="translate(32 31) rotate(12) scale(.92)" d="${FOOT}" fill="#fff0b0"/>` +
     `<path transform="translate(32.5 31.6) rotate(12) scale(.92)" d="${FOOT}" fill="#ffd45a"/>` +
     Gl(18.5, 17.5, 6, 2.6, -42, .9) + Sp(50, 11, 5);
-  return `<svg ${NS} viewBox="0 0 64 64" width="${size}" height="${size}" focusable="false" aria-hidden="true">${body}</svg>`;
+  return uniq(`<svg ${NS} viewBox="0 0 64 64" width="${size}" height="${size}" focusable="false" aria-hidden="true">${body}</svg>`);
 }
 function gem(size) {
   size = size || 20;
@@ -2337,7 +2704,7 @@ function gem(size) {
     `<circle cx="32" cy="32" r="7.5" fill="#0d1a3a" stroke="${INK}" stroke-width="3"/><circle cx="32" cy="32" r="7.5" fill="none" stroke="#c8f6ff" stroke-width="1.6" opacity=".7"/>` +
     `<path d="M29 9L31 22" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".8"/>` +
     Sp(50, 12, 4.5) + Sp(13, 50, 3);
-  return `<svg ${NS} viewBox="0 0 64 64" width="${size}" height="${size}" focusable="false" aria-hidden="true">${body}</svg>`;
+  return uniq(`<svg ${NS} viewBox="0 0 64 64" width="${size}" height="${size}" focusable="false" aria-hidden="true">${body}</svg>`);
 }
 
 root.Icons = {
