@@ -296,7 +296,7 @@ function dressTaxman(obj, punch) {
   };
   if (head) {
     const gold = toon(0xf2b51d, { emissive: 0x221100 });
-    const hat = topHat(0.62); hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
+    const hat = topHat(0.84); hat.position.set(0, 0.6, 0.04); hat.rotation.set(-0.04, 0, -0.08);
     const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.13, 0.37, 0.5);
     const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.22, 0.18, 0.47); chain.rotation.z = 0.4;
     const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain); inner.scale.setScalar(0.75); wrap.add(inner);
@@ -324,7 +324,7 @@ function dressTaxman(obj, punch) {
       m.material = m.material.clone(); m.material.color.setHex(0x2b1a12);
     }
     head.scale.multiplyScalar(1.22);
-    obj.userData.headroom = 0.55; // the hat now stands above the height the model was fitted to (portraits frame it in)
+    obj.userData.headroom = 0.9; // the hat now stands above the height the model was fitted to (portraits frame it in)
   }
   if (!hand) return;
   const fist = [];

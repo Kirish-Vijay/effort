@@ -221,7 +221,7 @@ function statRows(st) {
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
     return `<div class="stat" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(g[s.id], max)}"></i><b class="avg" style="left:${barPct(avg[s.id], max)}"></b></div><span class="sv">${fmt(g[s.id])}</span></div>`;
+      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(Math.round(g[s.id]), max)}"></i><b class="avg" style="left:${barPct(avg[s.id], max)}"></b></div><span class="sv">${fmt(g[s.id])}</span></div>`;
   }).join("") + `<p class="stat-key"><b class="avg"></b>Squad average</p>`;
 }
 function botKit(cls, kind) {

@@ -1216,7 +1216,7 @@ function statRows(st, gear = me().gear, inv = S.D.inv) {
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
     return `<div class="stat fx" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(g[s.id], max)}"></i>${avg ? `<b class="avg" style="left:${barPct(avg[s.id], max)}"></b>` : ""}</div><span class="sv">${fmt(g[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
+      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(Math.round(g[s.id]), max)}"></i>${avg ? `<b class="avg" style="left:${barPct(avg[s.id], max)}"></b>` : ""}</div><span class="sv">${fmt(g[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
   }).join("") + (avg ? `<p class="stat-key"><b class="avg"></b>Squad average</p>` : "");
 }
 // What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
@@ -1400,14 +1400,14 @@ const myCrateOdds = () => G.crateOdds(level(), S.D.today.day);
 function gambaPanel() {
   const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0, junk = junkDrawer();
   const pack = (pk) => { const it = G.houseItem(pk.id), over = week + pk.pence > Gm.weeklyPence;
-    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}>${pk.buckets} buckets · ${G.pounds(pk.pence)}</button>`; };
+    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}><b>${pk.buckets} buckets</b><small>${G.pounds(pk.pence)}</small></button>`; };
   const odds = myCrateOdds();
   return `<section class="panel gamba">
       <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
       <div class="bucket-stage">${bucketArt("legendary")}</div>
       <button class="oddsbar" data-act="gamba-odds" aria-label="Odds">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</button>
-      ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Open a bucket ${priceTag(Gm.price)}</button>`
-        : credits ? `<button class="btn gold xl block" data-act="gamba-buy">Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
+      ${left ? `<button class="btn gold xl block${S.gambaBusy ? " loading" : ""}" data-act="gamba-buy" data-off="${S.D.wallet >= Gm.price ? 0 : 1}" ${S.D.wallet >= Gm.price && !S.gambaBusy ? "" : "disabled"}>Open a bucket ${priceTag(Gm.price)}</button>`
+        : credits ? `<button class="btn gold xl block${S.gambaBusy ? " loading" : ""}" data-act="gamba-buy" ${S.gambaBusy ? "disabled" : ""}>Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
       <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "Back at midnight"}${credits && left ? ` · ${credits} bought waiting` : ""}${Object.keys(junk).length ? ` · <button class="linkbtn" data-act="junk">Junk drawer (${Object.values(junk).reduce((a, b) => a + b, 0)})</button>` : ""}</p>
       <div class="gamba-more">
         <span class="field-label">More buckets for real money</span>
@@ -1430,15 +1430,24 @@ function gambaOdds() {
     </div>
     <p class="tiny faint" style="margin:10px 0 0">Duplicates sell straight back.</p>`);
 }
+// One bucket per tap: the button locks until the server answers. The server only charges a bucket that rolled, so
+// on any error the wallet is left alone and the numbers are pulled fresh.
+const gambaLock = (on) => { S.gambaBusy = on; for (const b of document.querySelectorAll('[data-act="gamba-buy"]')) { b.disabled = on || b.dataset.off === "1"; b.classList.toggle("loading", on); } };
+const gambaErr = (e) => (e instanceof TypeError || /^(Server error|Request failed|Couldn't reach)/.test(e.message) ? "Couldn't open it. Try again" : e.message);
 async function gambaBuy() {
-  if (S.busy) return; S.busy = true;
+  if (S.busy || S.gambaBusy) return;
+  S.busy = true; gambaLock(true);
   let r;
   try { r = await call("gamba", { token: S.token }); }
-  catch (e) { toast(e.message); return; }
-  finally { S.busy = false; }
+  catch (e) { S.busy = false; gambaLock(false); toast(gambaErr(e)); refresh(true); return; }
+  S.busy = false; gambaLock(false);
   S.D.gamba = { ...S.D.gamba, today: G.GAMBA.perDay - r.left, credits: r.credits };
+  // A piece this phone's catalogue doesn't know yet (the app is a version behind): it's in the bag all the same.
+  if (!G.itemById(r.item)) { S.D.wallet = r.wallet; toast("Opened. It's in your bag"); refresh(true); return; }
   FX.play("buy");
-  gambaReveal(r);
+  // If the opening can't draw, never leave its overlay stuck over the app: the piece is in the bag regardless.
+  try { gambaReveal(r); }
+  catch (e) { console.error(e); document.querySelector(".gamba-reveal")?.remove(); FX.destroy?.(); S.D.wallet = r.wallet; toast("Opened. It's in your bag"); refresh(true); }
 }
 // Old buckets paid out junk to a drawer on this phone; it's still there to look at.
 const junkDrawer = () => store.get(`junk:${me().id}`) || {};
@@ -1608,7 +1617,7 @@ function gambaReveal(r) {
       };
     }
   };
-  const more = r.left > 0 || r.credits > 0, on = !r.dupe && !me().gear?.[it.slot]; // the server puts it straight on an empty slot
+  const more = r.left > 0 ? r.wallet >= G.GAMBA.price : r.credits > 0, on = !r.dupe && !me().gear?.[it.slot]; // the server puts it straight on an empty slot
   const equipped = `<span class="gr-on">${ic("check")} Equipped</span>`;
   const showCard = () => {
     el.classList.add("carded");
@@ -2214,7 +2223,7 @@ function viewReveal() {
     <h1 class="ol disp" style="margin:8px 0 2px;font-size:32px">${esc(a.name || "You")}</h1>
     <div class="chip gold" style="margin:4px auto 10px">${esc(cls.name)}</div>
     <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
-    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st), max = statScale(...Object.values(st)); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${barPct(st[s.id], max)}"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
+    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st), max = statScale(...Object.values(st)); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${barPct(st[s.id], max)}"></i></div><span class="sv">${fmt(st[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
       <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go. Gold names are your class's stats, and your class gear piles more onto your best one.</p></section>
     <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">That's me</button></div>
   </section>`;

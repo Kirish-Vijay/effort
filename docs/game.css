@@ -132,6 +132,8 @@ svg.ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.15em
 .btn::after { content: ""; position: absolute; left: 8px; right: 8px; top: 4px; height: 38%; border-radius: 10px 10px 40% 40% / 10px 10px 100% 100%; background: linear-gradient(180deg, rgba(255,255,255,.3), rgba(255,255,255,0)); pointer-events: none; }
 .btn:active:not(:disabled) { transform: translateY(3px); box-shadow: inset 0 2px 0 rgba(255,255,255,.42), inset 0 -2px 0 rgba(0,0,0,.18), 0 1px 0 var(--ink); }
 .btn:disabled { filter: grayscale(.85) brightness(.75); cursor: default; }
+.btn.loading:disabled { filter: none; opacity: .8; animation: btnwait .7s ease-in-out infinite alternate; }
+@keyframes btnwait { to { opacity: .55; } }
 .btn .ic { font-size: 1.15em; }
 .btn.gold { --t: #ffe68a; --m: #ffc83d; --b: #f09a0c; }
 .btn.green { --t: #a6f57d; --m: #4fd67f; --b: #1f9e52; }
@@ -248,8 +250,8 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .slot .ph { font-size: 30px; opacity: .45; display: grid; justify-items: center; gap: 6px; }
 .slot .ph span { font: 700 10px/1 var(--ui); letter-spacing: .1em; text-transform: uppercase; }
 .slot.full { --rc: var(--r-common); background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--rc) 55%, #fff 0%), color-mix(in srgb, var(--rc) 35%, var(--inset)) 70%); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rc) 80%, #fff 0%), 0 3px 0 var(--ink); }
-.slot.full .art { width: 74%; height: 74%; }
-.slot .slab { position: absolute; left: 6px; right: 6px; bottom: 6px; text-align: center; font: 700 10px/1.1 var(--ui); letter-spacing: .02em; color: #fff; text-shadow: 0 1px 2px #000; overflow-wrap: anywhere; }
+.slot.full .art { width: 70%; height: 70%; margin-bottom: 18px; }
+.slot .slab { position: absolute; left: 6px; right: 6px; bottom: 6px; text-align: center; font: 700 10px/1.1 var(--ui); letter-spacing: .02em; color: #fff; text-shadow: 0 1px 2px #000; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .items { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .item { --rc: var(--r-common); position: relative; display: grid; grid-template-rows: auto auto 1fr auto; text-align: left; border-radius: 16px; border: 2px solid var(--ink); padding: 0; overflow: hidden; cursor: pointer; color: var(--text);
   background: linear-gradient(180deg, #24326a, #182452); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rc) 70%, transparent), 0 4px 0 var(--ink); }
@@ -971,7 +973,7 @@ button.oddsbar { width: 100%; padding: 0; margin: 0 0 12px; cursor: pointer; bac
   background: rgba(20,8,16,.72); color: #ff7a8a; font: 400 25px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; animation: stamp .36s cubic-bezier(.2,1.4,.4,1) .3s both; }
 @keyframes stamp { from { scale: 2.6; opacity: 0; } 60% { opacity: 1; } }
 .gamba-reveal .gr-art.melt { animation: melt .55s cubic-bezier(.5,0,.8,.4) forwards; }
-@keyframes melt { to { transform: scale(.55) rotate(-8deg); opacity: .18; filter: grayscale(1) drop-shadow(0 0 0 transparent); } }
+@keyframes melt { to { transform: scale(.74) rotate(-8deg); opacity: .42; filter: grayscale(1) drop-shadow(0 0 0 transparent); } }
 .gamba-reveal .coinfly { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
 .gamba-reveal .coinfly span { position: absolute; left: 0; top: 0; width: 26px; height: 26px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.45)); }
 .gamba-reveal .coinfly svg { width: 26px; height: 26px; display: block; }
@@ -1030,6 +1032,8 @@ button.oddsbar { width: 100%; padding: 0; margin: 0 0 12px; cursor: pointer; bac
 .shopfeature b { display: block; font: 400 15px/1.1 var(--display); }
 .shopfeature small { display: block; font-size: 11.5px; color: rgba(255,255,255,.75); margin-top: 2px; }
 .gamba-more { margin-top: 14px; padding-top: 12px; border-top: 1.5px solid var(--line-2); }
+.gamba-more .btn { flex-direction: column; gap: 2px; padding-top: 9px; padding-bottom: 9px; line-height: 1; white-space: nowrap; }
+.gamba-more .btn small { font: 600 13px/1 var(--ui); opacity: .85; letter-spacing: 0; }
 .tabs-sub { flex-wrap: wrap; overflow-x: visible; margin: 0; padding: 2px 0 4px; }
 .skincard.on { outline: 3px solid var(--gold); outline-offset: 1px; }
 .skinsw.own { background: var(--panel); display: grid; place-items: center; }
