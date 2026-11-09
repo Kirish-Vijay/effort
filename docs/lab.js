@@ -205,14 +205,24 @@ function syncSliders() {
 }
 
 // ---------- Raid ----------
+// The same bars as the app: one scale per panel (the next round milestone above the biggest number), whole numbers,
+// and a notch for the test squad's average.
+const STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+function statScale(...vals) {
+  const top = Math.max(10, ...vals.filter(Number.isFinite)) * 1.12;
+  for (let p = 1; ; p *= 10) for (const k of STEPS) if (k * p >= top) return k * p;
+}
+const barPct = (v, max) => `${Math.min(100, (Math.max(0, v || 0) / max) * 100).toFixed(1)}%`;
 function statRows(st) {
   const { g } = G.loadout(st, L.equipped, L.inv);
-  const fill = (v) => `${(G.statFill(v) * 100).toFixed(1)}%`; // never full: bigger stats keep drawing longer bars
+  const gs = botSquad().map((m) => G.loadout(m.stats, m.equipped, m.inv).g);
+  const avg = Object.fromEntries(G.STATS.map(({ id }) => [id, gs.reduce((a, x) => a + (x[id] || 0), 0) / gs.length]));
+  const max = statScale(...G.STATS.map(({ id }) => g[id]), ...Object.values(avg));
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
     return `<div class="stat" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${fill(st[s.id])}"></i><i class="gear" style="width:calc(${fill(g[s.id])} - ${fill(st[s.id])})"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span></div>`;
-  }).join("");
+      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(g[s.id], max)}"></i><b class="avg" style="left:${barPct(avg[s.id], max)}"></b></div><span class="sv">${fmt(g[s.id])}</span></div>`;
+  }).join("") + `<p class="stat-key"><b class="avg"></b>Squad average</p>`;
 }
 function botKit(cls, kind) {
   if (kind === "none") return {};
@@ -283,8 +293,7 @@ function tabRaid() {
       <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2><span class="side chip gold">Best: ${G.posOf(sug).label}</span></div>
       <p class="small muted" style="margin:-4px 0 8px">${esc(cls.blurb)} Your top two stats set your class, and your class sets your gear.</p>
       ${statRows(st)}
-      <p class="tiny faint" style="margin:6px 0 10px">Striped = from gear. Stats always total ${G.STAT_TOTAL} before gear.</p>
-      <div class="btn-row"><button class="btn xs" data-act="reroll">${ic("refresh")} New walker</button><button class="btn xs blue" data-act="use-mine">Use my walker</button></div>
+      <div class="btn-row" style="margin-top:12px"><button class="btn xs" data-act="reroll">${ic("refresh")} New walker</button><button class="btn xs blue" data-act="use-mine">Use my walker</button></div>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></div>

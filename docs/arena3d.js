@@ -81,31 +81,98 @@ function buildAlgorithm() {
   antenna.position.set(0, 5.35, 0); root.add(antenna);
   return { root, height: 5.4, parts: { body, armL, armR, legL, legR, antenna, screen }, drawFace };
 }
-// The Taxman's nose: very big but a real one, in his own skin (pass the face's material). No outline and no red bulb:
-// a bridge narrowing between the eyes, a slight hump, a rounded tip, wings either side and nostrils underneath. It
-// hangs from the top of the bridge (0,0,0): -y runs down the nose, +z out of the face. About 0.34 long at s = 1.
-function taxNose(skin, s = 1) {
-  const nose = new THREE.Group(), L = 0.34;
-  // The body of the nose: a sphere pushed into shape. t runs 0 at the bridge to 1 under the tip, where it meets the lip.
-  const geo = new THREE.SphereGeometry(1, 40, 32), p = geo.attributes.position, v = new THREE.Vector3();
-  const sm = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const t = (1 - v.y) / 2;
-    const width = 0.032 + 0.05 * Math.pow(t, 1.6) + 0.018 * sm(0.7, 0.92, t);
-    const out = (0.03 + 0.21 * sm(0, 0.84, t) + 0.012 * Math.exp(-(((t - 0.38) / 0.13) ** 2))) * (1 - 0.85 * sm(0.86, 1, t));
-    p.setXYZ(i, v.x * width, -t * L, v.z > 0 ? v.z * out : v.z * 0.02);
+// The Taxman's nose: long and big, but a real human one, in his own skin (pass the face's material). It's one smooth
+// surface, not stuck-on balls: a distance field of the parts of a nose (a narrow bridge with a slight hump, a rounded
+// tip, the wings either side with a soft crease behind them, the column under the tip, and wide sidewalls that run
+// back into the cheeks) blended together, with the nostrils carved out underneath. A sphere is shrink-wrapped onto it
+// and lit with the field's own normals, so it shades smoothly. It hangs from the top of the bridge (0,0,0): -y runs
+// down the nose, +z out of the face. About 0.25 long and 0.15 out from the face at s = 1.
+const NOSE_GEO = new Map();
+function noseGeometry() {
+  if (NOSE_GEO.has("v")) return NOSE_GEO.get("v");
+  const V = THREE.Vector3;
+  // Ellipsoid (centre c, radii r): a good-enough signed distance (Quilez's bound).
+  const ell = (p, c, r) => {
+    const x = (p.x - c[0]) / r[0], y = (p.y - c[1]) / r[1], z = (p.z - c[2]) / r[2];
+    const k0 = Math.hypot(x, y, z), k1 = Math.hypot(x / r[0], y / r[1], z / r[2]);
+    return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -Math.min(...r);
+  };
+  // Capsule from a to b with the radius running ra -> rb, squeezed sideways by sx (narrower bridge).
+  const cap = (p, a, b, ra, rb, sx = 1) => {
+    const px = p.x / sx, ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [px - a[0], p.y - a[1], p.z - a[2]];
+    const h = Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / (ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2)));
+    return Math.hypot(ap[0] - ab[0] * h, ap[1] - ab[1] * h, ap[2] - ab[2] * h) - (ra + (rb - ra) * h);
+  };
+  const smin = (a, b, k) => { const h = Math.max(0, Math.min(1, 0.5 + (0.5 * (b - a)) / k)); return b + (a - b) * h - k * h * (1 - h); };
+  const smax = (a, b, k) => -smin(-a, -b, k);
+  const field = (p) => {
+    // The bridge: narrow at the top, a slight hump a third of the way down, filling out towards the tip.
+    let d = cap(p, [0, 0.01, -0.004], [0, -0.19, 0.11], 0.021, 0.036, 0.92);
+    d = smin(d, ell(p, [0, -0.085, 0.052], [0.027, 0.05, 0.022]), 0.03);
+    // Sidewalls: wide and shallow, so the nose rises out of the cheeks instead of sitting on them.
+    d = smin(d, ell(p, [0, -0.118, -0.03], [0.066, 0.122, 0.05]), 0.045);
+    // The tip (two domes, barely parted) and the column under it.
+    d = smin(d, ell(p, [-0.012, -0.203, 0.106], [0.037, 0.04, 0.039]), 0.03);
+    d = smin(d, ell(p, [0.012, -0.203, 0.106], [0.037, 0.04, 0.039]), 0.03);
+    d = smin(d, cap(p, [0, -0.232, 0.092], [0, -0.24, 0.02], 0.018, 0.016), 0.02);
+    // The wings, with a softer join so a faint crease shows where they meet the tip.
+    for (const x of [-1, 1]) d = smin(d, ell(p, [x * 0.054, -0.214, 0.032], [0.036, 0.033, 0.05]), 0.018);
+    // Nostrils, carved up into the underside and angled out.
+    for (const x of [-1, 1]) d = smax(d, -ell(p, [x * 0.027, -0.247, 0.056], [0.015, 0.012, 0.028]), 0.008);
+    return d;
+  };
+  const geo = new THREE.SphereGeometry(1, 76, 60), pos = geo.attributes.position, nrm = geo.attributes.normal;
+  const C = new V(0, -0.14, 0.062), dir = new V(), q = new V(), e = 0.0007;
+  for (let i = 0; i < pos.count; i++) {
+    dir.fromBufferAttribute(pos, i); dir.set(dir.x, dir.y * 2.3, dir.z * 1.15).normalize();
+    // March out from inside to the first point that leaves the surface, then bisect.
+    let lo = 0, hi = 0;
+    for (let t = 0.0025; t < 0.45; t += 0.0025) { if (field(q.copy(dir).multiplyScalar(t).add(C)) > 0) { hi = t; break; } lo = t; }
+    if (!hi) hi = lo;
+    for (let k = 0; k < 10; k++) { const m = (lo + hi) / 2; if (field(q.copy(dir).multiplyScalar(m).add(C)) > 0) hi = m; else lo = m; }
+    q.copy(dir).multiplyScalar((lo + hi) / 2).add(C);
+    pos.setXYZ(i, q.x, q.y, q.z);
+    const n = new V(field(new V(q.x + e, q.y, q.z)) - field(new V(q.x - e, q.y, q.z)), field(new V(q.x, q.y + e, q.z)) - field(new V(q.x, q.y - e, q.z)), field(new V(q.x, q.y, q.z + e)) - field(new V(q.x, q.y, q.z - e))).normalize();
+    nrm.setXYZ(i, n.x, n.y, n.z);
   }
-  geo.computeVertexNormals();
-  const body = new THREE.Mesh(geo, skin); nose.add(body);
-  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.064, 24, 18), skin); tip.scale.set(1.1, 0.9, 0.85); tip.position.set(0, -0.8 * L, 0.168); nose.add(tip);
+  geo.computeBoundingSphere();
+  NOSE_GEO.set("v", geo);
+  return geo;
+}
+function taxNose(skin, s = 1) {
+  const nose = new THREE.Group();
+  nose.add(new THREE.Mesh(noseGeometry(), skin));
+  // The dark inside of each nostril, up in the carved hollow: seen from below, only a shadow from the front.
   for (const x of [-1, 1]) {
-    const ala = new THREE.Mesh(new THREE.SphereGeometry(0.046, 20, 14), skin); ala.scale.set(0.7, 0.62, 1.3); ala.position.set(x * 0.056, -0.885 * L, 0.07); ala.rotation.y = x * 0.55; nose.add(ala);
-    // Nostrils: dark, flattened, tucked under the wings so they show from below and only just from the front.
-    const hole = new THREE.Mesh(new THREE.SphereGeometry(0.022, 14, 10), toon(0x4a2620)); hole.scale.set(1, 0.4, 1.7); hole.position.set(x * 0.032, -0.95 * L, 0.1); hole.rotation.y = -x * 0.35; nose.add(hole);
+    const hole = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), toon(0x5a2e26));
+    hole.scale.set(0.009, 0.005, 0.017); hole.position.set(x * 0.027, -0.236, 0.056); hole.rotation.y = -x * 0.35; nose.add(hole);
   }
   nose.scale.setScalar(s);
   return nose;
+}
+// Toon material with a cool rim of light round its silhouette, so dark things (the Taxman's top hat) still read
+// against the dark green arena.
+function rimToon(color, rim = 0x93a3bf, power = 2.4, strength = 0.42) {
+  const m = toon(color), rc = new THREE.Color(rim);
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.rimColor = { value: rc.multiplyScalar(strength) };
+    sh.fragmentShader = sh.fragmentShader.replace("void main() {", `uniform vec3 rimColor;\nvoid main() {`)
+      .replace("#include <dithering_fragment>", `#include <dithering_fragment>\n  float rimK = pow(1.0 - clamp(abs(dot(normalize(vNormal), normalize(vViewPosition))), 0.0, 1.0), ${power.toFixed(2)});\n  gl_FragColor.rgb += rimColor * rimK;`);
+  };
+  m.customProgramCacheKey = () => `rim${rim}:${power}:${strength}`;
+  return m;
+}
+// The hat both Taxmen wear: a charcoal topper with a rim light, a lighter edge to the brim and a red band.
+// Sized so the brim is radius 1 at s = 1, sitting on y = 0.
+function topHat(s = 1) {
+  const hat = new THREE.Group(), felt = rimToon(0x1d212c), edge = toon(0x4b5266), red = toon(0xd9483b);
+  const brim = outlined(new THREE.CylinderGeometry(1, 1, 0.1, 36), felt, 1.04); hat.add(brim);
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(0.985, 0.045, 8, 48), edge); lip.rotation.x = Math.PI / 2; hat.add(lip);
+  const crown = outlined(new THREE.CylinderGeometry(0.62, 0.66, 1.13, 32), felt, 1.04); crown.position.y = 0.61; hat.add(crown);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.67, 0.672, 0.19, 32), red); band.position.y = 0.16; hat.add(band);
+  const top = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), toon(0x2b3140)); top.rotation.x = -Math.PI / 2; top.position.y = 1.18; hat.add(top);
+  hat.scale.setScalar(s);
+  return hat;
 }
 // A sack of your money, gathered at the neck: the neck sits at (0,0,0) for a fist to close round, the sack hangs
 // down -y. Wrinkles bunch up towards the tie, a frill sticks out above it, and the £ is printed on the front.
@@ -136,14 +203,20 @@ function buildTaxman() {
   const suit = toon(0x7d8a82), dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x332200 }), skin = toon(0xe9d8c4);
   const body = outlined(new THREE.CapsuleGeometry(1.0, 1.8, 8, 20), suit, 1.04); body.position.y = 2.0; body.scale.set(1, 1, 0.85); root.add(body);
   const head = outlined(new THREE.SphereGeometry(0.75, 24, 18), skin); head.position.y = 3.9; root.add(head);
-  const brim = outlined(new THREE.CylinderGeometry(1.0, 1.0, 0.1, 28), dark); brim.position.y = 4.5; root.add(brim);
-  const hat = outlined(new THREE.CylinderGeometry(0.62, 0.66, 1.1, 24), dark); hat.position.y = 5.05; root.add(hat);
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.665, 0.67, 0.18, 24), red); band.position.y = 4.65; root.add(band);
-  const eye = (x) => { const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.08, 0.64); const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), dark); p.position.set(0, 0, 0.12); e.add(p); return e; };
+  const hat = topHat(1); hat.position.y = 4.47; root.add(hat);
+  // Eyes with a dark iris and a glint of light, so he looks at you rather than past you.
+  const glint = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const eye = (x) => {
+    const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.08, 0.64);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 10), toon(0x3b2a1e)); iris.scale.z = 0.6; iris.position.set(0, -0.005, 0.12); e.add(iris);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), dark); p.scale.z = 0.6; p.position.set(0, -0.005, 0.165); e.add(p);
+    const g = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), glint); g.position.set(0.035, 0.035, 0.17); e.add(g);
+    return e;
+  };
   const eL = eye(-0.26), eR = eye(0.26); root.add(eL, eR);
   const mono = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 24), gold); mono.position.set(0.26, 4.08, 0.74); root.add(mono);
-  // Same material as the head, set into the face just below the eyes.
-  const nose = taxNose(skin, 2.2); nose.position.set(0, 4.12, 0.68); nose.rotation.x = 0.15; root.add(nose);
+  // Same material as the head: the bridge starts between the eyes and the nose runs down over the front of the face.
+  const nose = taxNose(skin, 2.15); nose.position.set(0, 4.14, 0.69); nose.rotation.x = 0.06; root.add(nose);
   const tie = outlined(new THREE.ConeGeometry(0.18, 0.9, 4), red); tie.position.set(0, 2.9, 0.86); tie.rotation.x = Math.PI; root.add(tie);
   const armL = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armL.position.set(-1.25, 2.4, 0); armL.rotation.z = -0.35; root.add(armL);
   const armR = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armR.position.set(1.25, 2.4, 0); armR.rotation.z = 0.35; root.add(armR);
@@ -198,7 +271,8 @@ function prepareModel(gltf, spec) {
   if (spec.taxman) dressTaxman(obj, byName.get("punch_right"));
   return { obj, mixer, clips, k };
 }
-// The Business Man model gets the Taxman's top hat, monocle and big nose (in the model's own skin), and his right hand
+// The Business Man model gets the Taxman's top hat (rim-lit, so it holds up against the dark arena), monocle and big
+// nose (in the model's own skin), a glint in each eye, and a head a fifth bigger so he reads next to the heroes. His right hand
 // closes into a fist round the neck of a sack of your money. punch: the model's Punch_Right clip, which holds a fist
 // the whole way through; that pose is held on his fingers every frame. obj.userData.tick() keeps the sack in the fist
 // and hanging under it: call it after each mixer update.
@@ -219,18 +293,36 @@ function dressTaxman(obj, punch) {
     bone.add(group);
   };
   if (head) {
-    const hat = new THREE.Group();
-    const dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x221100 });
-    const brim = outlined(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 28), dark); hat.add(brim);
-    const crown = outlined(new THREE.CylinderGeometry(0.38, 0.41, 0.7, 24), dark); crown.position.y = 0.38; hat.add(crown);
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.42, 0.12, 24), red); band.position.y = 0.1; hat.add(band);
-    hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
+    const gold = toon(0xf2b51d, { emissive: 0x221100 });
+    const hat = topHat(0.62); hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
     const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.13, 0.37, 0.5);
     const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.22, 0.18, 0.47); chain.rotation.z = 0.4;
-    // The nose starts between his eyes and sits on the face, tipped down a touch.
-    const nose = taxNose(skin || toon(0xe8c4a0), 1.35); nose.position.set(0, 0.41, 0.47); nose.rotation.x = 0.12;
-    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain, nose); inner.scale.setScalar(0.75); wrap.add(inner);
+    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain); inner.scale.setScalar(0.75); wrap.add(inner);
+    // The nose (in head units: the model's eyes sit at y 0.28, its face is z 0.36 down the middle) starts between his
+    // eyes and runs down to just above his top lip.
+    const nose = taxNose(skin || toon(0xe8c4a0), 1.1); nose.position.set(0, 0.345, 0.356); wrap.add(nose);
     pin(head, wrap);
+    // The model's eyes are plain dark boxes: find each one and give it a catchlight, up and out, on its front.
+    const eyeMesh = [];
+    obj.traverse((o) => { if (o.isMesh && /^eye$/i.test(o.material?.name || "")) eyeMesh.push(o); });
+    const glint = new THREE.MeshBasicMaterial({ color: 0xffffff }), hp = new THREE.Vector3(), v = new THREE.Vector3();
+    for (const m of eyeMesh) {
+      const pos = m.geometry.attributes.position, sides = [[], []];
+      head.updateWorldMatrix(true, false); wrap.updateWorldMatrix(true, false);
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i); if (m.isSkinnedMesh) m.applyBoneTransform(i, v);
+        wrap.worldToLocal(v.applyMatrix4(m.matrixWorld)); sides[v.x < 0 ? 0 : 1].push(v.clone());
+      }
+      sides.forEach((pts, k) => {
+        if (!pts.length) return;
+        const c = pts.reduce((a, p) => a.add(p), hp.set(0, 0, 0)).divideScalar(pts.length), front = Math.max(...pts.map((p) => p.z));
+        const out = k ? 1 : -1, g = new THREE.Mesh(new THREE.SphereGeometry(0.0115, 10, 8), glint);
+        g.position.set(c.x + out * 0.012, c.y + 0.014, front + 0.004); wrap.add(g);
+      });
+      m.material = m.material.clone(); m.material.color.setHex(0x2b1a12);
+    }
+    head.scale.multiplyScalar(1.22);
+    obj.userData.headroom = 0.55; // the hat now stands above the height the model was fitted to (portraits frame it in)
   }
   if (!hand) return;
   const fist = [];
@@ -312,7 +404,7 @@ function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) 
         obj.userData.tick?.();
         // Skinned meshes report bounds from an unposed skeleton, so frame from the size we normalised to.
         const hv = spec.hover || 0;
-        known = new THREE.Box3(new THREE.Vector3(-height * 0.42, hv, -height * 0.3), new THREE.Vector3(height * 0.42, hv + height, height * 0.3));
+        known = new THREE.Box3(new THREE.Vector3(-height * 0.42, hv, -height * 0.3), new THREE.Vector3(height * 0.42, hv + height + (obj.userData.headroom || 0), height * 0.3));
       } else {
         const b = (BUILT_IN[id] || BUILT_IN.algorithm)();
         obj = b.root; height = b.height; obj.rotation.y = -0.35;
