@@ -322,3 +322,29 @@ attack.
 | Dodge button that turns red and pulses when you're marked | MMO dodge | One button, 8s cooldown shown on it | Replaces three row buttons with one decision |
 
 Result screenshot: `combos-raid-screen.jpg` (a Hunt against Brett with three bots).
+
+
+---
+
+# Raid screens: HUD, boss intro, K.O. and results (9 Nov 2026)
+
+**Outcome.** The Sunday raid has to read like a top-tier mobile raid on a phone held upright: the boss always
+visible, your damage legible at a glance, a clear "nothing works yet" entrance, a K.O. that feels like a kill, and a
+results screen where the outcome is a title and the hardest hitter gets the credit (loot now follows damage). The
+audience is the same friend squad that plays Clash Royale, Brawl Stars and Pokémon GO.
+
+All references below are *(play knowledge)*: well-known in-game behaviour, not re-checked on the web for this board.
+
+| Reference | What it does exceptionally | Taken for Effort |
+|---|---|---|
+| **Pokémon GO raids** | Camera high behind your team, boss framed in the upper half; countdown before the battle opens | Higher raid camera looking down, squad pushed forward into the bottom third; countdown into "Fight!" |
+| **Monster Hunter Now / World** | Boss intro: letterbox bars, name card in the lower third, then control returns; "Hunt complete" held while the camera slows | Letterbox for the entrance and the K.O.; boss card in the lower third with a progress line; slow-mo push-in |
+| **Elden Ring / Dark Souls** | "Enemy felled" text held for the whole death beat while the body burns away into particles; no white-out | K.O. stamp held until results; dissolve in the stage colour with bloom eased down so the silhouette reads |
+| **Genshin Impact / Diablo Immortal** | Damage numbers with a heavy outline, crits bigger and warmer, numbers fan out instead of stacking | Ink-stroked numbers, crits 38px orange on dark red, alternating left/right lanes with jitter, short lift |
+| **World of Warcraft / Destiny raid frames** | One colour per player on the frame and the nameplate | A fixed per-slot colour on the party frame, its badge and the marker over the hero |
+| **Brawl Stars end screen** | "VICTORY" is a big title, not a button; the Star Player gets their own card | Gold display title with soft rays; MVP card with the walker's face |
+| **Raid: Shadow Legends clan boss** | Damage board ranked by damage with a bar per member | Rows sorted by damage, a colour bar per row, empty columns dropped |
+| **Clash Royale chest flow** | One primary action pinned to the bottom | Collect docked at the bottom; XP bar fills from the old total on Collect |
+
+Fonts unchanged: Lilita One and Rubik (SIL OFL), already self-consistent across the game.
+Banned defaults avoided: no new gradients or glass; colour carries meaning (gold = reward/you, per-slot squad colours).

@@ -1102,3 +1102,111 @@ s.was { color: var(--text-3); text-decoration-thickness: 2px; text-decoration-co
 .cmention button small { margin-left: auto; font: 600 11px/1 var(--ui); color: var(--text-3); }
 .cmention .cav .ic { width: 18px; height: 18px; color: var(--gold-hi); }
 .cmsg.pinged { box-shadow: inset 3px 0 0 var(--gold); background: rgba(255,200,61,.06); }
+
+/* ---------- Raid polish: cinema, K.O., party colours, damage board (Nov 2026) ----------
+   References: WoW/Destiny raid frames (one colour per player, on the frame and the nameplate), Monster Hunter and
+   Elden Ring boss intros and deaths (letterbox, name card, a held "felled" moment while the body burns away),
+   Brawl Stars / Clash Royale end screens (a title, not a button; an MVP up front), Raid: Shadow Legends clan-boss
+   damage board (ranked by damage, a bar per row). */
+.arena.raid .arena-stage { z-index: auto; } /* so the hero markers can sit above the effects layer */
+.arena.raid #plates { z-index: 7; }
+/* Letterbox bars for the entrance and the K.O. */
+.lb { position: absolute; left: 0; right: 0; height: 9%; z-index: 9; background: #02040b; pointer-events: none; transition: transform .45s cubic-bezier(.2,.8,.2,1); }
+.lb.top { top: 0; transform: translateY(-101%); box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.lb.bot { bottom: 0; transform: translateY(101%); box-shadow: 0 -6px 18px rgba(0,0,0,.45); }
+.arena.cine .lb { transform: none; }
+/* Entrance: everything that can't be used yet says so. */
+.arena .tele, .arena .taphint, .arena #combo, .arena .buffs, .arena #plates { transition: opacity .25s; }
+.arena.intro .tele, .arena.intro .taphint, .arena.intro .buffs, .arena.intro #feed, .arena.intro #plates { opacity: 0; }
+.arena.intro .controls > :not(.lockchip) { filter: grayscale(1) brightness(.5); pointer-events: none; }
+.arena.intro .controls .ready, .arena.intro .controls .hot { animation: none !important; box-shadow: none !important; }
+.controls { position: relative; }
+.lockchip { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; align-items: center; gap: 6px; padding: 7px 12px 7px 10px; border-radius: 99px;
+  background: rgba(2,4,11,.92); border: 1.5px solid rgba(255,255,255,.18); color: rgba(255,255,255,.85); font-size: 15px; box-shadow: 0 4px 14px rgba(0,0,0,.5); pointer-events: none; }
+.lockchip b { font: 400 18px/1 var(--display); color: var(--gold-hi); min-width: 10px; text-align: center; }
+.arena.intro .lockchip { display: inline-flex; }
+.bosscard { top: auto; bottom: calc(env(safe-area-inset-bottom) + 280px); gap: 8px; }
+.bosscard .cdl { display: block; width: 150px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.18); overflow: hidden; box-shadow: 0 1px 0 rgba(0,0,0,.5); }
+.bosscard .cdl s { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi)); }
+.bosscard .cdrow { display: flex; align-items: center; gap: 10px; padding-left: 30px; } /* balances the countdown digit on the right */
+.bosscard .count { min-width: 20px; font: 400 28px/1 var(--display); color: var(--gold-hi); text-align: left;
+  text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink); }
+.bosscard .count.pop { animation: countpop .5s cubic-bezier(.2,.8,.3,1.3) both; }
+@keyframes countpop { from { transform: scale(1.9); } }
+/* The K.O.: the fight's HUD leaves the moment it dies; the card holds until the results. */
+.arena.over .foot { opacity: 0; transform: translateY(28px); pointer-events: none; transition: opacity .3s, transform .35s; }
+.arena.over .tele, .arena.over .taphint, .arena.over #combo, .arena.over .buffs, .arena.over #plates { opacity: 0; pointer-events: none; }
+.kocard { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 52px); z-index: 21; display: grid; justify-items: center; gap: 4px; text-align: center; pointer-events: none; }
+.kocard .stamp { font: 400 92px/0.9 var(--display); letter-spacing: .01em; background: linear-gradient(180deg, #fff 22%, var(--gold-hi) 48%, var(--gold) 72%, var(--gold-lo)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 4px 0 var(--ink)) drop-shadow(3px 0 0 var(--ink)) drop-shadow(-3px 0 0 var(--ink)) drop-shadow(0 -3px 0 var(--ink)) drop-shadow(0 14px 22px rgba(0,0,0,.6));
+  animation: koslam .5s cubic-bezier(.2,.9,.25,1.25) both; }
+.kocard.lost .stamp { font-size: 68px; background: linear-gradient(180deg, #fff 20%, #c7cfe8 55%, #7f8bb3); -webkit-background-clip: text; background-clip: text; }
+.kocard .who { font: 400 24px/1 var(--display); color: #fff; text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink); animation: kofade .4s .35s both; }
+.kocard small { font: 700 11.5px/1 var(--ui); letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.8); text-shadow: 0 2px 4px #000; animation: kofade .4s .5s both; }
+@keyframes koslam { 0% { opacity: 0; transform: scale(2.6) rotate(-6deg); } 60% { opacity: 1; transform: scale(.94) rotate(1deg); } 100% { transform: none; } }
+@keyframes kofade { from { opacity: 0; transform: translateY(8px); } }
+/* Party frames: each squad-mate's colour on the frame, the badge and their marker in the arena; names fit, not cut. */
+.party { gap: 5px; padding-top: 9px; }
+.pf { grid-template-columns: minmax(0, 1fr); grid-template-rows: 13px 6px 3px; row-gap: 3px; padding: 11px 5px 5px; overflow: visible;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mc) 22%, rgba(10,15,38,.9)), rgba(10,15,38,.88) 70%); border: 1.5px solid color-mix(in srgb, var(--mc) 50%, transparent); }
+.pf .av { position: absolute; left: 50%; top: -9px; transform: translateX(-50%); width: auto; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; border: 1.5px solid var(--ink);
+  font: 800 9.5px/15px var(--ui); letter-spacing: .02em; text-align: center; display: block; }
+.pf.me .av { width: 22px; min-width: 0; height: 22px; padding: 0; top: -11px; border-radius: 50%; overflow: hidden; background: #e9efe4; border: 2px solid var(--gold); }
+.pf.me .av svg { display: block; width: 136%; height: 136%; margin: 8% 0 0 -18%; }
+.pf b { text-align: center; line-height: 13px; overflow: hidden; text-overflow: clip; letter-spacing: -.01em; }
+.pf .st { position: absolute; right: 3px; top: 2px; }
+.pf .hpb, .pf .spb { grid-column: 1; }
+.pf.me { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(255,200,61,.35); }
+.pf.dead .av { background: #5b6170; }
+.mk { width: auto; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; font: 800 9.5px/1 var(--ui); letter-spacing: .02em; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.mk.me { min-width: 0; padding: 0; box-shadow: none; }
+/* Results: the outcome as a title, the MVP up front, a damage board ranked by damage. */
+.results { padding-bottom: 0; }
+.results .inner { min-height: calc(100dvh - env(safe-area-inset-top) - 18px); display: flex; flex-direction: column; }
+.results .stack { flex: 1; display: flex; flex-direction: column; }
+.vhead { position: relative; text-align: center; padding: 10px 0 4px; }
+.vhead .rays { position: absolute; left: 50%; top: 38px; width: 360px; height: 360px; transform: translate(-50%, -50%); pointer-events: none; opacity: .5;
+  background: repeating-conic-gradient(from 0deg, rgba(255,214,102,.22) 0deg 6deg, rgba(255,214,102,0) 6deg 18deg);
+  -webkit-mask: radial-gradient(circle, #000 0%, rgba(0,0,0,.6) 30%, transparent 62%); mask: radial-gradient(circle, #000 0%, rgba(0,0,0,.6) 30%, transparent 62%); animation: rays 24s linear infinite; }
+.results.lost .vhead .rays { display: none; }
+@keyframes rays { to { transform: translate(-50%, -50%) rotate(360deg); } }
+.vtitle { position: relative; margin: 0; font: 400 60px/1 var(--display); letter-spacing: .01em; background: linear-gradient(180deg, #fff 20%, var(--gold-hi) 46%, var(--gold) 70%, var(--gold-lo)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 4px 0 var(--ink)) drop-shadow(2.5px 0 0 var(--ink)) drop-shadow(-2.5px 0 0 var(--ink)) drop-shadow(0 -2.5px 0 var(--ink)) drop-shadow(0 12px 18px rgba(0,0,0,.5)); animation: pop .5s cubic-bezier(.2,.9,.3,1.3); }
+.results.lost .vtitle { background: linear-gradient(180deg, #fff 20%, #c7cfe8 55%, #7f8bb3); -webkit-background-clip: text; background-clip: text; }
+.vhead .subline { position: relative; margin: 8px 0 14px; font: 600 12.5px/1 var(--ui); letter-spacing: .06em; color: var(--text-2); }
+.mvp { --mc: var(--gold); position: relative; display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px 12px 12px; border-radius: var(--radius); border: 2px solid var(--ink);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 26%, #1d2a5e), #152049 65%); box-shadow: inset 0 1.5px 0 rgba(255,255,255,.18), 0 4px 0 var(--ink); overflow: hidden; }
+.mvp::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1.5px rgba(255,214,102,.45); pointer-events: none; }
+.mvp .mface .face { width: 64px !important; height: 64px !important; border-radius: 50%; overflow: hidden; background: radial-gradient(circle at 50% 30%, #3a4f9a, #1d2a5e); border: 2.5px solid var(--gold); box-shadow: 0 0 0 2px var(--ink), 0 0 18px rgba(255,200,61,.45); }
+.mvp .mface .fb svg { width: 120%; height: 120%; margin-top: 16%; }
+.mvp .mtag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 7px; background: var(--ink); color: var(--gold-hi); font: 400 11.5px/1 var(--display); letter-spacing: .06em; }
+.mvp .mtx { min-width: 0; }
+.mvp .mtx b { display: block; margin: 4px 0 3px; font: 400 22px/1.05 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mvp .mtx small { display: block; font: 600 11.5px/1.25 var(--ui); color: var(--text-2); }
+.mvp .mloot { display: grid; justify-items: center; gap: 2px; font: 400 20px/1 var(--display); color: var(--gold-hi); }
+.mvp .mloot svg { width: 18px; height: 18px; }
+.dboard { padding: 12px 12px 6px; }
+.dhead, .drow { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--dc), minmax(38px, auto)); column-gap: 8px; align-items: center; }
+.dhead span { font: 700 9.5px/1 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); text-align: right; padding-bottom: 6px; }
+.dhead span:first-child { text-align: left; }
+.drow { --mc: var(--gold); padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.drow > span { text-align: right; color: var(--text-2); }
+.drow > span b { color: #fff; font-weight: 700; }
+.drow .dn { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 6px; row-gap: 5px; align-items: center; text-align: left; min-width: 0; }
+.drow .dn em { font: 400 13px/1 var(--display); font-style: normal; color: var(--text-3); text-align: center; }
+.drow .dn em .ic { color: var(--gold); }
+.drow .dn b { font: 700 13px/1.1 var(--ui); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drow .dbar { grid-column: 2; display: block; height: 5px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; }
+.drow .dbar s { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--mc); transition: width .7s cubic-bezier(.2,.8,.2,1); }
+.drow.me { background: linear-gradient(90deg, rgba(255,200,61,.12), rgba(255,200,61,0) 80%); margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
+.drow.me .dn b { color: var(--gold-hi); }
+.settle { display: flex; align-items: center; gap: 6px; padding: 9px 0 6px; border-top: 1px solid var(--line); font: 600 12px/1.2 var(--ui); color: var(--text-2); }
+.settle .ic { color: var(--gold); }
+.settle b { color: var(--gold-hi); font: 400 15px/1 var(--display); }
+.settle small { margin-left: auto; font: 700 9.5px/1 var(--ui); letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.lvlpanel .xpgain { font: 400 15px/1 var(--display); color: var(--green-hi); opacity: 0; transform: translateY(6px); transition: opacity .3s, transform .3s; }
+.lvlpanel .xpgain.on { opacity: 1; transform: none; }
+.lvlpanel .xp i { transition: width .65s cubic-bezier(.2,.8,.2,1); }
+.collect-dock { position: sticky; bottom: 0; margin-top: auto; padding: 18px 0 calc(env(safe-area-inset-bottom) + 16px); background: linear-gradient(180deg, rgba(6,10,26,0), rgba(6,10,26,.92) 40%); z-index: 2; }
+.results.lost .collect-dock { background: linear-gradient(180deg, rgba(8,6,12,0), rgba(8,6,12,.92) 40%); }
+@media (prefers-reduced-motion: reduce) { .vhead .rays, .kocard .stamp, .bosscard .count.pop { animation: none !important; }  }

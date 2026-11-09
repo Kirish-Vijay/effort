@@ -805,7 +805,7 @@ function eventCard() {
   const ends = new Date(`${day.slice(0, 4)}-${ev.to}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
   return `<section class="panel eventcard"><div class="caps">Event · until ${ends}</div><h2 class="ol disp">${esc(ev.name)}</h2>
       <p class="small" style="margin:0">${esc(B.blurb)}</p>
-      <p class="small muted" style="margin:8px 0 0"><b>${esc(B.name)}</b> is a choice in Sunday's lobby: as tough as your ladder boss, 25% more loot, and the ladder doesn't move.${prize ? ` ${won ? `You've won the ${esc(prize.name)}.` : `Beat it to win the <b>${esc(prize.name)}</b>.`}` : ""}</p></section>`;
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"><span class="chip">${esc(B.name)} · Sunday lobby</span><span class="chip gold">+25% loot</span>${prize ? `<span class="chip ${won ? "green" : ""}">${won ? ic("check") + " " : ""}${esc(prize.name)}</span>` : ""}</div></section>`;
 }
 function journeyTeaser() {
   const Z = season(), C = seasonContent(); if (!Z || !C) return "";
@@ -961,7 +961,7 @@ function denPanel() {
   if (!squad()) return "";
   const F = S.D.features || {}, D = S.D.squad.den;
   if (!F.den || !D) return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">Opens ${G.FEATURES.den ? new Date(G.FEATURES.den + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : "soon"}</span></div>
-      <p class="small muted" style="margin:0">Your squad's base: ten rooms, ten levels each. Every level is a small bonus for everyone.</p></section>`;
+</section>`;
   const rows = G.DEN_ROOMS.map((r) => {
     const L = D.levels[r.id] || 0, nx = G.denNext(D.totals[r.id] || 0), got = D.totals[r.id] || 0;
     const pct = nx ? Math.max(0, Math.min(1, 1 - nx.need / G.denCost(nx.level))) : 1;
@@ -969,7 +969,7 @@ function denPanel() {
   }).join("");
   const total = Object.values(D.levels).reduce((s, v) => s + v, 0);
   return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">${total} of ${G.DEN_ROOMS.length * G.DEN_MAX}</span></div>
-    <p class="small muted" style="margin:-4px 0 10px">Everyone chips in. Each level helps the whole squad.</p><div class="denrooms">${rows}</div></section>`;
+    <div class="denrooms">${rows}</div></section>`;
 }
 function denSheet(id) {
   const r = G.DEN_ROOMS.find((x) => x.id === id), D = S.D.squad?.den; if (!r || !D) return;
@@ -1027,7 +1027,7 @@ function huntCard() {
   if (!H.open) return H.done ? "" : `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Next one ${new Date(H.next + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}, noon to 11pm.</p></section>`;
   if (H.done) return `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Done for this week. Next Wednesday.</p></section>`;
   return `<section class="panel huntcard"><div class="caps">Midweek Hunt · today until 11pm</div><h2 class="ol disp">${esc(H.boss)}</h2>
-    <p class="small" style="margin:0">Five minutes against your squad's boss, with ${H.roster.length - 1} squad-mate${H.roster.length === 2 ? "" : "s"} as bots. You keep your share.</p>
+    <p class="small muted" style="margin:0">5 minutes · ${H.roster.length - 1} bot${H.roster.length === 2 ? "" : "s"}</p>
     <button class="btn gold block" style="margin-top:10px" data-act="hunt">${ic("target")} Start the Hunt</button></section>`;
 }
 function startHunt() {
@@ -1065,7 +1065,7 @@ function weekPanel() {
           <span class="lbn"><b class="num">${fmt(val(r))}</b><small>${{ today: "today", week: "this week", all: "all time" }[by]}</small>${by === "week" && r.lost ? `<small class="cut-t">${ic("bolt")}−${fmt(r.lost)}</small>` : ""}</span>
         </button>`; }).join("")}</div>
       <button class="invite-row" data-act="invite">${ic("share")}<span class="grow">Invite to ${esc(squad().name)}</span><span class="small muted">Code</span><b class="code-chip">${squad().code}</b></button>
-      <p class="tiny faint" style="margin:10px 0 0">Tap anyone for their week. Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
+      <p class="tiny faint" style="margin:10px 0 0">Raid power: your steps ÷ the squad average (×${G.RULES.strideMin}–×${G.RULES.strideMax}). Raid loot splits by damage × raid power. Sunday: the bottom walker pays the top walker ${Math.round(G.RULES.slackerTax * 100)}% of their week.</p>
     </section>`;
 }
 function noSquadPanel() {
@@ -1113,7 +1113,7 @@ function taxHero() {
     chip = `<span class="chip">${ic("check")} Done for today</span>`;
     line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : k >= 0.05 ? `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.` : `He took the full ${Math.round(Number(f.rate) * 100)}%.`;
     btn = `<div class="rline total" style="margin-top:12px"><span>Banked today</span><span class="rv">${paid ? signedEfforts(paid.amount + Math.max(0, pendingToday().n)) : "–"}</span></div>
-      <p class="tiny faint" style="margin:6px 0 0">This covers all of today's steps, so keep walking.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
+      ${w.test ? "" : `<p class="tiny faint" style="margin:6px 0 0">Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span></p>`}`;
   } else if (st === "off") {
     chip = `<span class="chip cyan">${ic("star")} Sunday · day off</span>`;
     line = "He takes Sundays off. No tax on today's steps: they go straight in.";
@@ -1225,11 +1225,9 @@ function goalPanel() {
   return `<section class="panel goal ${g.met ? "met" : ""}">
       <div class="ptitle"><span class="ic-badge ${g.met ? "green" : "red"}">${ic(g.met ? "check" : "steps")}</span><h2 class="ol-sm">Squad goal</h2><span class="side chip ${g.met ? "green" : "red"}">${g.met ? "Made it" : frozen ? "Missed" : `${fmt(left)} to go`}</span></div>
       <div class="goalbar"><i style="width:${pct * 100}%"></i><span>${fmt(g.steps)} / ${fmt(g.target)} steps</span></div>
-      <p class="small muted" style="margin:10px 0 0">${g.met
-        ? `${esc(boss.name)} stays normal on Sunday. Every step past this still raises your raid power.`
-        : frozen ? `The squad missed the goal, so ${esc(boss.name)} is enraged: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder.`
-        : `Between you, average ${fmt(g.perDay)} steps a day each, Monday to Saturday (Sunday's count too). Miss it and ${esc(boss.name)} is <b>enraged</b> on Sunday: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder. About ${fmt(left / g.players / daysLeft)} a day each from here.`}</p>
-      <p class="tiny faint" style="margin:6px 0 0">${fmt(g.perDay)} × ${g.days ?? g.players * 6} player-days, Monday to Saturday. Each boss up the ladder asks 500 more a day.</p>
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">${g.met
+        ? `<span class="chip green">${esc(boss.name)} stays normal</span>`
+        : `<span class="chip red">${ic("bolt")} ${frozen ? "Enraged" : "Miss it: enraged"} · ${G.RULES.enragedHp}× health · ${G.RULES.enragedDmg}× hits</span>${frozen ? "" : `<span class="chip">${fmt(left / g.players / daysLeft)} a day each</span>`}`}</div>
     </section>`;
 }
 const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
@@ -1266,7 +1264,6 @@ function raidHero() {
           <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(P))}<small>squad</small></div></div>
           <div class="tile ${mine.stride > 1 ? "green" : mine.stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${mine.stride.toFixed(2)}<small>from steps</small></div></div>
         </div>${btn}
-        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–11pm. When ${G.RULES.raidSquadSize} or more of you are in the lobby and ready, the 15-minute fight starts.</p>
       </div>
     </section>`;
 }
@@ -1281,9 +1278,8 @@ function tabRaid() {
       <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${lap}</span></div>
       <div class="ladder">${G.BOSSES.map((b, i) => {
         const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
-        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small><small class="bstyle">${esc(b.style || "")}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
+        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small${state === "next" && b.style ? ' class="bstyle"' : ""}>${esc(state === "next" && b.style ? b.style : b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
-      <p class="small muted" style="margin:10px 0 0">Each Sunday: last week's boss, one up or one down. Climb before your gear's ready and you'll lose. After Vex the bosses come round again, tougher and richer.</p>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2></div>
@@ -2655,8 +2651,11 @@ function raidTick() {
     const o = v.out, gap = t - v.lastSent, T = v.R?.trivia, ans = o.ans ?? (v.pendingAns != null && T?.per[v.my] && !T.per[v.my].ans ? v.pendingAns : null);
     const act = o.ab || o.sp || o.move || o.ans != null;
     if ((act && gap >= 100) || ((v.tapSeq || 0) > v.tapSent && gap >= 300) || (ans != null && gap >= 600)) {
+      // n: the running total (this version's hosts read it); taps: the batch since the last message, for a host still
+      // on the old version during a rollout (it only reads taps, and ignores n).
+      const batch = Math.max(0, (v.tapSeq || 0) - (v.tapSent || 0));
       v.lastSent = t; v.tapSent = v.tapSeq || 0;
-      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, n: v.tapSeq || 0, ab: o.ab, sp: o.sp, move: o.move, ans } });
+      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, n: v.tapSeq || 0, taps: batch, ab: o.ab, sp: o.sp, move: o.move, ans } });
       v.out = { ab: false, sp: false, move: null, ans: null };
     }
     // The host has gone quiet: work out who takes over (maybe us, from the last snapshot).
@@ -2686,9 +2685,23 @@ function raidOver(v, how) {
   $("#dg")?.classList.remove("hot");
   toastClear(); hint(null);
   for (const id of ["#trivia", "#veil"]) { const el = $(id); if (el) el.innerHTML = ""; }
+  // The fight's controls, combo, phase strip and callouts leave at once: from here the screen belongs to the K.O.
+  const ar = $("#arena"); ar?.classList.remove("intro"); ar?.classList.add("over", "cine");
+  const combo = $("#combo"); if (combo) combo.innerHTML = "";
+  for (const b of document.querySelectorAll("#arena .banner, #arena .bosscard")) b.remove();
+  FX.clearText();
   FX.music(false);
-  if (how === "won") { v.A?.bossKO(); banner("K.O.!", `${v.R?.boss.name || ""} is down`); FX.play("ko"); FX.shake($("#shake"), 14, 700); if (!v.A) { const [x, y] = bossXY(); FX.sparks(x, y, "#ffd166", 50, 900); } }
-  else banner(how === "wiped" ? "Wiped" : "Time's up");
+  if (how === "won") { v.A?.bossKO(); FX.play("ko"); FX.shake($("#shake"), 14, 700); if (!v.A) { const [x, y] = bossXY(); FX.sparks(x, y, "#ffd166", 50, 900); } }
+  koCard(v, how);
+}
+// Held on screen for the whole beat until the results take over: the stamp, then the boss's name and the time.
+function koCard(v, how) {
+  const R = v.R, el = document.createElement("div");
+  el.className = `kocard ${how === "won" ? "won" : "lost"}`;
+  const secs = R ? fightSecs(R) : 0, dealt = R ? Math.round((1 - R.boss.hp / R.boss.max) * 100) : 0;
+  el.innerHTML = `<b class="stamp">${how === "won" ? "K.O." : how === "wiped" ? "Wiped" : "Time's up"}</b>
+    <span class="who">${esc(R?.boss.name || "")}</span><small>${how === "won" ? `Down in ${mmss(secs)}` : `${dealt}% dealt`}</small>`;
+  $("#arena")?.appendChild(el);
 }
 // Results once the K.O. has played out (about 3 seconds after the boss went down).
 function raidResultSoon(result, v) {
@@ -2754,12 +2767,13 @@ function renderRaid() {
       <div class="buffs" id="buffs"></div>
     </div>
     <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
-    <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
+    <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div><i class="lb top"></i><i class="lb bot"></i></div>
     ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f" style="transform:scale(${G.stepScale(m.stride)})">${head2d(ANS[m.id])}</div>${esc(m.id === v.my ? "You" : m.name)}</div>`).join("")}</div>`}
     <div class="foot">${partyFrames(R, v)}<div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
         <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
-        <div class="rside"><button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div></div>
+        <div class="rside"><button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div>
+        <div class="lockchip" aria-hidden="true">${ic("lock")}<b id="lock-n"></b></div></div>
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
   FX.init($("#arena"));
@@ -2768,37 +2782,77 @@ function renderRaid() {
     v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m, i) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: i % 2 ? "mid" : "front", scale: G.stepScale(m.stride) })) });
     if (!v.A) return renderRaid();
     // Over the heroes, just a small marker in each one's colour (their health lives in the party frames).
-    $("#plates").innerHTML = R.members.map((m) => `<div class="mk ${m.id === v.my ? "me" : ""}" id="np-${m.id}" style="--mc:${mateCol(m.id)}">${m.id === v.my ? "" : esc(initialOf(m.name))}</div>`).join("");
+    const L = squadLook(R, v.my);
+    $("#plates").innerHTML = R.members.map((m) => `<div class="mk ${m.id === v.my ? "me" : ""}" id="np-${m.id}" style="--mc:${L[m.id].col}">${m.id === v.my ? "" : esc(L[m.id].mono)}</div>`).join("");
   }
   v.abRow = null; v.q = null;
   if (!v.toasted) { v.toasted = true; raidIntro(v, R); }
+  else if (v.intro) $("#arena").classList.add("intro", "cine"); // redrawn mid-entrance (someone joined): stay locked
+  if (v.koAt) { $("#arena").classList.add("over", "cine"); koCard(v, v.R?.result?.how || "won"); }
   $("#arena").classList.toggle("fogged", G.affixList(R.affix).includes("fog"));
   $("#arena").classList.toggle("frosted", G.affixList(R.affix).includes("frost"));
   paintRaid();
 }
-// Everyone's colour and initial: the same on their party frame and on the marker over their hero.
-const mateCol = (id) => `hsl(${G.hash(String(id)) % 360} 75% 64%)`;
-const initialOf = (name) => (String(name || "?").trim()[0] || "?").toUpperCase();
-// The squad in a fixed row: initial, short name, health, special charge, and a mark when down.
+// Everyone's colour and monogram: the same on their party frame and on the marker over their hero. Colours go by
+// place in the fight (the same order on every phone), so no two squad-mates share one. One letter where it's unique,
+// two where first letters clash, and a number if two names are the same. You get your walker's head and a chevron.
+const SQUAD_COLS = ["#4fc3ff", "#ff7ab8", "#8ee35a", "#b794ff", "#ff9f43", "#3fe0c5", "#ff5c6c", "#f3e65a", "#9fb4ff", "#e0a3ff"];
+function squadLook(R, my) {
+  const out = {}, words = (n) => String(n || "?").trim().split(/[\s._-]+/).filter(Boolean);
+  const others = R.members.filter((m) => m.id !== my);
+  const one = (m) => (words(m.name)[0]?.[0] || "?").toUpperCase();
+  const two = (m) => { const w = words(m.name); return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || "?").slice(0, 2)).toUpperCase(); };
+  const count = (list) => list.reduce((c, x) => ((c[x] = (c[x] || 0) + 1), c), {});
+  const c1 = count(others.map(one));
+  let mono = others.map((m) => (c1[one(m)] > 1 ? two(m) : one(m)));
+  const c2 = count(mono), seen = {};
+  mono = mono.map((x) => (c2[x] > 1 ? `${x[0]}${(seen[x] = (seen[x] || 0) + 1)}` : x));
+  R.members.forEach((m, i) => { out[m.id] = { col: SQUAD_COLS[i % SQUAD_COLS.length], mono: m.id === my ? "" : mono[others.indexOf(m)] }; });
+  return out;
+}
+// Long names shrink to fit the frame rather than being cut to "Sha…".
+const frameName = (name) => { const w = String(name || "").trim().split(/\s+/)[0] || "?", n = w.length; return { w, size: n <= 5 ? 11 : n <= 7 ? 10 : n <= 9 ? 9.5 : 8.5 }; };
+// The squad in a fixed row: monogram (your head for you), name, health, special charge, and a mark when down.
 function partyFrames(R, v) {
-  return `<div class="party" id="party">${R.members.map((m) => `<div class="pf ${m.id === v.my ? "me" : ""}" id="pf-${m.id}" style="--mc:${mateCol(m.id)}">
-    <span class="av">${esc(initialOf(m.name))}</span><b>${esc(m.id === v.my ? "You" : m.name)}</b><span class="st"></span><i class="hpb"><s></s></i><i class="spb"><s></s></i></div>`).join("")}</div>`;
+  const L = squadLook(R, v.my);
+  return `<div class="party" id="party">${R.members.map((m) => { const me = m.id === v.my, nm = frameName(me ? "You" : m.name);
+    return `<div class="pf ${me ? "me" : ""}" id="pf-${m.id}" style="--mc:${L[m.id].col}">
+    <span class="av">${me ? head2d(ANS[m.id] || Walker.fallbackAnswers(m.id)) : esc(L[m.id].mono)}</span><b style="font-size:${nm.size}px">${esc(nm.w)}</b><span class="st"></span><i class="hpb"><s></s></i><i class="spb"><s></s></i></div>`; }).join("")}</div>`;
 }
 // The entrance: a name card while the camera finds the boss and it roars; taps unlock on "Fight!". It plays in full
 // at the start (the boss holds its first move meanwhile) and as a quick card for anyone arriving in the first seconds.
 function raidIntro(v, R) {
   const left = (R.start || 0) - R.t, secs = left > 0.8 ? Math.min(5, left) : R.t - (R.start || 0) < 15 ? 1.6 : 0;
   if (!secs || R.over) return;
-  const mine = R.members.find((m) => m.id === v.my), ax = G.affixInfo(R.affix);
+  const ax = G.affixInfo(R.affix);
   const el = document.createElement("div");
   el.className = "bosscard";
-  el.innerHTML = `<small>${esc(R.boss.eventName || `Boss ${R.tier}`)}${R.boss.enraged ? " · Enraged" : ""}${ax ? ` · ${esc(ax.name)}` : ""}</small><b>${esc(R.boss.name)}</b>${mine ? `<em>Your steps ×${(mine.stride || 1).toFixed(2)}</em>` : ""}`;
+  el.innerHTML = `<small>${esc(R.boss.eventName || `Boss ${R.tier}`)}${R.boss.enraged ? " · Enraged" : ""}${ax ? ` · ${esc(ax.name)}` : ""}</small><b>${esc(R.boss.name)}</b>
+    <span class="cdrow"><i class="cdl"><s></s></i><span class="count"></span></span>`;
   $("#arena").appendChild(el);
+  // Letterbox, locked controls and a countdown into "Fight!": it's plain that nothing works yet, and for how long.
+  $("#arena").classList.add("intro", "cine");
   v.intro = true;
   v.A?.intro(secs);
   FX.play("roar");
+  const end = performance.now() + secs * 1000, bar = el.querySelector(".cdl s"), num = el.querySelector(".count"), lockN = $("#lock-n");
+  let shown = -1;
+  const tick = () => {
+    if (V.raid !== v || v.koAt) return clearInterval(timer);
+    const left = Math.max(0, end - performance.now()) / 1000, n = Math.ceil(left);
+    bar.style.width = `${(1 - left / secs) * 100}%`;
+    if (lockN) lockN.textContent = n || "";
+    if (n !== shown) {
+      shown = n;
+      if (n > 0 && n <= 3) { num.textContent = n; num.classList.remove("pop"); void num.offsetWidth; num.classList.add("pop"); FX.play("tick"); }
+    }
+  };
+  const timer = setInterval(tick, 50); tick();
   setTimeout(() => {
+    clearInterval(timer);
     v.intro = false; el.classList.add("out");
+    $("#arena")?.classList.remove("intro");
+    if (!v.koAt) $("#arena")?.classList.remove("cine");
     setTimeout(() => { el.remove(); if (V.raid === v && !v.R?.over) { banner("Fight!"); FX.play("combo"); } }, 350);
   }, secs * 1000);
 }
@@ -2826,6 +2880,9 @@ function paintBuffs(R) {
 }
 const mateEl = (id) => $(`#np-${id}`) || $(`#m-${id}`);
 const mateXY = (id) => { const A = arena(); if (A) return toArena(A.screenOf(id, 0.75)); return mateEl(id) ? FX.centre(mateEl(id)) : [0, 0]; };
+// Callouts over a hero (hurt, heal, Dodge, Big swing!) lift a little and fade: they used to rise 110px, straight
+// through the hero markers and up over the boss's face.
+const HERO_NUM = { rise: 40, drift: 0, life: 0.85 };
 function raidFx(e) {
   const v = V.raid; if (!v || !$("#arena")) return;
   const R = v.R, A = v.A, my = v.my;
@@ -2861,16 +2918,16 @@ function raidFx(e) {
     }
     case "hurt": {
       A?.hurt(e.id);
-      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${fmt(e.amt)}`, { size: 22, color: "#ff6b78" });
+      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${fmt(e.amt)}`, { ...HERO_NUM, size: 22, color: "#ff6b78" });
       if (e.id === my) { FX.flash($("#arena")); FX.play("hurt"); FX.buzz(40); }
       break;
     }
-    case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { size: 20, color: "#9af0ff" }); break; }
+    case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { ...HERO_NUM, size: 20, color: "#9af0ff" }); break; }
     case "shield": FX.play("shield"); A?.shield(e.ids, 6 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
-    case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
-    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${fmt(e.amt)}`, { size: 22, color: "#7ee29d" }); break; }
-    case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
-    case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
+    case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { ...HERO_NUM, size: e.by === my ? 22 : 17, grad: ["#fff3a0", "#ff7a3d"] }); break; }
+    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${fmt(e.amt)}`, { ...HERO_NUM, size: 22, color: "#7ee29d" }); break; }
+    case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { ...HERO_NUM, size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
+    case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { ...HERO_NUM, size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
     case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("Back up!"); break;
     case "phase": FX.play("phase"); FX.music(true, e.phase); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
     case "feastEnd": if (e.healed) { FX.number(bx, by - 40, `+${fmt(e.healed)}`, { size: 30, color: "#7ee29d" }); FX.play("heal"); } else { FX.number(bx, by - 40, "Interrupted", { size: 26, grad: ["#fff3a0", "#ff7a3d"] }); FX.play("combo"); } break;
@@ -2879,7 +2936,7 @@ function raidFx(e) {
       FX.play("special"); A?.special(e.id, e.cls, e.roll); FX.shake($("#shake"), 10, 450); FX.buzz(30);
       if (S) {
         const [x, y] = mateXY(e.id);
-        FX.number(x, y - 34, S.name, { size: 24, grad: ["#ffffff", SPECIAL_COL[e.cls] || "#ffd166"] });
+        FX.number(x, y - 34, S.name, { ...HERO_NUM, size: 24, grad: ["#ffffff", SPECIAL_COL[e.cls] || "#ffd166"] });
         if (e.id === my || ["lollipop", "librarian", "hedge", "pigeon"].includes(e.cls)) banner(S.name, e.id === my ? "" : m.name);
         if (["bouncer", "mad", "pickpocket"].includes(e.cls) || e.roll === "crit") setTimeout(() => { FX.sparks(bx, by, SPECIAL_COL[e.cls] || "#ffd166", 30, 700); bossHurt(true); }, 380);
       }
@@ -2892,8 +2949,8 @@ function raidFx(e) {
       break;
     }
     case "blocked": A?.blocked(); FX.play("shield"); FX.number(bx, by + 10, e.stopped ? "Never landed" : "Blocked", { size: 26, grad: ["#ffffff", "#8fd8ff"] }); break;
-    case "pulse": { A?.pulse(e.by, e.id); if (e.id === my || e.by === my) FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${fmt(e.amt)}`, { size: 16, color: "#7ee29d" }); break; }
-    case "release": { A?.release(e.id, e.freed); if (e.freed) { FX.play("release"); const [x, y] = mateXY(e.id); FX.number(x, y - 28, "Free!", { size: 22, grad: ["#ffffff", "#c9a6ff"] }); } break; }
+    case "pulse": { A?.pulse(e.by, e.id); if (e.id === my || e.by === my) FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${fmt(e.amt)}`, { ...HERO_NUM, size: 16, color: "#7ee29d" }); break; }
+    case "release": { A?.release(e.id, e.freed); if (e.freed) { FX.play("release"); const [x, y] = mateXY(e.id); FX.number(x, y - 28, "Free!", { ...HERO_NUM, size: 22, grad: ["#ffffff", "#c9a6ff"] }); } break; }
     case "trivia": FX.play("warn"); break;
     case "answered": if (e.id !== my) FX.play(e.valid ? "tap" : "blocked"); break;
     case "triviaDone": FX.play(e.failed ? "wrong" : "right"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(true); } break;
@@ -2942,7 +2999,7 @@ function paintRaid() {
     const el = mateEl(m.id);
     if (el) {
       el.classList.toggle("dead", !m.alive); el.classList.toggle("away", !!m.away);
-      if (v.A) { const pt = v.A.screenOf(m.id, 1.05); if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1]}px) translate(-50%, -100%)`; }
+      if (v.A) { const pt = v.A.screenOf(m.id, 1.3); if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1] - 4}px) translate(-50%, -100%)`; }
     }
     const pf = $(`#pf-${m.id}`); if (!pf) continue;
     pf.classList.toggle("dead", !m.alive); pf.classList.toggle("away", !!m.away);
@@ -3095,24 +3152,38 @@ function renderResult() {
     const nm = (id) => (id === my ? "you" : out.names?.[id] || out.shares.find((x) => x.id === id)?.name || "someone");
     won = out.how === "won";
     title = { won: "Victory", timeout: "Time up", wiped: "Defeat" }[out.how];
-    sub = `${esc(out.boss)} · ${Math.round(out.frac * 100)}% dealt`;
-    body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed.</b><span class="small muted">Everyone who fought starts tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></section>` : ""}
-      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Steps</th><th>Damage</th><th>Taps/s</th><th>Loot</th><th>Tax</th></tr>
-        ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === my ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}<span class="rn">${esc(s.id === my ? "You" : s.name)}</span></td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmtShort(s.dmg)}</td><td>${s.tps != null ? s.tps.toFixed(1) : "–"}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
-        ${out.settle ? `<p class="small muted" style="margin:10px 0 0">${ic("coins")} Weekly settlement: ${esc(nm(out.settle.from))} (lowest walker) paid ${esc(nm(out.settle.to))} ${fmt(out.settle.amount)} Efforts.</p>` : ""}</section>
+    sub = `${esc(out.boss)} · ${Math.round(out.frac * 100)}% dealt${out.secs ? ` · ${mmss(out.secs)}` : ""}`;
+    // Ranked by damage: the MVP is whoever hit hardest (loot follows damage too). Empty columns are left out.
+    const rows = [...out.shares].sort((a, b) => b.dmg - a.dmg), top = Math.max(1, rows[0]?.dmg || 0), total = Math.max(1, rows.reduce((s, x) => s + x.dmg, 0));
+    const look = res.R ? squadLook(res.R, my) : {}, colOf = (id) => look[id]?.col || "var(--gold)";
+    const cols = [["dmg", "Damage", true], ["tps", "Taps/s", rows.some((s) => s.tps != null)], ["steps", "Steps", rows.some((s) => s.weekSteps)], ["loot", "Loot", true], ["tax", "Tax", rows.some((s) => s.tax)]].filter((c) => c[2]);
+    const cell = (s, k) => k === "dmg" ? `<b>${fmtShort(s.dmg)}</b>` : k === "tps" ? (s.tps != null ? s.tps.toFixed(1) : "–") : k === "steps" ? `${fmt(s.weekSteps / 1000)}k` : k === "loot" ? fmt(s.reward)
+      : `<span style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</span>`;
+    const mvp = rows[0] && rows[0].dmg > 0 ? rows[0] : null;
+    body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed</b><span class="small muted">−${fmt(G.RULES.paralysedSteps)} steps tomorrow</span></div></section>` : ""}
+      ${mvp ? `<section class="mvp" style="--mc:${colOf(mvp.id)}"><div class="mface">${face(mvp.id, 64)}</div>
+        <div class="mtx"><span class="mtag">${ic("crown")} MVP</span><b>${esc(mvp.id === my ? "You" : frameName(mvp.name).w)}</b><small>${fmtShort(mvp.dmg)} damage · ${Math.round((mvp.dmg / total) * 100)}% of the squad's</small></div>
+        <div class="mloot">${coin(18)}<b>${fmt(mvp.reward)}</b></div></section>` : ""}
+      <section class="panel dboard" style="--dc:${cols.length}"><div class="dhead"><span>Squad</span>${cols.map((c) => `<span>${c[1]}</span>`).join("")}</div>
+        ${rows.map((s, i) => `<div class="drow ${s.id === my ? "me" : ""}" style="--mc:${colOf(s.id)}"><span class="dn"><em>${i === 0 && mvp ? ic("crown") : i + 1}</em><b style="font-size:${frameName(s.name).w.length > 8 && s.id !== my ? 10.5 : 13}px">${esc(s.id === my ? "You" : frameName(s.name).w)}</b><i class="dbar"><s data-w="${(s.dmg / top) * 100}"></s></i></span>${cols.map((c) => `<span>${cell(s, c[0])}</span>`).join("")}</div>`).join("")}
+        ${out.settle ? `<div class="settle">${ic("coins")}<span>${esc(nm(out.settle.from).replace(/^you$/, "You"))} → ${esc(nm(out.settle.to))}</span><b>${fmt(out.settle.amount)}</b><small>weekly settlement</small></div>` : ""}</section>
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
         ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
       <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
         ${!mine ? `<div class="small muted">You weren't in this one.</div>` : ""}${won && !out.hunt && !G.isEventTier(out.tier) ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(out.tier + 1).name)}</div>` : ""}${out.prize ? `<div class="small" style="margin-top:6px">${ic("star")} Won the <b>${esc(G.wardrobeById(out.prize)?.name || "")}</b>. Wear it from Me → Wardrobe.</div>` : ""}</section>`;
   }
+  // The level bar starts where you were before this fight; Collect pulls the new total and fills it from there.
+  res.xpBefore ??= S.D?.xp || 0;
+  const p0 = G.levelProgress(res.xpBefore);
   $("#app").innerHTML = `<div class="results ${won ? "" : "lost"}" id="arena"><div class="inner">
-    <div class="ribbon ol">${title}</div>
-    <div class="subline">${sub}</div>
+    <div class="vhead"><i class="rays"></i><h1 class="vtitle">${title}</h1><div class="subline">${sub}</div></div>
     <div class="stack">${body}
-      <section class="panel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${res.lvlBefore}</b></div><div class="xp big"><i style="width:0%"></i><span class="xpt"></span></div><div id="lvlup"></div></section>
-      <button class="btn gold xl block" data-act="collect">${ic("coins")} Collect</button>
+      <section class="panel lvlpanel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${p0.lvl}</b><span class="xpgain" id="xp-gain"></span></div><div class="xp big"><i style="width:${p0.pct * 100}%"></i><span class="xpt">${fmt(p0.into)} / ${fmt(p0.need)} XP</span></div><div id="lvlup"></div></section>
+      <div class="collect-dock"><button class="btn gold xl block" data-act="collect">${ic("coins")} Collect</button></div>
     </div></div></div>`;
   if (res.kind === "raid") { const mine = res.out.shares.find((s) => s.id === me().id); countUp($("#count"), mine ? mine.total : 0); }
+  // Damage bars grow in, top to bottom.
+  setTimeout(() => document.querySelectorAll(".dbar s").forEach((s, i) => { s.style.transitionDelay = `${i * 70}ms`; s.style.width = `${s.dataset.w}%`; }), 60);
   FX.init($("#arena"));
   if (won) setTimeout(() => FX.confetti(140), 250);
 }
@@ -3131,11 +3202,20 @@ async function collect() {
   btn.disabled = true;
   try { await load(); } catch (e) { toast(e.message); }
   btn.disabled = false;
-  const p = G.levelProgress(S.D.xp);
-  $(".results .xp i").style.width = `${p.pct * 100}%`;
-  $(".results .xp .xpt").textContent = `${fmt(p.into)} / ${fmt(p.need)} XP`;
-  $("#lvl-now").textContent = `Level ${p.lvl}`;
-  if (p.lvl > res.lvlBefore) { $("#lvlup").innerHTML = `<div class="lvlup ol">Level ${p.lvl}!</div>`; FX.play("levelup"); FX.confetti(100); }
+  // Fill the bar from where it was: to the end and round again for each level gained, then on to the new total.
+  const xp = S.D?.xp || 0, p = G.levelProgress(xp), p0 = G.levelProgress(res.xpBefore || 0), bar = $(".results .xp i");
+  const gain = xp - (res.xpBefore || 0);
+  if (gain > 0) { const g = $("#xp-gain"); g.textContent = `+${fmt(gain)} XP`; g.classList.add("on"); }
+  const settle = () => {
+    bar.style.width = `${p.pct * 100}%`;
+    $(".results .xp .xpt").textContent = `${fmt(p.into)} / ${fmt(p.need)} XP`;
+    $("#lvl-now").textContent = `Level ${p.lvl}`;
+    if (p.lvl > p0.lvl) { $("#lvlup").innerHTML = `<div class="lvlup ol">Level ${p.lvl}!</div>`; FX.play("levelup"); FX.confetti(100); }
+  };
+  if (p.lvl > p0.lvl) {
+    bar.style.width = "100%";
+    setTimeout(() => { bar.style.transition = "none"; bar.style.width = "0%"; void bar.offsetWidth; bar.style.transition = ""; settle(); }, 650);
+  } else settle();
   btn.innerHTML = `Continue ${ic("arrowRight")}`;
   btn.dataset.act = "back";
 }
