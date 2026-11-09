@@ -1194,17 +1194,30 @@ function howDay() {
 }
 
 // ---------- Raid ----------
-// Each stat with what it does for you right now (gear included). Your class's two stats are marked. Bars use
-// Game.statFill, which never fills, so a bigger stat is always a longer bar (and the same length on anyone's screen).
-const pctFill = (v) => `${(G.statFill(v) * 100).toFixed(1)}%`;
-const gearFill = (base, all) => `${((G.statFill(all) - G.statFill(base)) * 100).toFixed(1)}%`;
+// Each stat with what it does for you right now (gear included), as a whole number. Every bar on the panel shares one
+// scale: the next round milestone (12, 15, 20, 25, 30, 40, 50, 60, 80, 100...) comfortably above the biggest number on
+// it, so a normal walker's bars look healthy, the top one never fills, and every point of growth still moves a bar.
+// The notch on each bar is the squad's average (gear on), when you're in a squad.
+const STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+function statScale(...vals) {
+  const top = Math.max(10, ...vals.filter(Number.isFinite)) * 1.12;
+  for (let p = 1; ; p *= 10) for (const k of STEPS) if (k * p >= top) return k * p;
+}
+const barPct = (v, max) => `${Math.min(100, (Math.max(0, v || 0) / max) * 100).toFixed(1)}%`;
+function squadAverage() {
+  const ms = squad()?.members || [];
+  if (ms.length < 2) return null;
+  const gs = ms.map((m) => (m.id === me().id ? G.loadout(myStats(), me().gear, S.D.inv) : G.loadout(G.stats(m.character || {}), m.gear, {})).g);
+  return Object.fromEntries(G.STATS.map(({ id }) => [id, gs.reduce((a, g) => a + (g[id] || 0), 0) / gs.length]));
+}
 function statRows(st, gear = me().gear, inv = S.D.inv) {
-  const { g } = G.loadout(st, gear, inv), fx = G.statEffects(g), mine = G.classOf(st).stats;
+  const { g } = G.loadout(st, gear, inv), fx = G.statEffects(g), avg = squadAverage();
+  const max = statScale(...G.STATS.map(({ id }) => g[id]), ...(avg ? Object.values(avg) : []));
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
-    return `<div class="stat fx${mine.includes(s.id) ? " cl" : ""}" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${pctFill(st[s.id])}"></i><i class="gear" style="width:${gearFill(st[s.id], g[s.id])}"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
-  }).join("");
+    return `<div class="stat fx" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
+      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(Math.round(g[s.id]), max)}"></i>${avg ? `<b class="avg" style="left:${barPct(avg[s.id], max)}"></b>` : ""}</div><span class="sv">${fmt(g[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
+  }).join("") + (avg ? `<p class="stat-key"><b class="avg"></b>Squad average</p>` : "");
 }
 // What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
 function raidPreview() {
@@ -1387,14 +1400,14 @@ const myCrateOdds = () => G.crateOdds(level(), S.D.today.day);
 function gambaPanel() {
   const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0, junk = junkDrawer();
   const pack = (pk) => { const it = G.houseItem(pk.id), over = week + pk.pence > Gm.weeklyPence;
-    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}>${pk.buckets} buckets · ${G.pounds(pk.pence)}</button>`; };
+    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}><b>${pk.buckets} buckets</b><small>${G.pounds(pk.pence)}</small></button>`; };
   const odds = myCrateOdds();
   return `<section class="panel gamba">
       <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
       <div class="bucket-stage">${bucketArt("legendary")}</div>
       <button class="oddsbar" data-act="gamba-odds" aria-label="Odds">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</button>
-      ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Open a bucket ${priceTag(Gm.price)}</button>`
-        : credits ? `<button class="btn gold xl block" data-act="gamba-buy">Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
+      ${left ? `<button class="btn gold xl block${S.gambaBusy ? " loading" : ""}" data-act="gamba-buy" data-off="${S.D.wallet >= Gm.price ? 0 : 1}" ${S.D.wallet >= Gm.price && !S.gambaBusy ? "" : "disabled"}>Open a bucket ${priceTag(Gm.price)}</button>`
+        : credits ? `<button class="btn gold xl block${S.gambaBusy ? " loading" : ""}" data-act="gamba-buy" ${S.gambaBusy ? "disabled" : ""}>Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
       <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "Back at midnight"}${credits && left ? ` · ${credits} bought waiting` : ""}${Object.keys(junk).length ? ` · <button class="linkbtn" data-act="junk">Junk drawer (${Object.values(junk).reduce((a, b) => a + b, 0)})</button>` : ""}</p>
       <div class="gamba-more">
         <span class="field-label">More buckets for real money</span>
@@ -1405,21 +1418,36 @@ function gambaPanel() {
 }
 // Your odds (tiers past your level count as your best), what each sells back for, and the average back.
 function gambaOdds() {
-  const Gm = G.GAMBA, odds = myCrateOdds(), pc = (p) => `${(p * 100).toFixed(p < 0.01 ? 2 : 1)}%`;
+  // One precision for every chance (the rarest is 0.03%), so the column lines up on the decimal point.
+  const Gm = G.GAMBA, odds = myCrateOdds(), pc = (p) => `${(p * 100).toFixed(2)}%`;
+  const back = Math.round(G.gambaReturn(level(), S.D.today.day) * Gm.price);
   openSheet(`${sheetHead("The odds")}
     <div class="oddsbar">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</div>
-    <div class="oddsrows">${odds.map((o) => `<div class="oddsrow"><span class="dot" style="background:${tierCol(o.tier)}"></span><b class="grow">${esc(G.tierOf(o.tier).label)}</b><span class="muted">sells ${coin(14)}${fmt(o.sells)}</span><span class="pc">${pc(o.p)}</span></div>`).join("")}</div>
-    <p class="small muted" style="margin:12px 0 0">${fmt(Gm.price)} Efforts a bucket. Back on average: ${coin(14)}${fmt(Math.round(G.gambaReturn(level(), S.D.today.day) * Gm.price))}. One you already own goes straight back to the shop.</p>`);
+    <div class="oddsgrid">
+      <span class="oh"></span><span class="oh sells">Sells for</span><span class="oh">Chance</span>
+      ${odds.map((o) => `<b class="ot"><i class="dot" style="background:${tierCol(o.tier)}"></i>${esc(G.tierOf(o.tier).label)}</b><span class="oc">${coin(16)}</span><span class="on">${fmt(o.sells)}</span><span class="on pc">${pc(o.p)}</span>`).join("")}
+      <b class="ot sum">Back on average</b><span class="oc sum">${coin(16)}</span><span class="on sum">${fmt(back)}</span><span class="on sum faint">of ${fmt(Gm.price)}</span>
+    </div>
+    <p class="tiny faint" style="margin:10px 0 0">Duplicates sell straight back.</p>`);
 }
+// One bucket per tap: the button locks until the server answers. The server only charges a bucket that rolled, so
+// on any error the wallet is left alone and the numbers are pulled fresh.
+const gambaLock = (on) => { S.gambaBusy = on; for (const b of document.querySelectorAll('[data-act="gamba-buy"]')) { b.disabled = on || b.dataset.off === "1"; b.classList.toggle("loading", on); } };
+const gambaErr = (e) => (e instanceof TypeError || /^(Server error|Request failed|Couldn't reach)/.test(e.message) ? "Couldn't open it. Try again" : e.message);
 async function gambaBuy() {
-  if (S.busy) return; S.busy = true;
+  if (S.busy || S.gambaBusy) return;
+  S.busy = true; gambaLock(true);
   let r;
   try { r = await call("gamba", { token: S.token }); }
-  catch (e) { toast(e.message); return; }
-  finally { S.busy = false; }
+  catch (e) { S.busy = false; gambaLock(false); toast(gambaErr(e)); refresh(true); return; }
+  S.busy = false; gambaLock(false);
   S.D.gamba = { ...S.D.gamba, today: G.GAMBA.perDay - r.left, credits: r.credits };
+  // A piece this phone's catalogue doesn't know yet (the app is a version behind): it's in the bag all the same.
+  if (!G.itemById(r.item)) { S.D.wallet = r.wallet; toast("Opened. It's in your bag"); refresh(true); return; }
   FX.play("buy");
-  gambaReveal(r);
+  // If the opening can't draw, never leave its overlay stuck over the app: the piece is in the bag regardless.
+  try { gambaReveal(r); }
+  catch (e) { console.error(e); document.querySelector(".gamba-reveal")?.remove(); FX.destroy?.(); S.D.wallet = r.wallet; toast("Opened. It's in your bag"); refresh(true); }
 }
 // Old buckets paid out junk to a drawer on this phone; it's still there to look at.
 const junkDrawer = () => store.get(`junk:${me().id}`) || {};
@@ -1493,70 +1521,136 @@ function reelCards(won) {
     return pool[Math.floor(Math.random() * pool.length)] || won;
   });
 }
-// The reel spins past the centre line, slows, and stops somewhere inside the won card (never dead centre, so it
-// reads as a spin, not a slide); the screen floods with its tier colour, then the card. Tap to skip the spin.
+// The opening: Winny's bucket rattles above a big reel of tier-coloured cards. The reel races past the gold marker,
+// slows, runs a hair past the landing point and settles back inside the won card (never dead centre, so it reads
+// as a spin, not a slide). The plate under the reel names whatever is under the marker. Then the screen floods with
+// the tier colour and the card flips in. A duplicate gets stamped, melts into coins and they fly into your wallet.
+// Tap anywhere during the spin to skip to the landing.
 function gambaReveal(r) {
   const it = G.itemById(r.item), t = G.tierOf(r.tier), rank = I.TIERS.findIndex((x) => x.id === r.tier);
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, cards = reelCards(it);
+  const before = r.wallet - (r.dupe ? r.sells : 0);
   const el = document.createElement("div");
   el.className = "gamba-reveal crate reeling"; el.style.setProperty("--rc", GAMBA_COL.dud);
-  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-taps">Tap to skip</span></div>
-    <div class="gr-tip">${bucketArt("legendary")}</div>
-    <div class="reel"><div class="reel-track">${cards.map((c) => `<div class="rcard" style="--tc:${tierCol(c.tier)}"><div class="art">${itemArt(c)}</div></div>`).join("")}</div><i class="reel-mark" aria-hidden="true"></i></div>
-    <div class="gr-prize" hidden></div>`;
+  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-wallet">${coin(22)}<b class="num">${fmt(before)}</b></span></div>
+    <div class="gr-stage">
+      <i class="gr-halo" aria-hidden="true"></i><div class="gr-pail">${bucketArt("legendary")}</div>
+      <div class="reel"><div class="reel-track">${cards.map((c) => `<div class="rcard" style="--tc:${tierCol(c.tier)}"><div class="art">${itemArt(c)}</div></div>`).join("")}</div><i class="reel-mark" aria-hidden="true"></i></div>
+      <div class="gr-now" aria-live="off"><small></small><b></b></div>
+    </div>
+    <div class="gr-prize" hidden></div>
+    <span class="gr-skip">Tap to skip</span>`;
   document.body.appendChild(el);
   FX.init(el);
-  const reel = el.querySelector(".reel"), track = el.querySelector(".reel-track"), kids = track.children;
-  const step = kids[1].offsetLeft - kids[0].offsetLeft, cw = kids[0].offsetWidth, mid = reel.clientWidth / 2;
-  const end = mid - (REEL_AT * step + cw / 2 + (Math.random() - 0.5) * (cw - 18));
-  const D = reduce ? 700 : 5600, ease = (k) => 1 - Math.pow(1 - k, 4);
-  let t0 = performance.now(), under = -1, lastTick = 0, spun = false;
+  const reel = el.querySelector(".reel"), track = el.querySelector(".reel-track"), kids = track.children, pail = el.querySelector(".gr-pail");
+  const nowT = el.querySelector(".gr-now small"), nowN = el.querySelector(".gr-now b"), wallet = el.querySelector(".gr-wallet");
+  const x0 = kids[0].offsetLeft, step = kids[1].offsetLeft - x0, cw = kids[0].offsetWidth, mid = reel.clientWidth / 2, vw = reel.clientWidth;
+  // Where the marker comes to rest inside the won card, and how far it runs past before settling back.
+  const rest = (Math.random() * 0.68 - 0.38) * cw, over = reduce ? 0 : 0.11 * cw;
+  const end = mid - (REEL_AT * step + cw / 2 + rest), far = end - over;
+  const D = reduce ? 700 : 5800, SETTLE = reduce ? 0 : 420;
+  const ease = (k) => 1 - Math.pow(1 - k, 4.2), inout = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+  const xAt = (ms) => (ms < D ? far * ease(Math.max(0, ms / D)) : far + (end - far) * inout(Math.min(1, (ms - D) / Math.max(1, SETTLE))));
+  let t0 = performance.now(), under = -1, lastTick = 0, spun = false, lensed = [];
+  // Cards swell as they pass the marker, so the one under it is always the biggest thing on screen.
+  const lens = (x) => {
+    for (const c of lensed) c.style.scale = "";
+    lensed = [];
+    const first = Math.max(0, Math.floor((-x) / step) - 1), last = Math.min(kids.length - 1, first + Math.ceil(vw / step) + 2);
+    for (let i = first; i <= last; i++) {
+      const d = Math.abs(x0 + i * step + cw / 2 + x - mid) / step;
+      if (d < 1) { const s = 1 + 0.22 * (1 - d * d); kids[i].style.scale = s.toFixed(3); kids[i].style.zIndex = d < 0.5 ? 1 : ""; lensed.push(kids[i]); }
+      else kids[i].style.zIndex = "";
+    }
+  };
+  const showUnder = (u) => {
+    const c = cards[u]; if (!c) return;
+    const tc = tierCol(c.tier);
+    nowT.textContent = G.tierOf(c.tier).label; nowT.style.color = tc; nowN.textContent = c.name;
+    pail.parentNode.style.setProperty("--glow", tc);
+  };
   const frame = (now) => {
     if (spun) return;
-    const k = Math.min(1, Math.max(0, (now - t0) / D)), x = end * ease(k);
+    const ms = now - t0, x = xAt(ms), v = Math.abs(xAt(ms + 16) - x);
     track.style.transform = `translate3d(${x}px,0,0)`;
+    lens(x);
+    // The bucket rattles while the reel is fast and calms down with it.
+    const shake = Math.min(1, v / 40);
+    pail.style.transform = `rotate(${(Math.sin(now / 38) * 7 * shake).toFixed(2)}deg) translateY(${(-Math.abs(Math.sin(now / 76)) * 6 * shake).toFixed(1)}px)`;
     const u = Math.floor((mid - x) / step);
-    if (u !== under) { under = u; if (now - lastTick > 45) { lastTick = now; FX.play("tick"); FX.buzz(3); } }
-    if (k < 1) requestAnimationFrame(frame); else land();
+    if (u !== under) { under = u; showUnder(u); if (now - lastTick > 45) { lastTick = now; FX.play("tick"); FX.buzz(3); } }
+    if (ms < D + SETTLE) requestAnimationFrame(frame); else land();
   };
   const land = () => {
     spun = true;
+    track.style.transform = `translate3d(${end}px,0,0)`; lens(end); pail.style.transform = "";
+    showUnder(REEL_AT);
     el.classList.remove("reeling"); el.classList.add("flood", r.tier); el.style.setProperty("--rc", t.color);
-    el.querySelector(".gr-taps").textContent = "";
     kids[REEL_AT].classList.add("hit");
+    track.style.transformOrigin = `${mid}px 50%`; // the reel shrinks about the marker when the card comes in
     FX.play(rank >= 2 ? "rare" : "coin");
     if (rank >= 2) { FX.shake(el, 6 + rank * 2, 300); FX.buzz(40); }
-    setTimeout(showCard, reduce ? 150 : 650);
+    setTimeout(showCard, reduce ? 150 : 750);
   };
-  const more = r.left > 0 || r.credits > 0, on = !r.dupe && !me().gear?.[it.slot]; // the server puts it straight on an empty slot
+  // Coins burst out of the item and arc into the wallet, which ticks up as they land.
+  const flyCoins = (from, n) => {
+    const [x0, y0] = FX.centre(from), wr = wallet.getBoundingClientRect(), x1 = wr.left + 16, y1 = wr.top + wr.height / 2;
+    const layer = document.createElement("div"); layer.className = "coinfly"; el.appendChild(layer);
+    const num = wallet.querySelector("b"), gain = r.wallet - before;
+    let landed = 0;
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement("span"); c.innerHTML = coin(26); layer.appendChild(c);
+      const a = Math.random() * Math.PI * 2, burst = 40 + Math.random() * 46, bx = x0 + Math.cos(a) * burst, by = y0 + Math.sin(a) * burst * 0.8 - 20;
+      const frames = Array.from({ length: 14 }, (_, k) => {
+        const s = k / 13, p1 = Math.min(1, s / 0.28), p2 = Math.max(0, (s - 0.28) / 0.72), q = p2 * p2;
+        const x = s < 0.28 ? x0 + (bx - x0) * (1 - (1 - p1) ** 2) : bx + (x1 - bx) * q;
+        const y = s < 0.28 ? y0 + (by - y0) * (1 - (1 - p1) ** 2) : by + (y1 - by) * q - Math.sin(p2 * Math.PI) * 60;
+        const sc = s < 0.28 ? 0.4 + 0.8 * p1 : 1.2 - 0.6 * q;
+        return { transform: `translate(${x - 13}px,${y - 13}px) scale(${sc.toFixed(2)}) rotate(${Math.round(s * 540 + i * 40)}deg)`, opacity: s > 0.96 ? 0 : 1 };
+      });
+      c.animate(frames, { duration: 900, delay: i * 55, easing: "linear", fill: "both" }).onfinish = () => {
+        c.remove(); landed++;
+        num.textContent = fmt(before + Math.round((gain * landed) / n));
+        wallet.classList.remove("bump"); void wallet.offsetWidth; wallet.classList.add("bump");
+        if (landed % 2) FX.play("coin");
+        if (landed === n) layer.remove();
+      };
+    }
+  };
+  const more = r.left > 0 ? r.wallet >= G.GAMBA.price : r.credits > 0, on = !r.dupe && !me().gear?.[it.slot]; // the server puts it straight on an empty slot
+  const equipped = `<span class="gr-on">${ic("check")} Equipped</span>`;
   const showCard = () => {
-    reel.classList.add("dim"); el.classList.add("carded");
+    el.classList.add("carded");
     const P = el.querySelector(".gr-prize"); P.hidden = false;
     const st = G.itemStats(it, 0, myStats()), cls = it.cls ? I.CLASSES.find((c) => c.id === it.cls) : null;
-    P.innerHTML = `<div class="gr-card">
+    P.innerHTML = `<div class="gr-card${r.dupe ? " dupe" : ""}">
         <span class="gr-rar">${esc(t.label)}${cls ? ` · ${esc(cls.name)}` : ""}</span>
-        <div class="gr-art">${itemArt(it)}</div>
+        <div class="gr-artwrap"><div class="gr-art">${itemArt(it)}</div>${r.dupe ? `<b class="gr-stamp">Duplicate</b>` : ""}</div>
         <h2 class="ol-sm">${esc(it.name)}</h2>
-        <div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div>
-        <p class="small muted gr-tale">${esc(bucketTale(r.dupe ? "dupe" : r.tier))}</p>
-        <div class="gr-worth">${r.dupe ? `Sold back +${coin(18)}${fmt(r.sells)}` : `Sells for ${coin(18)}${fmt(r.sells)}`}</div>
-        <div class="btn-row">${r.dupe ? "" : on ? `<button class="btn" disabled>${ic("check")} Equipped</button>` : `<button class="btn blue" data-act="gamba-equip">Equip</button>`}<button class="btn gold" data-act="gamba-close">Done</button></div>
+        ${r.dupe ? `<div class="gr-worth big">+${coin(24)}<span class="num">${fmt(r.sells)}</span></div>`
+          : `<div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div>
+        <p class="small muted gr-tale">${esc(bucketTale(r.tier))}</p>
+        <div class="gr-worth">Sells for ${coin(18)}<span class="num">${fmt(r.sells)}</span></div>`}
+        <div class="btn-row">${r.dupe ? "" : on ? equipped : `<button class="btn blue" data-act="gamba-equip">Equip</button>`}<button class="btn gold" data-act="gamba-close">Done</button></div>
         ${more ? `<button class="btn sm block" style="margin-top:8px" data-act="gamba-again">Another bucket${r.left > 0 ? ` ${priceTag(G.GAMBA.price)}` : ""}</button>` : ""}
       </div>`;
-    const [x, y] = FX.centre(P.querySelector(".gr-art"));
-    if (r.dupe) FX.coins(x, y, 8);
+    if (r.dupe) {
+      const art = P.querySelector(".gr-art");
+      setTimeout(() => { FX.play("hit"); FX.buzz(20); }, reduce ? 0 : 380);
+      setTimeout(() => { art.classList.add("melt"); flyCoins(art, 12); }, reduce ? 100 : 820);
+    }
     if (rank >= 4) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); }
     if (rank >= 3) el.classList.add("rays");
   };
   const close = () => { FX.destroy(); el.remove(); S.D.wallet = r.wallet; render(); return load().then(render).catch(() => {}); };
   el.addEventListener("click", async (e) => {
-    if (!spun) { t0 = performance.now() - D; return; } // skip to the landing
+    if (!spun) { t0 = performance.now() - D - SETTLE; return; } // skip to the landing
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (act === "gamba-close") close();
     else if (act === "gamba-again") { close(); gambaBuy(); }
     else if (act === "gamba-equip") {
       const b = e.target.closest("button"); b.disabled = true;
-      try { await call("equip", { token: S.token, slot: it.slot, item: it.id }); b.className = "btn"; b.innerHTML = `${ic("check")} Equipped`; FX.play("buy"); }
+      try { await call("equip", { token: S.token, slot: it.slot, item: it.id }); b.outerHTML = equipped; FX.play("buy"); }
       catch (err) { b.disabled = false; toast(err.message); }
     }
   });
@@ -2129,7 +2223,7 @@ function viewReveal() {
     <h1 class="ol disp" style="margin:8px 0 2px;font-size:32px">${esc(a.name || "You")}</h1>
     <div class="chip gold" style="margin:4px auto 10px">${esc(cls.name)}</div>
     <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
-    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${pctFill(st[s.id])}"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
+    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st), max = statScale(...Object.values(st)); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${barPct(st[s.id], max)}"></i></div><span class="sv">${fmt(st[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
       <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go. Gold names are your class's stats, and your class gear piles more onto your best one.</p></section>
     <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">That's me</button></div>
   </section>`;
