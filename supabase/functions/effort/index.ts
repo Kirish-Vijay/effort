@@ -64,6 +64,8 @@ function dayIsSane(day: string, tz: string) {
 }
 
 const clip = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
+// A time zone the server can actually use, or undefined (a junk zone would break every date the game works out).
+const tzOf = (v: unknown) => { const t = clip(v, 60); if (!t) return undefined; try { new Intl.DateTimeFormat("en", { timeZone: t }); return t; } catch { return undefined; } };
 const prettyDay = (day: string) =>
   new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 const PLATFORMS = ["ios", "android", "other"];
@@ -123,7 +125,7 @@ function newPlayerRow(body: Record<string, any>) {
     emoji: clip(body.emoji, 8) || "🚶",
     color: goodColor(body.color) ? body.color : "#6d5efc",
     platform: PLATFORMS.includes(body.platform) ? body.platform : "other",
-    tz: clip(body.tz, 60) || "Europe/London",
+    tz: tzOf(body.tz) || "Europe/London",
     is_public: body.is_public !== false,
     character: cleanCharacter(body.character),
   };
@@ -177,7 +179,7 @@ async function touchSteps(id: string, source: string, extra: Record<string, unkn
 // Health Connect payloads arrive as either one full-day total per day ("Daily" resolution,
 // already de-duplicated across phone + watch) or as smaller chunks we sum ourselves.
 async function handleHealthConnect(player: Record<string, any>, body: Record<string, any>) {
-  const tz = body.timezone && body.timezone !== "UTC" ? String(body.timezone) : player.tz;
+  const tz = body.timezone !== "UTC" && tzOf(body.timezone) || player.tz;
   const records: any[] = Array.isArray(body.steps) ? body.steps : [];
   const dailyDays = new Set<string>();
   const chunkDays = new Set<string>();
@@ -251,7 +253,7 @@ async function ownerAction(op: string, body: Record<string, any>) {
       if ("daily_goal" in body) patch.daily_goal = body.daily_goal ? clampGoal(body.daily_goal) : null;
       if (PLATFORMS.includes(body.platform)) patch.platform = body.platform;
       if (typeof body.is_public === "boolean") patch.is_public = body.is_public;
-      if (clip(body.tz, 60)) patch.tz = clip(body.tz, 60);
+      if (tzOf(body.tz)) patch.tz = tzOf(body.tz);
       const { data, error } = await db.from("players").update(patch).eq("id", body.id).select().single();
       if (error) throw error;
       return json({ ok: true, player: data });
@@ -476,7 +478,7 @@ Deno.serve(async (req) => {
         if ("daily_goal" in body) patch.daily_goal = body.daily_goal ? clampGoal(body.daily_goal) : null;
         if (PLATFORMS.includes(body.platform)) patch.platform = body.platform;
         if (typeof body.is_public === "boolean") patch.is_public = body.is_public;
-        if (clip(body.tz, 60)) patch.tz = clip(body.tz, 60);
+        if (tzOf(body.tz)) patch.tz = tzOf(body.tz);
         if ("character" in body) patch.character = cleanCharacter(body.character);
         if ("equipped" in body) patch.equipped = typeof body.equipped === "string" && /^[a-z-]{2,20}$/.test(body.equipped) ? body.equipped : null;
         if (body.code && "team" in body) {

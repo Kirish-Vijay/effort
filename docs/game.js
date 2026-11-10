@@ -20,7 +20,7 @@ const DEFAULT_RULES = {
   stealMax: 0.30,           // never more than this, whatever you wear
   paceTax: 0.05,            // beat the squad's average steps today: 5 points less tax; fall 10% short: 5 more
   // Walking is the point. In the Sunday raid your steps this week, against the squad's average, decide how hard you hit.
-  strideMin: 0.5,           // half the squad average or less: half damage
+  strideMin: 0.4,           // 40% of the squad average or less: 40% damage (so a low week still counts for something, but less)
   strideMax: 1.6,           // the hardest walker hits up to 60% harder
   // Raid loot: your share of the pool is your damage over the squad's (your stride is already in your damage; gear loot perks add on top).
   slackerTax: 0.1,          // the week's lowest walker pays 10% of their week's Efforts to the top walker
@@ -54,7 +54,7 @@ const DEFAULT_RULES = {
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 6800000,      // Brett's health; every boss has its own multiple. Five get all of it, four 80% (raidFullSquad). Tuned so
+  raidHpBase: 6650000,      // Brett's health; every boss has its own multiple. Five get all of it, four 80% (raidFullSquad). Tuned so
                             // five tapping flat out (the 7/s cap) and dodging need 12 to 13 minutes of the 15: five times the
                             // 2.5 minutes a squad took before the cap. Four, or slower tappers, often run out of time.
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
