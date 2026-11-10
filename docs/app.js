@@ -73,6 +73,7 @@ const G = Game, I = EffortItems;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => Math.round(n).toLocaleString("en-GB");
+const fmtShort = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}m` : n >= 1e4 ? `${Math.round(n / 1000)}k` : fmt(n));
 const mmss = (s) => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 // "4d 22h", "2h 14m", "3:12"
 function countdown(ms) {
@@ -147,6 +148,7 @@ function toast(msg) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => (t.hidden = true), 2800);
 }
+function toastClear() { clearTimeout(toast.timer); const t = $("#toast"); if (t) t.hidden = true; }
 async function copy(text, label = "Copied") {
   try { await navigator.clipboard.writeText(text); toast(label); }
   catch { prompt("Copy this", text); }
@@ -803,7 +805,7 @@ function eventCard() {
   const ends = new Date(`${day.slice(0, 4)}-${ev.to}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long" });
   return `<section class="panel eventcard"><div class="caps">Event · until ${ends}</div><h2 class="ol disp">${esc(ev.name)}</h2>
       <p class="small" style="margin:0">${esc(B.blurb)}</p>
-      <p class="small muted" style="margin:8px 0 0"><b>${esc(B.name)}</b> is a choice in Sunday's lobby: as tough as your ladder boss, 25% more loot, and the ladder doesn't move.${prize ? ` ${won ? `You've won the ${esc(prize.name)}.` : `Beat it to win the <b>${esc(prize.name)}</b>.`}` : ""}</p></section>`;
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"><span class="chip">${esc(B.name)} · Sunday lobby</span><span class="chip gold">+25% loot</span>${prize ? `<span class="chip ${won ? "green" : ""}">${won ? ic("check") + " " : ""}${esc(prize.name)}</span>` : ""}</div></section>`;
 }
 function journeyTeaser() {
   const Z = season(), C = seasonContent(); if (!Z || !C) return "";
@@ -959,7 +961,7 @@ function denPanel() {
   if (!squad()) return "";
   const F = S.D.features || {}, D = S.D.squad.den;
   if (!F.den || !D) return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">Opens ${G.FEATURES.den ? new Date(G.FEATURES.den + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : "soon"}</span></div>
-      <p class="small muted" style="margin:0">Your squad's base: ten rooms, ten levels each. Every level is a small bonus for everyone.</p></section>`;
+</section>`;
   const rows = G.DEN_ROOMS.map((r) => {
     const L = D.levels[r.id] || 0, nx = G.denNext(D.totals[r.id] || 0), got = D.totals[r.id] || 0;
     const pct = nx ? Math.max(0, Math.min(1, 1 - nx.need / G.denCost(nx.level))) : 1;
@@ -967,7 +969,7 @@ function denPanel() {
   }).join("");
   const total = Object.values(D.levels).reduce((s, v) => s + v, 0);
   return `<section class="panel"><div class="ptitle"><span class="ic-badge">${ic("door")}</span><h2 class="ol-sm">The Den</h2><span class="side chip">${total} of ${G.DEN_ROOMS.length * G.DEN_MAX}</span></div>
-    <p class="small muted" style="margin:-4px 0 10px">Everyone chips in. Each level helps the whole squad.</p><div class="denrooms">${rows}</div></section>`;
+    <div class="denrooms">${rows}</div></section>`;
 }
 function denSheet(id) {
   const r = G.DEN_ROOMS.find((x) => x.id === id), D = S.D.squad?.den; if (!r || !D) return;
@@ -1025,17 +1027,17 @@ function huntCard() {
   if (!H.open) return H.done ? "" : `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Next one ${new Date(H.next + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}, noon to 11pm.</p></section>`;
   if (H.done) return `<section class="panel huntcard dim"><div class="caps">Midweek Hunt</div><p class="small muted" style="margin:4px 0 0">Done for this week. Next Wednesday.</p></section>`;
   return `<section class="panel huntcard"><div class="caps">Midweek Hunt · today until 11pm</div><h2 class="ol disp">${esc(H.boss)}</h2>
-    <p class="small" style="margin:0">Five minutes against your squad's boss, with ${H.roster.length - 1} squad-mate${H.roster.length === 2 ? "" : "s"} as bots. You keep your share.</p>
+    <p class="small muted" style="margin:0">5 minutes · ${H.roster.length - 1} bot${H.roster.length === 2 ? "" : "s"}</p>
     <button class="btn gold block" style="margin-top:10px" data-act="hunt">${ic("target")} Start the Hunt</button></section>`;
 }
 function startHunt() {
   const H = S.D.hunt; if (!H?.open || H.done) return;
   FX.unlock();
   for (const m of H.roster) ANS[m.id] = { ...(m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id)), ...wearOf(m.wear) };
-  const R = G.raidCreate(H.roster, { seed: H.seed, tier: H.tier, minutes: H.minutes, affix: H.affix, den: H.den });
+  const R = G.raidCreate(H.roster, { seed: H.seed, tier: H.tier, minutes: H.minutes, affix: H.affix, den: H.den, scale: G.HUNT.hp });
   V.raid = {
     hunt: true, raid: { id: "hunt", goal: { affix: H.affix, den: H.den } }, roster: Object.fromEntries(H.roster.map((m) => [m.id, m])), my: me().id, R, host: true, A: null,
-    present: Object.fromEntries(H.roster.map((m) => [m.id, 0])), heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
+    present: Object.fromEntries(H.roster.map((m) => [m.id, 0])), heard: {}, tapBudget: {}, joinedAt: now(), out: { ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
     lastSent: 0, lastSave: Infinity, q: null, taps: 0, lvlBefore: level(), rosterKey: "", hostLast: performance.now(),
   };
   S.view = "raid";
@@ -1063,7 +1065,7 @@ function weekPanel() {
           <span class="lbn"><b class="num">${fmt(val(r))}</b><small>${{ today: "today", week: "this week", all: "all time" }[by]}</small>${by === "week" && r.lost ? `<small class="cut-t">${ic("bolt")}−${fmt(r.lost)}</small>` : ""}</span>
         </button>`; }).join("")}</div>
       <button class="invite-row" data-act="invite">${ic("share")}<span class="grow">Invite to ${esc(squad().name)}</span><span class="small muted">Code</span><b class="code-chip">${squad().code}</b></button>
-      <p class="tiny faint" style="margin:10px 0 0">Tap anyone for their week. Monday to Sunday. Your raid power is your steps ÷ the squad average (×${G.RULES.strideMin} to ×${G.RULES.strideMax}). On Sunday the top walker gets +${Math.round(G.RULES.topLoot * 100)}% loot and ${Math.round(G.RULES.slackerTax * 100)}% of the bottom walker's week.</p>
+      <p class="tiny faint" style="margin:10px 0 0">Raid power: your steps ÷ the squad average (×${G.RULES.strideMin}–×${G.RULES.strideMax}). Raid loot splits by damage × raid power. Sunday: the bottom walker pays the top walker ${Math.round(G.RULES.slackerTax * 100)}% of their week.</p>
     </section>`;
 }
 function noSquadPanel() {
@@ -1111,7 +1113,7 @@ function taxHero() {
     chip = `<span class="chip">${ic("check")} Done for today</span>`;
     line = k >= 1 ? `Knocked out, and you stole ${Math.round(Number(f.steal_pct) * 100)}% back.` : k >= 0.05 ? `You fought him down to ${Math.round(Number(f.rate) * (1 - k) * 100)}% tax.` : `He took the full ${Math.round(Number(f.rate) * 100)}%.`;
     btn = `<div class="rline total" style="margin-top:12px"><span>Banked today</span><span class="rv">${paid ? signedEfforts(paid.amount + Math.max(0, pendingToday().n)) : "–"}</span></div>
-      <p class="tiny faint" style="margin:6px 0 0">This covers all of today's steps, so keep walking.${w.test ? "" : ` Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span>.`}</p>`;
+      ${w.test ? "" : `<p class="tiny faint" style="margin:6px 0 0">Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span></p>`}`;
   } else if (st === "off") {
     chip = `<span class="chip cyan">${ic("star")} Sunday · day off</span>`;
     line = "He takes Sundays off. No tax on today's steps: they go straight in.";
@@ -1192,15 +1194,30 @@ function howDay() {
 }
 
 // ---------- Raid ----------
-// Each stat with what it does for you right now (gear included). Your class's two stats are marked.
+// Each stat with what it does for you right now (gear included), as a whole number. Every bar on the panel shares one
+// scale: the next round milestone (12, 15, 20, 25, 30, 40, 50, 60, 80, 100...) comfortably above the biggest number on
+// it, so a normal walker's bars look healthy, the top one never fills, and every point of growth still moves a bar.
+// The notch on each bar is the squad's average (gear on), when you're in a squad.
+const STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+function statScale(...vals) {
+  const top = Math.max(10, ...vals.filter(Number.isFinite)) * 1.12;
+  for (let p = 1; ; p *= 10) for (const k of STEPS) if (k * p >= top) return k * p;
+}
+const barPct = (v, max) => `${Math.min(100, (Math.max(0, v || 0) / max) * 100).toFixed(1)}%`;
+function squadAverage() {
+  const ms = squad()?.members || [];
+  if (ms.length < 2) return null;
+  const gs = ms.map((m) => (m.id === me().id ? G.loadout(myStats(), me().gear, S.D.inv) : G.loadout(G.stats(m.character || {}), m.gear, {})).g);
+  return Object.fromEntries(G.STATS.map(({ id }) => [id, gs.reduce((a, g) => a + (g[id] || 0), 0) / gs.length]));
+}
 function statRows(st, gear = me().gear, inv = S.D.inv) {
-  const { g } = G.loadout(st, gear, inv), fx = G.statEffects(g), mine = G.classOf(st).stats;
-  const max = Math.max(10, ...Object.values(g));
+  const { g } = G.loadout(st, gear, inv), fx = G.statEffects(g), avg = squadAverage();
+  const max = statScale(...G.STATS.map(({ id }) => g[id]), ...(avg ? Object.values(avg) : []));
   return G.STATS.map((s) => {
     const [icon, col] = STAT_LOOK[s.id];
-    return `<div class="stat fx${mine.includes(s.id) ? " cl" : ""}" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
-      <div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / max) * 100}%"></i><i class="gear" style="width:${((g[s.id] - st[s.id]) / max) * 100}%"></i></div><span class="sv">${+g[s.id].toFixed(1)}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
-  }).join("");
+    return `<div class="stat fx" title="${esc(s.what)}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span>
+      <div class="bar"><i class="base" style="--sc:${col};width:${barPct(Math.round(g[s.id]), max)}"></i>${avg ? `<b class="avg" style="left:${barPct(avg[s.id], max)}"></b>` : ""}</div><span class="sv">${fmt(g[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`;
+  }).join("") + (avg ? `<p class="stat-key"><b class="avg"></b>Squad average</p>` : "");
 }
 // What Sunday looks like if the whole squad turns up (gear upgrades on teammates aren't counted here).
 function raidPreview() {
@@ -1221,11 +1238,9 @@ function goalPanel() {
   return `<section class="panel goal ${g.met ? "met" : ""}">
       <div class="ptitle"><span class="ic-badge ${g.met ? "green" : "red"}">${ic(g.met ? "check" : "steps")}</span><h2 class="ol-sm">Squad goal</h2><span class="side chip ${g.met ? "green" : "red"}">${g.met ? "Made it" : frozen ? "Missed" : `${fmt(left)} to go`}</span></div>
       <div class="goalbar"><i style="width:${pct * 100}%"></i><span>${fmt(g.steps)} / ${fmt(g.target)} steps</span></div>
-      <p class="small muted" style="margin:10px 0 0">${g.met
-        ? `${esc(boss.name)} stays normal on Sunday. Every step past this still raises your raid power.`
-        : frozen ? `The squad missed the goal, so ${esc(boss.name)} is enraged: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder.`
-        : `Between you, average ${fmt(g.perDay)} steps a day each, Monday to Saturday (Sunday's count too). Miss it and ${esc(boss.name)} is <b>enraged</b> on Sunday: ${G.RULES.enragedHp}× health and hits ${G.RULES.enragedDmg}× harder. About ${fmt(left / g.players / daysLeft)} a day each from here.`}</p>
-      <p class="tiny faint" style="margin:6px 0 0">${fmt(g.perDay)} × ${g.days ?? g.players * 6} player-days, Monday to Saturday. Each boss up the ladder asks 500 more a day.</p>
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:10px">${g.met
+        ? `<span class="chip green">${esc(boss.name)} stays normal</span>`
+        : `<span class="chip red">${ic("bolt")} ${frozen ? "Enraged" : "Miss it: enraged"} · ${G.RULES.enragedHp}× health · ${G.RULES.enragedDmg}× hits</span>${frozen ? "" : `<span class="chip">${fmt(left / g.players / daysLeft)} a day each</span>`}`}</div>
     </section>`;
 }
 const poolFor = (R) => G.RULES.raidRewardPerMember * R.members.length * R.lvl ** G.RULES.raidRewardCurve * R.boss.reward * R.timeShare;
@@ -1262,7 +1277,6 @@ function raidHero() {
           <div class="tile gold"><div class="k">${ic("chest")} Win reward</div><div class="v">${effortTag(poolFor(P))}<small>squad</small></div></div>
           <div class="tile ${mine.stride > 1 ? "green" : mine.stride < 1 ? "red" : ""}"><div class="k">${ic("steps")} Your power</div><div class="v">×${mine.stride.toFixed(2)}<small>from steps</small></div></div>
         </div>${btn}
-        <p class="tiny faint" style="margin:10px 0 0">Sunday 6–11pm. When ${G.RULES.raidSquadSize} or more of you are in the lobby and ready, the 15-minute fight starts.</p>
       </div>
     </section>`;
 }
@@ -1277,9 +1291,8 @@ function tabRaid() {
       <div class="ptitle"><span class="ic-badge red">${ic("ladder")}</span><h2 class="ol-sm">The ladder</h2><span class="side chip">Lap ${lap}</span></div>
       <div class="ladder">${G.BOSSES.map((b, i) => {
         const t = (lap - 1) * G.BOSSES.length + i + 1, state = t < tier ? "beaten" : t === tier ? "next" : "locked";
-        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small>${esc(b.title)}</small><small class="bstyle">${esc(b.style || "")}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
+        return `<div class="rung ${state}"><span class="n">${state === "beaten" ? ic("check") : i + 1}</span><span class="grow"><b>${esc(b.name)}</b><small${state === "next" && b.style ? ' class="bstyle"' : ""}>${esc(state === "next" && b.style ? b.style : b.title)}</small></span>${state === "next" ? `<span class="chip gold">Next</span>` : state === "locked" ? `<span class="lockic">${ic("lock")}</span>` : ""}</div>`;
       }).join("")}</div>
-      <p class="small muted" style="margin:10px 0 0">Each Sunday: last week's boss, one up or one down. Climb before your gear's ready and you'll lose. After Vex the bosses come round again, tougher and richer.</p>
     </section>
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("crown")}</span><h2 class="ol-sm">${esc(cls.name)}</h2></div>
@@ -1299,7 +1312,7 @@ function lastRaidPanel(L) {
 function howRaids() {
   return `<details class="panel howbox"><summary class="ptitle"><span class="ic-badge">${ic("info")}</span><h2 class="ol-sm">How raids work</h2></summary>
       <div class="how">
-        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit and how big you stand. Half the loot goes by steps, half by the fight. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit. Loot splits by damage dealt. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Squad combos</b><span>Fire specials within ${G.RULES.comboWindow}s of each other and they combo: ×${G.comboMult(2)} for two, ×${G.comboMult(3)} for three, ×${G.comboMult(4)} for four or more. Call it in chat. His Scream drains everyone's charge, so don't sit on it too long.</span></div></div>
         <div class="hrow"><span class="hic">${ic("arrowRight")}</span><div><b>Dodge</b><span>Marked by an attack? Tap Dodge before it lands and it misses you.</span></div></div>
         <div class="hrow"><span class="hic">${ic("bigSwing")}</span><div><b>Stagger the wind-ups</b><span>Hit hard together while he winds up (Big Swing helps) and the attack lands at half strength, or not at all.</span></div></div>
@@ -1372,26 +1385,29 @@ function tabShop() {
 }
 
 // ---------- Winny's Gamba Bucket ----------
-// Bought with Efforts only (never real money, and nothing in it can be cashed out). The server rolls; the bucket
-// then plays that result out over three taps, climbing the rarity ladder no higher than what you actually won.
-const GAMBA_RANK = { dud: 0, common: 1, rare: 2, epic: 3, legendary: 4, mythic: 5, jackpot: 6 };
+// A crate: every bucket drops a piece of gear. Efforts buy the day's five, House packs buy more, and nothing in it can
+// be cashed out. The server rolls (Game.gambaRoll); the reel here only plays out what it picked.
 const GAMBA_COL = { dud: "#5b6584", common: "#9aa6c4", rare: "#3d9bff", epic: "#a86bff", legendary: "#ffb21e", mythic: "#ff4d6a", jackpot: "#ffc83d" };
+const tierCol = (t) => G.tierOf(t).color;
 const bucketArt = (rar = "dud") => `<svg class="bucket-svg" viewBox="0 0 120 120" aria-hidden="true">
   <path d="M30 34 Q60 4 90 34" fill="none" stroke="#0a0f26" stroke-width="7" stroke-linecap="round"/><path d="M30 34 Q60 4 90 34" fill="none" stroke="#c9cfe6" stroke-width="3.5" stroke-linecap="round"/>
-  <path d="M22 40 L98 40 L88 108 Q60 116 32 108 Z" fill="${GAMBA_COL[rar]}" stroke="#0a0f26" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M22 40 L98 40 L88 108 Q60 116 32 108 Z" fill="${GAMBA_COL[rar] || rar}" stroke="#0a0f26" stroke-width="5" stroke-linejoin="round"/>
   <path d="M28 50 L92 50" stroke="rgba(255,255,255,.35)" stroke-width="4"/><path d="M33 96 Q60 103 87 96" stroke="rgba(0,0,0,.22)" stroke-width="5" fill="none"/>
   <ellipse cx="60" cy="40" rx="38" ry="7" fill="#1b2350" stroke="#0a0f26" stroke-width="5"/>
   <circle cx="45" cy="37" r="5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/><circle cx="62" cy="35" r="5" fill="#ffe58a" stroke="#0a0f26" stroke-width="2"/><circle cx="76" cy="38" r="4.5" fill="#ffc83d" stroke="#0a0f26" stroke-width="2"/>
   <text x="60" y="84" text-anchor="middle" font-family="Lilita One, sans-serif" font-size="30" fill="#fff" stroke="#0a0f26" stroke-width="5" paint-order="stroke">W</text></svg>`;
+const myCrateOdds = () => G.crateOdds(level(), S.D.today.day);
 function gambaPanel() {
   const Gm = G.GAMBA, used = S.D.gamba?.today || 0, left = Math.max(0, Gm.perDay - used), credits = S.D.gamba?.credits || 0, week = S.D.gamba?.weekPence || 0, junk = junkDrawer();
   const pack = (pk) => { const it = G.houseItem(pk.id), over = week + pk.pence > Gm.weeklyPence;
-    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}>${pk.buckets} buckets · ${G.pounds(pk.pence)}</button>`; };
+    return `<button class="btn ${it.link && !over ? "green" : ""} block" data-act="house-pay" data-id="${pk.id}" ${it.link && !over ? "" : "disabled"}><b>${pk.buckets} buckets</b><small>${G.pounds(pk.pence)}</small></button>`; };
+  const odds = myCrateOdds();
   return `<section class="panel gamba">
       <div class="ptitle"><span class="ic-badge gold">${ic("coin")}</span><h2 class="ol-sm">Winny's Gamba Bucket</h2><button class="side chip" data-act="gamba-odds">${ic("eye")} Odds</button></div>
       <div class="bucket-stage">${bucketArt("legendary")}</div>
-      ${left ? `<button class="btn gold xl block" data-act="gamba-buy" ${S.D.wallet >= Gm.price ? "" : "disabled"}>Buy a bucket ${priceTag(Gm.price)}</button>`
-        : credits ? `<button class="btn gold xl block" data-act="gamba-buy">Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
+      <button class="oddsbar" data-act="gamba-odds" aria-label="Odds">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</button>
+      ${left ? `<button class="btn gold xl block${S.gambaBusy ? " loading" : ""}" data-act="gamba-buy" data-off="${S.D.wallet >= Gm.price ? 0 : 1}" ${S.D.wallet >= Gm.price && !S.gambaBusy ? "" : "disabled"}>Open a bucket ${priceTag(Gm.price)}</button>`
+        : credits ? `<button class="btn gold xl block${S.gambaBusy ? " loading" : ""}" data-act="gamba-buy" ${S.gambaBusy ? "disabled" : ""}>Open a bought bucket (${credits} left)</button>` : `<button class="btn xl block" disabled>That's your 5 for today</button>`}
       <p class="tiny faint" style="margin:8px 0 0;text-align:center">${left ? `${left} of ${Gm.perDay} left today` : "Back at midnight"}${credits && left ? ` · ${credits} bought waiting` : ""}${Object.keys(junk).length ? ` · <button class="linkbtn" data-act="junk">Junk drawer (${Object.values(junk).reduce((a, b) => a + b, 0)})</button>` : ""}</p>
       <div class="gamba-more">
         <span class="field-label">More buckets for real money</span>
@@ -1400,31 +1416,40 @@ function gambaPanel() {
       </div>
     </section>`;
 }
+// Your odds (tiers past your level count as your best), what each sells back for, and the average back.
 function gambaOdds() {
-  const Gm = G.GAMBA, pc = (p) => `${(p * 100).toFixed(1)}%`;
+  // One precision for every chance (the rarest is 0.03%), so the column lines up on the decimal point.
+  const Gm = G.GAMBA, odds = myCrateOdds(), pc = (p) => `${(p * 100).toFixed(2)}%`;
+  const back = Math.round(G.gambaReturn(level(), S.D.today.day) * Gm.price);
   openSheet(`${sheetHead("The odds")}
-    <div class="oddsbar">${Gm.prizes.map(([p, , , r]) => `<i style="flex:${p};background:${GAMBA_COL[r]}"></i>`).join("")}</div>
-    <div class="oddsrows">${Gm.prizes.map(([p, v, l, r]) => `<div class="oddsrow"><span class="dot" style="background:${GAMBA_COL[r]}"></span><b class="grow">${esc(l)}</b><span class="muted">${v ? `${fmt(v)} Efforts` : "Something useless"}</span><span class="pc">${pc(p)}</span></div>`).join("")}</div>
-    <p class="small muted" style="margin:12px 0 0">${fmt(Gm.price)} Efforts a bucket. Winnings can't be cashed out.</p>`);
+    <div class="oddsbar">${odds.map((o) => `<i style="flex:${Math.max(o.p, 0.012)};background:${tierCol(o.tier)}"></i>`).join("")}</div>
+    <div class="oddsgrid">
+      <span class="oh"></span><span class="oh sells">Sells for</span><span class="oh">Chance</span>
+      ${odds.map((o) => `<b class="ot"><i class="dot" style="background:${tierCol(o.tier)}"></i>${esc(G.tierOf(o.tier).label)}</b><span class="oc">${coin(16)}</span><span class="on">${fmt(o.sells)}</span><span class="on pc">${pc(o.p)}</span>`).join("")}
+      <b class="ot sum">Back on average</b><span class="oc sum">${coin(16)}</span><span class="on sum">${fmt(back)}</span><span class="on sum faint">of ${fmt(Gm.price)}</span>
+    </div>
+    <p class="tiny faint" style="margin:10px 0 0">Duplicates sell straight back.</p>`);
 }
+// One bucket per tap: the button locks until the server answers. The server only charges a bucket that rolled, so
+// on any error the wallet is left alone and the numbers are pulled fresh.
+const gambaLock = (on) => { S.gambaBusy = on; for (const b of document.querySelectorAll('[data-act="gamba-buy"]')) { b.disabled = on || b.dataset.off === "1"; b.classList.toggle("loading", on); } };
+const gambaErr = (e) => (e instanceof TypeError || /^(Server error|Request failed|Couldn't reach)/.test(e.message) ? "Couldn't open it. Try again" : e.message);
 async function gambaBuy() {
-  if (S.busy) return; S.busy = true;
+  if (S.busy || S.gambaBusy) return;
+  S.busy = true; gambaLock(true);
   let r;
   try { r = await call("gamba", { token: S.token }); }
-  catch (e) { toast(e.message); return; }
-  finally { S.busy = false; }
+  catch (e) { S.busy = false; gambaLock(false); toast(gambaErr(e)); refresh(true); return; }
+  S.busy = false; gambaLock(false);
   S.D.gamba = { ...S.D.gamba, today: G.GAMBA.perDay - r.left, credits: r.credits };
+  // A piece this phone's catalogue doesn't know yet (the app is a version behind): it's in the bag all the same.
+  if (!G.itemById(r.item)) { S.D.wallet = r.wallet; toast("Opened. It's in your bag"); refresh(true); return; }
   FX.play("buy");
-  gambaReveal(r);
+  // If the opening can't draw, never leave its overlay stuck over the app: the piece is in the bag regardless.
+  try { gambaReveal(r); }
+  catch (e) { console.error(e); document.querySelector(".gamba-reveal")?.remove(); FX.destroy?.(); S.D.wallet = r.wallet; toast("Opened. It's in your bag"); refresh(true); }
 }
-// Nothing comes out of a bucket empty-handed: the worst you get is something useless for the junk drawer.
-const JUNK = ["A soggy chip", "One left sock", "Winny's IOU (void)", "A receipt for a receipt", "Half a bus ticket", "A rubber duck that doesn't squeak",
-  "A pigeon feather", "A bent spoon", "A pebble shaped like Brett", "Tangled headphones", "The lid of a different bucket", "An expired coupon for buckets"];
-const pickJunk = () => {
-  const j = JUNK[Math.floor(Math.random() * JUNK.length)], drawer = junkDrawer();
-  drawer[j] = (drawer[j] || 0) + 1; store.set(`junk:${me().id}`, drawer);
-  return j;
-};
+// Old buckets paid out junk to a drawer on this phone; it's still there to look at.
 const junkDrawer = () => store.get(`junk:${me().id}`) || {};
 // Anyone's week, Monday to Sunday: what they walked, anything the game took off (and why), and what counted.
 // Yours comes in your own time zone and live; squad-mates' come with the squad data.
@@ -1476,59 +1501,160 @@ function junkSheet() {
 }
 // What happened in the bucket, one line each.
 const TALES = {
-  dud: ["Winny shakes the bucket. That's all that falls out.", "Nothing in here but this. Winny calls it a collectible.", "Winny swears it was full when he left it."],
-  common: ["Half of it was chocolate coins. You keep the real half.", "A pigeon got to it first. It left you half."],
-  rare: ["The bucket was a mimic. It snapped, you yanked, and you got away with every Effort you put in.", "It bit. You bit back. You escape with exactly what you paid."],
-  epic: ["The bucket had a false bottom. Winny looks the other way while you pocket double.", "A second purse was wedged underneath. Double."],
-  legendary: ["Two false bottoms. Winny is furious.", "The Taxman hid his float in this one. Four times what you paid."],
-  mythic: ["You tip it out and it keeps coming.", "It's heavier than it looks. Much heavier."],
-  jackpot: ["Winny's own savings were in this one. He's not talking to you."],
+  common: ["Winny tips the bucket. This rolls out, wrapped in chip paper.", "Under the chocolate coins, this. Winny calls it vintage.", "A pigeon was sitting on it. It wants it back.", "Winny swears this was the good bucket."],
+  rare: ["The bucket was a mimic. You wrestled this out of its mouth.", "A false bottom, and this underneath it."],
+  epic: ["Winny goes quiet. He didn't know that was in there.", "Wrapped in a betting slip that actually won."],
+  legendary: ["The Taxman hid this in a bucket to dodge himself.", "Winny tries to swap buckets with you. Too late."],
+  mythic: ["The bucket hums. Winny takes a step back.", "It's heavier than the bucket. Physics is sulking."],
+  relic: ["Winny's grandad's. He's not talking to you.", "The bucket was only ever a lid for this."],
+  dupe: ["You've already got one. Winny buys it off you on the spot.", "Another one. Winny pays up and drops it back in a bucket."],
 };
-const bucketTale = (rar) => { const t = TALES[rar] || TALES.dud; return t[Math.floor(Math.random() * t.length)]; };
-// Three taps, then the flood of colour and the prize. Rarities only ever climb to what was really won.
+const bucketTale = (key) => { const t = TALES[key] || TALES.common; return t[Math.floor(Math.random() * t.length)]; };
+// The reel, like a CS:GO case: filler drawn at your real odds, the won piece near the end.
+const REEL_N = 46, REEL_AT = 40;
+function reelCards(won) {
+  const odds = myCrateOdds(), cls = myClass().id;
+  const tier = () => { let x = Math.random(); for (const o of odds) { x -= o.p; if (x < 0) return o.tier; } return odds[0].tier; };
+  return Array.from({ length: REEL_N }, (_, i) => {
+    if (i === REEL_AT) return won;
+    const pool = G.cratePool(tier(), cls);
+    return pool[Math.floor(Math.random() * pool.length)] || won;
+  });
+}
+// The opening: Winny's bucket rattles above a big reel of tier-coloured cards. The reel races past the gold marker,
+// slows, runs a hair past the landing point and settles back inside the won card (never dead centre, so it reads
+// as a spin, not a slide). The plate under the reel names whatever is under the marker. Then the screen floods with
+// the tier colour and the card flips in. A duplicate gets stamped, melts into coins and they fly into your wallet.
+// Tap anywhere during the spin to skip to the landing.
 function gambaReveal(r) {
-  const [, win, label, rar] = G.GAMBA.prizes[r.prize], top = GAMBA_RANK[rar], names = Object.keys(GAMBA_RANK);
+  const it = G.itemById(r.item), t = G.tierOf(r.tier), rank = I.TIERS.findIndex((x) => x.id === r.tier);
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches, cards = reelCards(it);
+  const before = r.wallet - (r.dupe ? r.sells : 0);
   const el = document.createElement("div");
-  el.className = "gamba-reveal"; el.style.setProperty("--rc", GAMBA_COL.dud);
-  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-taps">3 taps</span></div>
-    <button class="gr-bucket" aria-label="Tap the bucket">${bucketArt("dud")}</button><p class="gr-hint">Tap the bucket</p><div class="gr-prize" hidden></div>`;
+  el.className = "gamba-reveal crate reeling"; el.style.setProperty("--rc", GAMBA_COL.dud);
+  el.innerHTML = `<div class="gr-top"><b class="ol-sm">Winny's Gamba Bucket</b><span class="gr-wallet">${coin(22)}<b class="num">${fmt(before)}</b></span></div>
+    <div class="gr-stage">
+      <i class="gr-halo" aria-hidden="true"></i><div class="gr-pail">${bucketArt("legendary")}</div>
+      <div class="reel"><div class="reel-track">${cards.map((c) => `<div class="rcard" style="--tc:${tierCol(c.tier)}"><div class="art">${itemArt(c)}</div></div>`).join("")}</div><i class="reel-mark" aria-hidden="true"></i></div>
+      <div class="gr-now" aria-live="off"><small></small><b></b></div>
+    </div>
+    <div class="gr-prize" hidden></div>
+    <span class="gr-skip">Tap to skip</span>`;
   document.body.appendChild(el);
   FX.init(el);
-  let taps = 0, done = false;
-  const bucket = el.querySelector(".gr-bucket");
-  const finish = () => {
-    done = true; el.style.setProperty("--rc", GAMBA_COL[rar]); el.classList.add("flood", rar);
-    const [x, y] = FX.centre(bucket);
-    setTimeout(() => {
-      el.querySelector(".gr-hint").hidden = true; bucket.hidden = true;
-      const P = el.querySelector(".gr-prize"); P.hidden = false;
-      const junk = win ? null : pickJunk(), tale = bucketTale(rar);
-      P.innerHTML = `<div class="gr-card"><span class="gr-rar">${esc(rar === "jackpot" ? "Jackpot" : rar === "dud" ? "Junk" : rar)}</span><h2 class="ol disp">${esc(label)}</h2>
-        <div class="gr-win">${win ? `+${fmt(win)} Efforts` : esc(junk)}</div><p class="small muted">${esc(tale)}</p>
-        <button class="btn gold block" data-act="gamba-close">${win ? "Collect" : "Keep it"}</button></div>`;
-      if (win) { FX.coins(x, y, Math.min(60, 6 + top * 9)); FX.play("coin"); }
-      if (top >= 5) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); } else if (top >= 3) { FX.shake(el, 10, 400); FX.buzz(40); }
-    }, 600);
+  const reel = el.querySelector(".reel"), track = el.querySelector(".reel-track"), kids = track.children, pail = el.querySelector(".gr-pail");
+  const nowT = el.querySelector(".gr-now small"), nowN = el.querySelector(".gr-now b"), wallet = el.querySelector(".gr-wallet");
+  const x0 = kids[0].offsetLeft, step = kids[1].offsetLeft - x0, cw = kids[0].offsetWidth, mid = reel.clientWidth / 2, vw = reel.clientWidth;
+  // Where the marker comes to rest inside the won card, and how far it runs past before settling back.
+  const rest = (Math.random() * 0.68 - 0.38) * cw, over = reduce ? 0 : 0.11 * cw;
+  const end = mid - (REEL_AT * step + cw / 2 + rest), far = end - over;
+  const D = reduce ? 700 : 5800, SETTLE = reduce ? 0 : 420;
+  const ease = (k) => 1 - Math.pow(1 - k, 4.2), inout = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+  const xAt = (ms) => (ms < D ? far * ease(Math.max(0, ms / D)) : far + (end - far) * inout(Math.min(1, (ms - D) / Math.max(1, SETTLE))));
+  let t0 = performance.now(), under = -1, lastTick = 0, spun = false, lensed = [];
+  // Cards swell as they pass the marker, so the one under it is always the biggest thing on screen.
+  const lens = (x) => {
+    for (const c of lensed) c.style.scale = "";
+    lensed = [];
+    const first = Math.max(0, Math.floor((-x) / step) - 1), last = Math.min(kids.length - 1, first + Math.ceil(vw / step) + 2);
+    for (let i = first; i <= last; i++) {
+      const d = Math.abs(x0 + i * step + cw / 2 + x - mid) / step;
+      if (d < 1) { const s = 1 + 0.22 * (1 - d * d); kids[i].style.scale = s.toFixed(3); kids[i].style.zIndex = d < 0.5 ? 1 : ""; lensed.push(kids[i]); }
+      else kids[i].style.zIndex = "";
+    }
   };
-  bucket.onclick = () => {
-    if (done) return;
-    taps++;
-    const lv = Math.floor((top * taps) / 3), at = names[lv];
-    bucket.innerHTML = bucketArt(at); el.style.setProperty("--rc", GAMBA_COL[at]);
-    el.querySelector(".gr-taps").textContent = taps < 3 ? `${3 - taps} tap${3 - taps === 1 ? "" : "s"}` : "";
-    bucket.classList.remove("bump"); void bucket.offsetWidth; bucket.classList.add("bump");
-    const [x, y] = FX.centre(bucket);
-    FX.play(lv >= 3 ? "crit" : "hit"); FX.buzz(lv >= 3 ? 25 : 10);
-    if (lv >= 1) FX.coins(x, y - 30, 3 + lv * 2);
-    if (lv >= 2) FX.shake(el, 4 + lv * 2, 200);
-    if (lv >= 4) el.classList.add("rays");
-    if (taps >= 3) finish();
+  const showUnder = (u) => {
+    const c = cards[u]; if (!c) return;
+    const tc = tierCol(c.tier);
+    nowT.textContent = G.tierOf(c.tier).label; nowT.style.color = tc; nowN.textContent = c.name;
+    pail.parentNode.style.setProperty("--glow", tc);
   };
-  el.addEventListener("click", (e) => {
-    if (!e.target.closest("[data-act=gamba-close]")) return;
-    FX.destroy(); el.remove(); S.D.wallet = r.wallet; render();
-    load().then(render).catch(() => {});
+  const frame = (now) => {
+    if (spun) return;
+    const ms = now - t0, x = xAt(ms), v = Math.abs(xAt(ms + 16) - x);
+    track.style.transform = `translate3d(${x}px,0,0)`;
+    lens(x);
+    // The bucket rattles while the reel is fast and calms down with it.
+    const shake = Math.min(1, v / 40);
+    pail.style.transform = `rotate(${(Math.sin(now / 38) * 7 * shake).toFixed(2)}deg) translateY(${(-Math.abs(Math.sin(now / 76)) * 6 * shake).toFixed(1)}px)`;
+    const u = Math.floor((mid - x) / step);
+    if (u !== under) { under = u; showUnder(u); if (now - lastTick > 45) { lastTick = now; FX.play("tick"); FX.buzz(3); } }
+    if (ms < D + SETTLE) requestAnimationFrame(frame); else land();
+  };
+  const land = () => {
+    spun = true;
+    track.style.transform = `translate3d(${end}px,0,0)`; lens(end); pail.style.transform = "";
+    showUnder(REEL_AT);
+    el.classList.remove("reeling"); el.classList.add("flood", r.tier); el.style.setProperty("--rc", t.color);
+    kids[REEL_AT].classList.add("hit");
+    track.style.transformOrigin = `${mid}px 50%`; // the reel shrinks about the marker when the card comes in
+    FX.play(rank >= 2 ? "rare" : "coin");
+    if (rank >= 2) { FX.shake(el, 6 + rank * 2, 300); FX.buzz(40); }
+    setTimeout(showCard, reduce ? 150 : 750);
+  };
+  // Coins burst out of the item and arc into the wallet, which ticks up as they land.
+  const flyCoins = (from, n) => {
+    const [x0, y0] = FX.centre(from), wr = wallet.getBoundingClientRect(), x1 = wr.left + 16, y1 = wr.top + wr.height / 2;
+    const layer = document.createElement("div"); layer.className = "coinfly"; el.appendChild(layer);
+    const num = wallet.querySelector("b"), gain = r.wallet - before;
+    let landed = 0;
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement("span"); c.innerHTML = coin(26); layer.appendChild(c);
+      const a = Math.random() * Math.PI * 2, burst = 40 + Math.random() * 46, bx = x0 + Math.cos(a) * burst, by = y0 + Math.sin(a) * burst * 0.8 - 20;
+      const frames = Array.from({ length: 14 }, (_, k) => {
+        const s = k / 13, p1 = Math.min(1, s / 0.28), p2 = Math.max(0, (s - 0.28) / 0.72), q = p2 * p2;
+        const x = s < 0.28 ? x0 + (bx - x0) * (1 - (1 - p1) ** 2) : bx + (x1 - bx) * q;
+        const y = s < 0.28 ? y0 + (by - y0) * (1 - (1 - p1) ** 2) : by + (y1 - by) * q - Math.sin(p2 * Math.PI) * 60;
+        const sc = s < 0.28 ? 0.4 + 0.8 * p1 : 1.2 - 0.6 * q;
+        return { transform: `translate(${x - 13}px,${y - 13}px) scale(${sc.toFixed(2)}) rotate(${Math.round(s * 540 + i * 40)}deg)`, opacity: s > 0.96 ? 0 : 1 };
+      });
+      c.animate(frames, { duration: 900, delay: i * 55, easing: "linear", fill: "both" }).onfinish = () => {
+        c.remove(); landed++;
+        num.textContent = fmt(before + Math.round((gain * landed) / n));
+        wallet.classList.remove("bump"); void wallet.offsetWidth; wallet.classList.add("bump");
+        if (landed % 2) FX.play("coin");
+        if (landed === n) layer.remove();
+      };
+    }
+  };
+  const more = r.left > 0 ? r.wallet >= G.GAMBA.price : r.credits > 0, on = !r.dupe && !me().gear?.[it.slot]; // the server puts it straight on an empty slot
+  const equipped = `<span class="gr-on">${ic("check")} Equipped</span>`;
+  const showCard = () => {
+    el.classList.add("carded");
+    const P = el.querySelector(".gr-prize"); P.hidden = false;
+    const st = G.itemStats(it, 0, myStats()), cls = it.cls ? I.CLASSES.find((c) => c.id === it.cls) : null;
+    P.innerHTML = `<div class="gr-card${r.dupe ? " dupe" : ""}">
+        <span class="gr-rar">${esc(t.label)}${cls ? ` · ${esc(cls.name)}` : ""}</span>
+        <div class="gr-artwrap"><div class="gr-art">${itemArt(it)}</div>${r.dupe ? `<b class="gr-stamp">Duplicate</b>` : ""}</div>
+        <h2 class="ol-sm">${esc(it.name)}</h2>
+        ${r.dupe ? `<div class="gr-worth big">+${coin(24)}<span class="num">${fmt(r.sells)}</span></div>`
+          : `<div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div>
+        <p class="small muted gr-tale">${esc(bucketTale(r.tier))}</p>
+        <div class="gr-worth">Sells for ${coin(18)}<span class="num">${fmt(r.sells)}</span></div>`}
+        <div class="btn-row">${r.dupe ? "" : on ? equipped : `<button class="btn blue" data-act="gamba-equip">Equip</button>`}<button class="btn gold" data-act="gamba-close">Done</button></div>
+        ${more ? `<button class="btn sm block" style="margin-top:8px" data-act="gamba-again">Another bucket${r.left > 0 ? ` ${priceTag(G.GAMBA.price)}` : ""}</button>` : ""}
+      </div>`;
+    if (r.dupe) {
+      const art = P.querySelector(".gr-art");
+      setTimeout(() => { FX.play("hit"); FX.buzz(20); }, reduce ? 0 : 380);
+      setTimeout(() => { art.classList.add("melt"); flyCoins(art, 12); }, reduce ? 100 : 820);
+    }
+    if (rank >= 4) { FX.confetti(140); FX.buzz([60, 40, 60, 40, 60]); FX.play("ko"); }
+    if (rank >= 3) el.classList.add("rays");
+  };
+  const close = () => { FX.destroy(); el.remove(); S.D.wallet = r.wallet; render(); return load().then(render).catch(() => {}); };
+  el.addEventListener("click", async (e) => {
+    if (!spun) { t0 = performance.now() - D - SETTLE; return; } // skip to the landing
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (act === "gamba-close") close();
+    else if (act === "gamba-again") { close(); gambaBuy(); }
+    else if (act === "gamba-equip") {
+      const b = e.target.closest("button"); b.disabled = true;
+      try { await call("equip", { token: S.token, slot: it.slot, item: it.id }); b.outerHTML = equipped; FX.play("buy"); }
+      catch (err) { b.disabled = false; toast(err.message); }
+    }
   });
+  requestAnimationFrame(frame);
 }
 
 // ---------- The House: skins for real money ----------
@@ -1645,7 +1771,7 @@ function itemSheet(id, deal) {
            ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
     </div>
     ${own && sellFor ? `<button class="btn sm block" style="margin-top:10px" data-sell="${id}">Sell to the shop ${priceTag(sellFor)}</button>
-      <p class="tiny faint" style="text-align:center;margin:6px 0 0">${Math.round(G.RULES.sellBack * 100)}% of the ${fmt(S.D.paid[id])} you spent on it${up ? ", upgrades included" : ""}.</p>` : ""}
+      <p class="tiny faint" style="text-align:center;margin:6px 0 0">${Math.round(G.RULES.sellBack * 100)}% of ${S.D.won?.includes(id) ? `its ${fmt(S.D.paid[id])} shop price (from a bucket)` : `the ${fmt(S.D.paid[id])} you spent on it`}${up ? ", upgrades included" : ""}.</p>` : ""}
     ${!own && !locked && wallet < price ? `<p class="small muted" style="text-align:center;margin:10px 0 0">You need ${fmt(price - wallet)} more Efforts. Walk.</p>` : ""}`, { rc: t.color });
 }
 // Everything you own for one slot, to swap in (the raid lobby and the shop's loadout use it).
@@ -2097,7 +2223,7 @@ function viewReveal() {
     <h1 class="ol disp" style="margin:8px 0 2px;font-size:32px">${esc(a.name || "You")}</h1>
     <div class="chip gold" style="margin:4px auto 10px">${esc(cls.name)}</div>
     <p class="small muted" style="margin:0 0 12px">${esc(cls.blurb)} Your top two stats make your class, and your class decides your gear.</p>
-    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${(st[s.id] / 10) * 100}%"></i></div><span class="sv">${st[s.id]}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
+    <section class="panel" style="text-align:left">${(() => { const fx = G.statEffects(st), max = statScale(...Object.values(st)); return G.STATS.map((s) => { const [icon, col] = STAT_LOOK[s.id]; return `<div class="stat fx${cls.stats.includes(s.id) ? " cl" : ""}"><span class="sic" style="background:${col}">${ic(icon)}</span><span class="sn">${s.label}</span><div class="bar"><i class="base" style="--sc:${col};width:${barPct(st[s.id], max)}"></i></div><span class="sv">${fmt(st[s.id])}</span><small class="sfx">${esc(fx[s.id])}</small></div>`; }).join(""); })()}
       <p class="tiny faint" style="margin:6px 0 0">Everyone has ${G.STAT_TOTAL} points; your answers decide where they go. Gold names are your class's stats, and your class gear piles more onto your best one.</p></section>
     <div class="btn-row" style="margin-top:14px"><button class="btn" data-act="quiz-restart">Change answers</button><button class="btn gold" data-act="quiz-done">That's me</button></div>
   </section>`;
@@ -2214,14 +2340,18 @@ function setBar(bar, frac, text) {
   const ghost = bar.querySelector(".ghost"); if (ghost) ghost.style.width = w;
   bar.querySelector("span").textContent = text;
 }
-let comboShown = 0;
+// "Max combo" shows once per streak: a streak only ends after two seconds without a combo (a squad-mate's combo
+// flickers as their taps arrive in batches, and used to fire the banner over and over).
+let comboShown = 0, comboPeak = 0, comboGone = 0;
 function paintCombo(combo, mult) {
   const el = $("#combo"); if (!el) return;
-  if (combo < 5) { el.innerHTML = ""; comboShown = 0; return; }
+  const t = performance.now();
+  if (combo < 5) { if (el.innerHTML) el.innerHTML = ""; comboShown = 0; comboGone ||= t; if (t - comboGone > 2000) comboPeak = 0; return; }
+  comboGone = 0;
   el.innerHTML = `<span class="ol">×${mult.toFixed(2)}</span><small>${combo} combo</small>`;
   el.classList.toggle("hot", combo >= 25);
-  for (const m of [10, 25, 50]) if (comboShown < m && combo >= m) { FX.play("combo"); el.classList.add("bump"); setTimeout(() => el.classList.remove("bump"), 120); if (m >= 25) banner(m >= 50 ? "Max combo" : "On fire"); }
-  comboShown = combo;
+  for (const m of [10, 25, 50]) if (comboShown < m && combo >= m && comboPeak < m) { FX.play("combo"); el.classList.add("bump"); setTimeout(() => el.classList.remove("bump"), 120); if (m >= 50) banner("Max combo"); }
+  comboShown = combo; comboPeak = Math.max(comboPeak, combo);
 }
 function stagePoint(e) {
   const st = $("#stage").getBoundingClientRect();
@@ -2474,8 +2604,8 @@ async function joinRaid() {
   for (const m of r.roster) ANS[m.id] = { ...(m.answers && m.answers.time ? m.answers : Walker.fallbackAnswers(m.id)), ...wearOf(m.wear) };
   V.raid = {
     raid: r.raid, roster: Object.fromEntries(r.roster.map((m) => [m.id, m])), my: r.me, R: null, host: false, A: null,
-    present: {}, heard: {}, tapBudget: {}, joinedAt: now(), out: { taps: 0, ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
-    lastSent: 0, lastSave: now(), q: null, taps: 0, lvlBefore: level(), rosterKey: "",
+    present: {}, heard: {}, tapBudget: {}, joinedAt: now(), out: { ab: false, sp: false, move: null, ans: null }, fxOut: [], snapAt: 0,
+    lastSent: 0, lastSave: now(), q: null, taps: 0, tapSeq: null, tapSent: 0, lvlBefore: level(), rosterKey: "",
   };
   S.view = "raid";
   render();
@@ -2496,10 +2626,13 @@ function connectRaid() {
     });
 }
 // The host is whoever's been here longest and is still sending. Everyone works it out the same way.
-// Anyone ahead of you who has gone quiet for 4 seconds (a frozen or locked phone) is skipped.
+// Anyone ahead of you who has gone quiet for 4 seconds (a frozen or locked phone) is skipped. Nobody takes over from a
+// host who is still sending: a phone waking up used to grab the fight back and drag everyone to where it dozed off
+// (the boss's health jumped back up by hundreds of thousands).
 function elect() {
   const v = V.raid; if (!v || v.ended) return;
   const t = now(), patient = t - v.joinedAt < 4000;
+  if (!v.host && (t < (v.holdUntil || 0) || Object.keys(v.heard).some((id) => id !== v.my && id in v.present && t - v.heard[id] < 4000))) return;
   const ids = Object.keys(v.present).sort((a, b) => v.present[a] - v.present[b] || (a < b ? -1 : 1));
   const host = ids.find((id) => id === v.my || patient || t - (v.heard[id] || 0) < 4000);
   if (host === v.my && !v.host) becomeHost();
@@ -2510,15 +2643,17 @@ function becomeHost() {
   const v = V.raid;
   v.host = true;
   const started = Date.parse(v.raid.started_at), ends = Date.parse(v.raid.ends_at);
-  let R = v.R;
+  let R = v.R, fresh = false;
   if (!R && v.raid.snapshot) R = G.raidImport(v.raid.snapshot);
   if (!R) {
-    const here = Object.keys(v.present).filter((id) => v.roster[id]);
+    fresh = true;
     R = G.raidCreate(Object.keys(v.roster).map(fighter), { seed: Number(v.raid.seed), tier: v.raid.tier, minutes: G.RULES.raidMin, enraged: !!v.raid.goal?.enraged, affix: v.raid.goal?.affix || null, den: v.raid.goal?.den || null });
     for (const m of R.members) m.away = !(m.id in v.present);
   }
   R.dur = (ends - started) / 1000;
   R.t = Math.max(R.t, (now() - started) / 1000);
+  // A brand-new fight starts with the entrance, however long the phones took to connect.
+  if (fresh) G.raidHold(R, G.RULES.raidIntro);
   v.R = R; v.hostLast = performance.now();
   syncMembers();
 }
@@ -2533,15 +2668,25 @@ function syncMembers() {
   for (const id of Object.keys(v.present)) if (v.roster[id] && !R.members.some((m) => m.id === id)) G.raidAddMember(R, fighter(id));
   for (const m of R.members) m.away = !(m.id in v.present);
 }
-// Nobody taps faster than about 15 times a second; anything beyond that from a squad-mate's phone is dropped.
-const TAPS_PER_SEC = 15;
+// Taps that count: G.RULES.tapCap a second for everyone, host or not (the host's own taps used to go straight in
+// uncapped, so a host drumming with three fingers out-hit the squad 4 to 1). slack: room for a burst, or for a
+// squad-mate's taps arriving in a batch.
+function tapGate(v, id, n, slack = 1) {
+  const cap = G.RULES.tapCap, t = performance.now(), b = (v.tapBudget[id] ??= { left: cap, at: t });
+  b.left = Math.min(cap * slack, b.left + ((t - b.at) / 1000) * cap); b.at = t;
+  const ok = Math.max(0, Math.min(Math.floor(b.left), n)); b.left -= ok;
+  return ok;
+}
+const dealtBy = (R) => (R ? R.members.reduce((s, m) => s + (m.dmg || 0), 0) : -1);
 function onInput(p) {
   const v = V.raid; if (!v?.host || !v.R || !p || !v.roster[p.id]) return;
-  const R = v.R, t = performance.now(), b = (v.tapBudget[p.id] ??= { left: TAPS_PER_SEC, at: t });
-  b.left = Math.min(TAPS_PER_SEC, b.left + ((t - b.at) / 1000) * TAPS_PER_SEC); b.at = t;
-  const taps = Math.min(Math.floor(b.left), Math.max(0, p.taps | 0));
-  b.left -= taps;
-  for (let i = 0; i < taps; i++) G.raidTap(R, p.id);
+  const R = v.R, m = R.members.find((x) => x.id === p.id);
+  // Taps come as a running total, so a message the network drops loses nothing: the next one carries them.
+  let n = Math.max(0, p.taps | 0);
+  if (p.n != null && m) { n = Math.max(0, (p.n | 0) - (m.sent || 0)); m.sent = Math.max(m.sent || 0, p.n | 0); }
+  const taps = tapGate(v, p.id, n, 2);
+  // They arrive in batches a few hundred ms apart: give the combo that long to survive.
+  for (let i = 0; i < taps; i++) G.raidTap(R, p.id, 0.6);
   if (p.ab) G.raidAbility(R, p.id);
   if (p.sp) G.raidSpecial(R, p.id);
   if (p.move) G.raidMove(R, p.id, p.move);
@@ -2549,21 +2694,27 @@ function onInput(p) {
 }
 function onSnapshot(p) {
   const v = V.raid; if (!v || v.ended || !p?.R) return;
+  // Damage dealt only ever goes up, so it says which of two versions of the fight is further on.
+  const theirs = dealtBy(p.R), mine = dealtBy(v.R), tol = (p.R.boss?.max || 0) * 0.002;
   if (v.host && p.host !== v.my) {
-    // Two hosts for a moment (we both joined at once): the one who's been here longer keeps it.
-    if ((v.present[p.host] ?? Infinity) <= (v.present[v.my] ?? Infinity)) v.host = false;
+    // Two hosts at once (a phone woke up, or we both joined together): whoever is further into the fight keeps it;
+    // if neither is, the one who's been here longer.
+    if (theirs > mine + tol || (theirs >= mine - tol && (v.present[p.host] ?? Infinity) <= (v.present[v.my] ?? Infinity))) v.host = false;
     else return;
-  }
+  } else if (v.R && theirs < mine - tol && now() - v.snapAt < 4000) return; // an older fight than ours: a stale host
   v.snapAt = now(); v.heard[p.host] = v.snapAt;
   const R = G.raidImport(p.R);
   const grew = !v.R || R.members.length !== v.R.members.length;
   v.R = R;
+  // Our running tap total carries on from what the host has counted (it starts there after a reload).
+  const meR = R.members.find((m) => m.id === v.my);
+  if (meR) { v.tapSeq = Math.max(v.tapSeq ?? 0, meR.sent || 0); v.tapSent = Math.max(v.tapSent || 0, meR.sent || 0); }
   for (const e of p.fx || []) { if (e.type === "tap" && e.id === v.my) continue; raidFx(e); }
   if (grew) render(); else paintRaid();
 }
 function onEnd(p) {
   const v = V.raid; if (!v || v.ended) return;
-  if (p?.result) showRaidResult(p.result, v);
+  if (p?.result) raidResultSoon(p.result, v);
 }
 function raidTick() {
   const v = V.raid; if (!v || v.ended) return;
@@ -2571,25 +2722,35 @@ function raidTick() {
   if (v.host && v.R) {
     const R = v.R, pn = performance.now();
     let dt = (pn - v.hostLast) / 1000; v.hostLast = pn;
+    // We've been asleep (locked phone, app in the background) and someone else has probably carried on: step back and
+    // listen for a few seconds before taking it up again, rather than dragging the squad back to where we dozed off.
+    if (dt > 2.5 && !v.hunt) { v.host = false; v.snapAt = t; v.holdUntil = t + 3000; return; }
     while (dt > 0 && !R.over) { G.raidStep(R, Math.min(0.25, dt)); dt -= 0.25; }
     const fx = R.fx.splice(0);
     for (const e of fx) raidFx(e);
-    v.fxOut.push(...fx.filter((e) => e.type !== "tap" || e.crit || e.swing || Math.random() < 0.5));
-    if (t - v.lastSent >= 150 || R.over) {
+    v.fxOut.push(...fx.filter((e) => e.type !== "tap" || e.crit || e.swing || Math.random() < 0.35));
+    // Five a second: with every phone's messages fanned out to every other phone, faster than this runs into the
+    // live connection's message limit, and dropped messages were losing squad-mates' taps.
+    if (t - v.lastSent >= 200 || R.over) {
       v.lastSent = t;
       v.ch?.send({ type: "broadcast", event: "st", payload: { host: v.my, R: G.raidExport(R), fx: v.fxOut.splice(0, 40) } });
       v.fxOut.length = 0;
     }
-    if (!v.hunt && t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) showRaidResult(r.result, v); }).catch(() => {}); }
+    if (!v.hunt && t - v.lastSave > 15000) { v.lastSave = t; call("raid_sync", { token: S.token, raid_id: v.raid.id, snapshot: G.raidExport(R) }).then((r) => { if (r.status === "done" && r.result) raidResultSoon(r.result, v); }).catch(() => {}); }
     if (R.over) return hostFinish();
     if (rosterKey(R) !== v.rosterKey) return render();
   } else {
-    // Not the host: send what you did since the last message.
-    const o = v.out;
-    if ((o.taps || o.ab || o.sp || o.move || o.ans != null) && t - v.lastSent >= 120) {
-      v.lastSent = t;
-      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, ...o } });
-      v.out = { taps: 0, ab: false, sp: false, move: null, ans: null };
+    // Not the host: taps go as a running total about three times a second; a Dodge, special or answer straight away.
+    // An answer is re-sent until the host has it (a dropped message used to lose it).
+    const o = v.out, gap = t - v.lastSent, T = v.R?.trivia, ans = o.ans ?? (v.pendingAns != null && T?.per[v.my] && !T.per[v.my].ans ? v.pendingAns : null);
+    const act = o.ab || o.sp || o.move || o.ans != null;
+    if ((act && gap >= 100) || ((v.tapSeq || 0) > v.tapSent && gap >= 300) || (ans != null && gap >= 600)) {
+      // n: the running total (this version's hosts read it); taps: the batch since the last message, for a host still
+      // on the old version during a rollout (it only reads taps, and ignores n).
+      const batch = Math.max(0, (v.tapSeq || 0) - (v.tapSent || 0));
+      v.lastSent = t; v.tapSent = v.tapSeq || 0;
+      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, n: v.tapSeq || 0, taps: batch, ab: o.ab, sp: o.sp, move: o.move, ans } });
+      v.out = { ab: false, sp: false, move: null, ans: null };
     }
     // The host has gone quiet: work out who takes over (maybe us, from the last snapshot).
     if (t - v.snapAt > 4000) elect();
@@ -2604,25 +2765,61 @@ async function hostFinish() {
   v.finishing = true;
   clearInterval(v.timer);
   const R = v.R;
-  if (v.A && R.result.how === "won") { v.A.bossKO(); banner("K.O.!", `${R.boss.name} is down`); FX.play("ko"); }
+  raidOver(v, R.result?.how);
   const result = await reportRaid(R);
   if (result) v.ch?.send({ type: "broadcast", event: "end", payload: { result } });
-  setTimeout(() => showRaidResult(result, v), R.result?.how === "won" ? 1600 : 200);
+  raidResultSoon(result, v);
 }
+// The fight's over: clear the fight's overlays and play the K.O. (or the loss) on every phone, host or not.
+function raidOver(v, how) {
+  if (!v || v.koAt) return;
+  v.koAt = performance.now() - (how === "won" ? 0 : 1500);
+  const R = v.R; if (R && $("#r-hp")) setBar($("#r-hp"), R.boss.hp / R.boss.max, `${fmt(R.boss.hp)} / ${fmt(R.boss.max)}`);
+  const tele = $("#tele"); if (tele) { tele.className = "tele idle"; tele.querySelector(".tt").innerHTML = ""; tele.querySelector(".cd").style.width = "0"; }
+  $("#dg")?.classList.remove("hot");
+  toastClear(); hint(null);
+  for (const id of ["#trivia", "#veil"]) { const el = $(id); if (el) el.innerHTML = ""; }
+  // The fight's controls, combo, phase strip and callouts leave at once: from here the screen belongs to the K.O.
+  const ar = $("#arena"); ar?.classList.remove("intro"); ar?.classList.add("over", "cine");
+  const combo = $("#combo"); if (combo) combo.innerHTML = "";
+  for (const b of document.querySelectorAll("#arena .banner, #arena .bosscard")) b.remove();
+  FX.clearText();
+  FX.music(false);
+  if (how === "won") { v.A?.bossKO(); FX.play("ko"); FX.shake($("#shake"), 14, 700); if (!v.A) { const [x, y] = bossXY(); FX.sparks(x, y, "#ffd166", 50, 900); } }
+  koCard(v, how);
+}
+// Held on screen for the whole beat until the results take over: the stamp, then the boss's name and the time.
+function koCard(v, how) {
+  const R = v.R, el = document.createElement("div");
+  el.className = `kocard ${how === "won" ? "won" : "lost"}`;
+  const secs = R ? fightSecs(R) : 0, dealt = R ? Math.round((1 - R.boss.hp / R.boss.max) * 100) : 0;
+  el.innerHTML = `<b class="stamp">${how === "won" ? "K.O." : how === "wiped" ? "Wiped" : "Time's up"}</b>
+    <span class="who">${esc(R?.boss.name || "")}</span><small>${how === "won" ? `Down in ${mmss(secs)}` : `${dealt}% dealt`}</small>`;
+  $("#arena")?.appendChild(el);
+}
+// Results once the K.O. has played out (about 3 seconds after the boss went down).
+function raidResultSoon(result, v) {
+  if (v?.resultAt) return;
+  if (v) { v.resultAt = 1; if (!v.koAt) raidOver(v, result?.how); }
+  const wait = v?.koAt ? Math.max(0, v.koAt + 3000 - performance.now()) : 0;
+  setTimeout(() => showRaidResult(result, v), wait);
+}
+// How long the fight ran, from the entrance to the end (for taps a second).
+const fightSecs = (R) => Math.max(0, Math.round(Math.min(R.t, R.dur) - (R.start || 0)));
 async function reportRaid(R) {
   const v = V.raid; if (!v) return null;
   v.finishing = true;
   const res = R.result || { how: R.boss.hp <= 0 ? "won" : "timeout" };
   if (v.hunt) {
     try {
-      const r = await call("hunt_finish", { token: S.token, how: res.how, frac: 1 - R.boss.hp / R.boss.max, members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
+      const r = await call("hunt_finish", { token: S.token, how: res.how, frac: 1 - R.boss.hp / R.boss.max, secs: fightSecs(R), members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken, taps: m.taps || 0 })) });
       return { ...R.result, hunt: true, shares: R.result.shares.map((x) => ({ ...x, reward: x.id === v.my ? r.amount : 0, tax: 0, total: x.id === v.my ? r.amount : 0 })), settle: null };
     } catch (e) { toast(e.message); return { ...R.result, hunt: true, shares: [], settle: null }; }
   }
   try {
-    const r = await call("raid_finish", { token: S.token, raid_id: v.raid.id, how: res.how, frac: 1 - R.boss.hp / R.boss.max, paralysed: !!R.paralysed, deepDive: R.deepDive || 0,
-      members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken })) });
-    if (!v.host) showRaidResult(r.result, v);
+    const r = await call("raid_finish", { token: S.token, raid_id: v.raid.id, how: res.how, frac: 1 - R.boss.hp / R.boss.max, paralysed: !!R.paralysed, deepDive: R.deepDive || 0, secs: fightSecs(R),
+      members: R.members.map((m) => ({ id: m.id, dmg: Math.round(m.dmg), healed: m.healed, taken: m.taken, taps: m.taps || 0 })) });
+    if (!v.host) raidResultSoon(r.result, v);
     return r.result;
   } catch (e) { toast(e.message); v.finishing = false; return null; }
 }
@@ -2632,9 +2829,12 @@ function leaveRaid() {
   clearInterval(v.timer);
   try { v.ch?.unsubscribe(); } catch { /* already gone */ }
   v.A?.dispose(); FX.destroy();
+  toastClear();
   V.raid = null;
 }
 function showRaidResult(result, v) {
+  if (v?.shown) return;
+  if (v) v.shown = true;
   const R = v?.R || null, lvlBefore = v?.lvlBefore ?? level();
   if (V.raid) leaveRaid();
   if (!result) { S.view = "main"; refresh(true).then(render); return; }
@@ -2661,13 +2861,13 @@ function renderRaid() {
       <div class="buffs" id="buffs"></div>
     </div>
     <div class="tele idle" id="tele"><span class="ti">${ic("eye")}</span><span class="tt"></span><i class="cd"></i></div>
-    <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div></div>
+    <div class="arena-stage" id="stage">${three ? '<div id="plates"></div>' : `<div class="boss2d" id="boss">${Walker.boss(1, false)}</div>`}<div class="combo" id="combo"></div><div class="taphint" id="hint">${ic("target")} Tap the boss</div><i class="lb top"></i><i class="lb bot"></i></div>
     ${three ? "" : `<div class="party2d">${R.members.map((m) => `<div class="m" id="m-${m.id}"><div class="f" style="transform:scale(${G.stepScale(m.stride)})">${head2d(ANS[m.id])}</div>${esc(m.id === v.my ? "You" : m.name)}</div>`).join("")}</div>`}
-    <div class="foot"><div class="log" id="feed"></div>
+    <div class="foot">${partyFrames(R, v)}<div class="log" id="feed"></div>
       <div class="controls"><button class="ability" id="ab" data-act="ability" aria-label="Ability"><span class="cdv"></span><span class="ic-slot"></span><span class="secs"></span><span class="al"></span></button>
         <button class="special" id="sp" data-act="special" aria-label="Special"><span class="ring"></span><span class="ic-slot"></span><span class="pct"></span><span class="al"></span></button>
-        <div class="rside"><div class="sqsp" id="sqsp">${R.members.map((m) => `<span class="q" id="q-${m.id}"><i></i><b>${esc((m.id === v.my ? "You" : m.name).slice(0, 3))}</b></span>`).join("")}</div>
-          <button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div></div>
+        <div class="rside"><button class="dodge" id="dg" data-move="dodge" aria-label="Dodge">${ic("arrowRight")}<span>Dodge</span><em></em></button></div>
+        <div class="lockchip" aria-hidden="true">${ic("lock")}<b id="lock-n"></b></div></div>
     </div>
   </div><div id="trivia"></div><div id="veil"></div></div>`;
   FX.init($("#arena"));
@@ -2675,19 +2875,80 @@ function renderRaid() {
   if (three) {
     v.A = make3d({ mode: "raid", boss: { id: R.boss.id }, team: R.members.map((m, i) => ({ id: m.id, you: m.id === v.my, answers: ANS[m.id], pos: i % 2 ? "mid" : "front", scale: G.stepScale(m.stride) })) });
     if (!v.A) return renderRaid();
-    $("#plates").innerHTML = R.members.map((m) => `<div class="plate ${m.id === v.my ? "me" : ""} ${m.title || ""}" id="np-${m.id}">${m.title === "top" ? `<span class="tt">${ic("crown")}</span>` : m.title === "last" ? `<span class="tt">${ic("warning")}</span>` : ""}${esc(m.id === v.my ? "You" : m.name)}<span class="pw ${m.stride >= 1.15 ? "hi" : m.stride <= 0.85 ? "lo" : ""}">×${(m.stride || 1).toFixed(2)}</span><span class="st"></span><i><s></s></i></div>`).join("");
+    // Over the heroes, just a small marker in each one's colour (their health lives in the party frames).
+    const L = squadLook(R, v.my);
+    $("#plates").innerHTML = R.members.map((m) => `<div class="mk ${m.id === v.my ? "me" : ""}" id="np-${m.id}" style="--mc:${L[m.id].col}">${m.id === v.my ? "" : esc(L[m.id].mono)}</div>`).join("");
   }
   v.abRow = null; v.q = null;
-  if (!v.toasted) {
-    v.toasted = true;
-    const mine = R.members.find((m) => m.id === v.my) || v.roster[v.my];
-    setTimeout(() => toast(mine.title === "top" ? `Top walker this week: you hit ×${mine.stride.toFixed(2)}` : mine.title === "last" ? `Dead weight this week: ×${mine.stride.toFixed(2)} power, and the boss knows it` : `Your steps give you ×${mine.stride.toFixed(2)} power`), 900);
-    FX.play("roar"); setTimeout(() => banner(R.boss.name, R.boss.title), 150);
-    if (G.affixInfo(R.affix)) setTimeout(() => toast(`${G.affixInfo(R.affix).name}: ${G.affixInfo(R.affix).what}`), 3200);
-  }
+  if (!v.toasted) { v.toasted = true; raidIntro(v, R); }
+  else if (v.intro) $("#arena").classList.add("intro", "cine"); // redrawn mid-entrance (someone joined): stay locked
+  if (v.koAt) { $("#arena").classList.add("over", "cine"); koCard(v, v.R?.result?.how || "won"); }
   $("#arena").classList.toggle("fogged", G.affixList(R.affix).includes("fog"));
   $("#arena").classList.toggle("frosted", G.affixList(R.affix).includes("frost"));
   paintRaid();
+}
+// Everyone's colour and monogram: the same on their party frame and on the marker over their hero. Colours go by
+// place in the fight (the same order on every phone), so no two squad-mates share one. One letter where it's unique,
+// two where first letters clash, and a number if two names are the same. You get your walker's head and a chevron.
+const SQUAD_COLS = ["#4fc3ff", "#ff7ab8", "#8ee35a", "#b794ff", "#ff9f43", "#3fe0c5", "#ff5c6c", "#f3e65a", "#9fb4ff", "#e0a3ff"];
+function squadLook(R, my) {
+  const out = {}, words = (n) => String(n || "?").trim().split(/[\s._-]+/).filter(Boolean);
+  const others = R.members.filter((m) => m.id !== my);
+  const one = (m) => (words(m.name)[0]?.[0] || "?").toUpperCase();
+  const two = (m) => { const w = words(m.name); return (w.length > 1 ? w[0][0] + w[1][0] : (w[0] || "?").slice(0, 2)).toUpperCase(); };
+  const count = (list) => list.reduce((c, x) => ((c[x] = (c[x] || 0) + 1), c), {});
+  const c1 = count(others.map(one));
+  let mono = others.map((m) => (c1[one(m)] > 1 ? two(m) : one(m)));
+  const c2 = count(mono), seen = {};
+  mono = mono.map((x) => (c2[x] > 1 ? `${x[0]}${(seen[x] = (seen[x] || 0) + 1)}` : x));
+  R.members.forEach((m, i) => { out[m.id] = { col: SQUAD_COLS[i % SQUAD_COLS.length], mono: m.id === my ? "" : mono[others.indexOf(m)] }; });
+  return out;
+}
+// Long names shrink to fit the frame rather than being cut to "Sha…".
+const frameName = (name) => { const w = String(name || "").trim().split(/\s+/)[0] || "?", n = w.length; return { w, size: n <= 5 ? 11 : n <= 7 ? 10 : n <= 9 ? 9.5 : 8.5 }; };
+// The squad in a fixed row: monogram (your head for you), name, health, special charge, and a mark when down.
+function partyFrames(R, v) {
+  const L = squadLook(R, v.my);
+  return `<div class="party" id="party">${R.members.map((m) => { const me = m.id === v.my, nm = frameName(me ? "You" : m.name);
+    return `<div class="pf ${me ? "me" : ""}" id="pf-${m.id}" style="--mc:${L[m.id].col}">
+    <span class="av">${me ? head2d(ANS[m.id] || Walker.fallbackAnswers(m.id)) : esc(L[m.id].mono)}</span><b style="font-size:${nm.size}px">${esc(nm.w)}</b><span class="st"></span><i class="hpb"><s></s></i><i class="spb"><s></s></i></div>`; }).join("")}</div>`;
+}
+// The entrance: a name card while the camera finds the boss and it roars; taps unlock on "Fight!". It plays in full
+// at the start (the boss holds its first move meanwhile) and as a quick card for anyone arriving in the first seconds.
+function raidIntro(v, R) {
+  const left = (R.start || 0) - R.t, secs = left > 0.8 ? Math.min(5, left) : R.t - (R.start || 0) < 15 ? 1.6 : 0;
+  if (!secs || R.over) return;
+  const ax = G.affixInfo(R.affix);
+  const el = document.createElement("div");
+  el.className = "bosscard";
+  el.innerHTML = `<small>${esc(R.boss.eventName || `Boss ${R.tier}`)}${R.boss.enraged ? " · Enraged" : ""}${ax ? ` · ${esc(ax.name)}` : ""}</small><b>${esc(R.boss.name)}</b>
+    <span class="cdrow"><i class="cdl"><s></s></i><span class="count"></span></span>`;
+  $("#arena").appendChild(el);
+  // Letterbox, locked controls and a countdown into "Fight!": it's plain that nothing works yet, and for how long.
+  $("#arena").classList.add("intro", "cine");
+  v.intro = true;
+  v.A?.intro(secs);
+  FX.play("roar");
+  const end = performance.now() + secs * 1000, bar = el.querySelector(".cdl s"), num = el.querySelector(".count"), lockN = $("#lock-n");
+  let shown = -1;
+  const tick = () => {
+    if (V.raid !== v || v.koAt) return clearInterval(timer);
+    const left = Math.max(0, end - performance.now()) / 1000, n = Math.ceil(left);
+    bar.style.width = `${(1 - left / secs) * 100}%`;
+    if (lockN) lockN.textContent = n || "";
+    if (n !== shown) {
+      shown = n;
+      if (n > 0 && n <= 3) { num.textContent = n; num.classList.remove("pop"); void num.offsetWidth; num.classList.add("pop"); FX.play("tick"); }
+    }
+  };
+  const timer = setInterval(tick, 50); tick();
+  setTimeout(() => {
+    clearInterval(timer);
+    v.intro = false; el.classList.add("out");
+    $("#arena")?.classList.remove("intro");
+    if (!v.koAt) $("#arena")?.classList.remove("cine");
+    setTimeout(() => { el.remove(); if (V.raid === v && !v.R?.over) { banner("Fight!"); FX.play("combo"); } }, 350);
+  }, secs * 1000);
 }
 // Sound, shake and (for the person hit) a banner for each boss's signature move.
 const SIG_FX = { ooze: ["ooze", 6, "Slimed: half damage till you move or get healed"], spores: ["spores", 4, "Spores: healing clears them"], vanish: ["swipe", 9, ""],
@@ -2713,6 +2974,9 @@ function paintBuffs(R) {
 }
 const mateEl = (id) => $(`#np-${id}`) || $(`#m-${id}`);
 const mateXY = (id) => { const A = arena(); if (A) return toArena(A.screenOf(id, 0.75)); return mateEl(id) ? FX.centre(mateEl(id)) : [0, 0]; };
+// Callouts over a hero (hurt, heal, Dodge, Big swing!) lift a little and fade: they used to rise 110px, straight
+// through the hero markers and up over the boss's face.
+const HERO_NUM = { rise: 40, drift: 0, life: 0.85 };
 function raidFx(e) {
   const v = V.raid; if (!v || !$("#arena")) return;
   const R = v.R, A = v.A, my = v.my;
@@ -2748,16 +3012,16 @@ function raidFx(e) {
     }
     case "hurt": {
       A?.hurt(e.id);
-      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${e.amt}`, { size: 22, color: "#ff6b78" });
+      const [x, y] = mateXY(e.id); FX.number(x, y - 20, `-${fmt(e.amt)}`, { ...HERO_NUM, size: 22, color: "#ff6b78" });
       if (e.id === my) { FX.flash($("#arena")); FX.play("hurt"); FX.buzz(40); }
       break;
     }
-    case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { size: 20, color: "#9af0ff" }); break; }
+    case "dodge": { const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Dodge", { ...HERO_NUM, size: 20, color: "#9af0ff" }); break; }
     case "shield": FX.play("shield"); A?.shield(e.ids, 6 + (R.members.find((m) => m.id === e.by)?.perks.shield || 0)); break;
-    case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { size: 22, grad: ["#fff3a0", "#ff7a3d"] }); break; }
-    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${e.amt}`, { size: 22, color: "#7ee29d" }); break; }
-    case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
-    case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
+    case "swing": { FX.play("swing"); A?.heroAttack(e.by, { big: true }); const [x, y] = mateXY(e.by); FX.number(x, y - 30, "Big swing!", { ...HERO_NUM, size: e.by === my ? 22 : 17, grad: ["#fff3a0", "#ff7a3d"] }); break; }
+    case "heal": { FX.play("heal"); A?.heal(e.by, e.id); const [x, y] = mateXY(e.id); if (!A) FX.heal(x, y); FX.number(x, y - 26, `+${fmt(e.amt)}`, { ...HERO_NUM, size: 22, color: "#7ee29d" }); break; }
+    case "down": { FX.play("down"); A?.down(e.id); const [x, y] = mateXY(e.id); FX.number(x, y - 20, "Down", { ...HERO_NUM, size: 22, color: "#ff6b78" }); FX.sparks(x, y, "#ff6b78", 16, 300); break; }
+    case "secondWind": { const [x, y] = mateXY(e.id); FX.number(x, y - 26, "Second wind", { ...HERO_NUM, size: 20, grad: ["#ffffff", "#7ee29d"] }); FX.play("revive"); break; }
     case "revive": FX.play("revive"); for (const id of e.ids) { A?.revive(id); const [x, y] = mateXY(id); FX.heal(x, y); } banner("Back up!"); break;
     case "phase": FX.play("phase"); FX.music(true, e.phase); A?.phase(e.phase); $("#arena").classList.toggle("p2", e.phase === 2); $("#arena").classList.toggle("p3", e.phase === 3); banner(e.phase === 2 ? "Phase 2" : "Enraged", e.phase === 2 ? "It hits harder" : "It's fast now"); FX.shake($("#shake"), 12, 600); break;
     case "feastEnd": if (e.healed) { FX.number(bx, by - 40, `+${fmt(e.healed)}`, { size: 30, color: "#7ee29d" }); FX.play("heal"); } else { FX.number(bx, by - 40, "Interrupted", { size: 26, grad: ["#fff3a0", "#ff7a3d"] }); FX.play("combo"); } break;
@@ -2766,8 +3030,8 @@ function raidFx(e) {
       FX.play("special"); A?.special(e.id, e.cls, e.roll); FX.shake($("#shake"), 10, 450); FX.buzz(30);
       if (S) {
         const [x, y] = mateXY(e.id);
-        FX.number(x, y - 34, S.name, { size: 24, grad: ["#ffffff", SPECIAL_COL[e.cls] || "#ffd166"] });
-        if (e.id === my || ["lollipop", "librarian", "hedge", "pigeon"].includes(e.cls)) banner(S.name, e.id === my ? S.what : `${m.name}: ${S.what}`);
+        FX.number(x, y - 34, S.name, { ...HERO_NUM, size: 24, grad: ["#ffffff", SPECIAL_COL[e.cls] || "#ffd166"] });
+        if (e.id === my || ["lollipop", "librarian", "hedge", "pigeon"].includes(e.cls)) banner(S.name, e.id === my ? "" : m.name);
         if (["bouncer", "mad", "pickpocket"].includes(e.cls) || e.roll === "crit") setTimeout(() => { FX.sparks(bx, by, SPECIAL_COL[e.cls] || "#ffd166", 30, 700); bossHurt(true); }, 380);
       }
       break;
@@ -2779,13 +3043,13 @@ function raidFx(e) {
       break;
     }
     case "blocked": A?.blocked(); FX.play("shield"); FX.number(bx, by + 10, e.stopped ? "Never landed" : "Blocked", { size: 26, grad: ["#ffffff", "#8fd8ff"] }); break;
-    case "pulse": { A?.pulse(e.by, e.id); if (e.id === my || e.by === my) FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${e.amt}`, { size: 16, color: "#7ee29d" }); break; }
-    case "release": { A?.release(e.id, e.freed); if (e.freed) { FX.play("release"); const [x, y] = mateXY(e.id); FX.number(x, y - 28, "Free!", { size: 22, grad: ["#ffffff", "#c9a6ff"] }); } break; }
+    case "pulse": { A?.pulse(e.by, e.id); if (e.id === my || e.by === my) FX.play("pulse"); const [x, y] = mateXY(e.id); FX.number(x, y - 20, `+${fmt(e.amt)}`, { ...HERO_NUM, size: 16, color: "#7ee29d" }); break; }
+    case "release": { A?.release(e.id, e.freed); if (e.freed) { FX.play("release"); const [x, y] = mateXY(e.id); FX.number(x, y - 28, "Free!", { ...HERO_NUM, size: 22, grad: ["#ffffff", "#c9a6ff"] }); } break; }
     case "trivia": FX.play("warn"); break;
     case "answered": if (e.id !== my) FX.play(e.valid ? "tap" : "blocked"); break;
     case "triviaDone": FX.play(e.failed ? "wrong" : "right"); if (e.dive) { FX.number(bx, by, `-${fmt(e.dive)}`, { size: 38, grad: ["#c8f7ff", "#2bb3ff"] }); FX.sparks(bx, by, "#6fd4ff", 24, 600); bossHurt(true); } break;
     case "paralysed": FX.play("stun"); banner("Paralysed", `${fmt(G.RULES.paralysedSteps)} steps down tomorrow`); break;
-    case "end": FX.music(false); break;
+    case "end": raidOver(v, e.how); break;
   }
 }
 function paintRaid() {
@@ -2793,6 +3057,10 @@ function paintRaid() {
   const R = v.R, B = R.boss, mine = R.members.find((m) => m.id === v.my);
   const clock = $("#r-clock"); clock.textContent = mmss(R.dur - R.t); clock.parentElement.classList.toggle("low", R.dur - R.t <= 30);
   setBar($("#r-hp"), B.hp / B.max, `${fmt(B.hp)} / ${fmt(B.max)}`);
+  // Over: the K.O. has the screen now (no prompts, questions or tooltips over it).
+  if (v.koAt) return;
+  // The fight says it isn't winding up: make sure the 3D boss isn't still glowing from an event that never arrived.
+  if (v.A) { if (!(B.next && B.warned)) v.A.calm(); if (!B.hidden) v.A.unghost(); }
   const pct = Math.ceil((B.hp / B.max) * 10) / 10;
   if (!v.A && pct !== v.bossPct && $("#boss")) { v.bossPct = pct; $("#boss").innerHTML = Walker.boss(B.hp / B.max, false); }
   const tele = $("#tele"), tt = tele.querySelector(".tt"), cdbar = tele.querySelector(".cd");
@@ -2802,8 +3070,9 @@ function paintRaid() {
     tt.innerHTML = `${esc(B.attacks.grab || "Grab")}: ${esc(who?.id === v.my ? "you" : who?.name || "")}<small>${fmt(R.grab.dealt)} / ${fmt(R.grab.need)} to break free</small>`;
     cdbar.style.width = `${Math.max(0, (R.grab.until - R.t) / 10) * 100}%`;
   } else if (B.feast) {
-    tele.className = "tele feast";
-    tt.innerHTML = `${esc(B.attacks.feast)}<small>${fmt(B.feast.dealt)} / ${fmt(B.feast.need)} damage</small>`;
+    const done = B.feast.dealt >= B.feast.need;
+    tele.className = `tele feast ${done ? "done" : ""}`;
+    tt.innerHTML = `${esc(B.attacks.feast)}<small>${done ? "stopped" : `${fmt(B.feast.dealt)} / ${fmt(B.feast.need)} damage`}</small>`;
     cdbar.style.width = `${Math.max(0, (B.feast.until - R.t) / 6) * 100}%`;
   } else if (B.next && R.t >= B.next.warnAt) {
     const a = G.ATTACKS[B.next.type], total = B.next.at - B.next.warnAt;
@@ -2818,21 +3087,25 @@ function paintRaid() {
     cdbar.style.width = "0";
   }
   paintBuffs(R);
+  const C = R.combo && R.t <= R.combo.until ? R.combo : null;
   for (const m of R.members) {
-    const el = mateEl(m.id); if (!el) continue;
-    const f = m.hp / m.max;
-    el.classList.toggle("dead", !m.alive);
-    el.classList.toggle("away", !!m.away);
-    if (v.A) {
-      const pt = v.A.screenOf(m.id, 1.05);
-      if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1]}px) translate(-50%, -100%)`;
-      const bar = el.querySelector("s");
-      bar.style.width = `${f * 100}%`;
-      bar.style.background = f > 0.5 ? "var(--green)" : f > 0.25 ? "var(--gold)" : "var(--red)";
-      const st = m.away ? "eye" : !m.alive ? "skull" : R.grab?.id === m.id ? "lock" : R.t < m.stunUntil ? "bolt" : R.t < m.dotUntil ? "fire" : R.t < m.slimeUntil ? "warning" : R.t < m.shieldUntil ? "guard" : m.swing ? "bigSwing" : (m.sp || 0) >= G.RULES.spMax ? "star" : "";
-      const stEl = el.querySelector(".st");
-      if (stEl.dataset.s !== st) { stEl.dataset.s = st; stEl.innerHTML = st ? ic(st) : ""; }
+    const f = Math.max(0, Math.min(1, m.hp / m.max));
+    const el = mateEl(m.id);
+    if (el) {
+      el.classList.toggle("dead", !m.alive); el.classList.toggle("away", !!m.away);
+      if (v.A) { const pt = v.A.screenOf(m.id, 1.3); if (pt) el.style.transform = `translate(${pt[0]}px, ${pt[1] - 4}px) translate(-50%, -100%)`; }
     }
+    const pf = $(`#pf-${m.id}`); if (!pf) continue;
+    pf.classList.toggle("dead", !m.alive); pf.classList.toggle("away", !!m.away);
+    pf.classList.toggle("low", m.alive && f <= 0.3);
+    pf.classList.toggle("ready", (m.sp || 0) >= G.RULES.spMax && m.alive);
+    pf.classList.toggle("in", !!C?.ids.includes(m.id));
+    const hp = pf.querySelector(".hpb s");
+    hp.style.width = `${f * 100}%`; hp.style.background = f > 0.5 ? "var(--green)" : f > 0.25 ? "var(--gold)" : "var(--red)";
+    pf.querySelector(".spb s").style.width = `${Math.min(1, (m.sp || 0) / G.RULES.spMax) * 100}%`;
+    const st = m.away ? "eye" : !m.alive ? "skull" : R.grab?.id === m.id ? "lock" : R.t < m.stunUntil ? "bolt" : R.t < m.dotUntil ? "fire" : R.t < m.slimeUntil ? "warning" : m.swing ? "bigSwing" : "";
+    const stEl = pf.querySelector(".st");
+    if (stEl.dataset.s !== st) { stEl.dataset.s = st; stEl.innerHTML = st ? ic(st) : ""; }
   }
   const ab = $("#ab");
   if (!mine) { ab.disabled = true; hint(`${ic("squad")} Joining the fight…`); }
@@ -2850,17 +3123,9 @@ function paintRaid() {
     sp.querySelector(".pct").textContent = chg < 1 ? `${Math.floor(chg * 100)}%` : "";
     const spReady = chg >= 1 && mine.alive && R.t >= mine.stunUntil && R.t >= mine.moveUntil;
     sp.disabled = !spReady; sp.classList.toggle("ready", spReady);
-    if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); toast(`${S.name} is ready: ${S.what}`); }
+    // Ready: the button lights up and chimes (no toast: it used to sit over the results screen).
+    if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); }
     if (!spReady) v.spToast = false;
-    // Everyone's special charge, and who's in the combo that's going.
-    const C = R.combo && R.t <= R.combo.until ? R.combo : null;
-    for (const m of R.members) {
-      const q = $(`#q-${m.id}`); if (!q) continue;
-      q.querySelector("i").style.width = `${Math.min(1, (m.sp || 0) / G.RULES.spMax) * 100}%`;
-      q.classList.toggle("full", (m.sp || 0) >= G.RULES.spMax && m.alive);
-      q.classList.toggle("in", !!C?.ids.includes(m.id));
-      q.classList.toggle("dead", !m.alive);
-    }
     const dg = $("#dg"), dcd = Math.max(0, mine.dodgeUntil - R.t), marked = B.warned && (B.next?.ids || []).includes(mine.id);
     dg.disabled = dcd > 0 || !mine.alive || R.t < mine.stunUntil;
     dg.querySelector("em").textContent = dcd > 0 ? Math.ceil(dcd) : "";
@@ -2919,18 +3184,19 @@ function paintTrivia() {
 }
 function raidTapEvent(e) {
   const v = V.raid; if (!v?.R) return;
-  const mine = v.R.members.find((m) => m.id === v.my);
-  if (!mine || !mine.alive || v.R.t < mine.stunUntil || v.R.t < mine.moveUntil || v.R.over) return;
+  const R = v.R, mine = R.members.find((m) => m.id === v.my);
+  if (!mine || !mine.alive || v.intro || R.t < (R.start || 0) || R.t < mine.stunUntil || R.t < mine.moveUntil || R.over) return;
+  if (!tapGate(v, "me", 1)) return; // past the cap: drumming, not tapping
   const [x, y] = FX.local(e.clientX, e.clientY);
   v.taps++;
   let hit;
-  if (v.host) { hit = G.raidTap(v.R, v.my); if (!hit) return; }
-  else if (v.R.boss.hidden) { v.out.taps++; hit = { dmg: 0, miss: true }; }
+  if (v.host) { hit = G.raidTap(R, v.my); if (!hit) return; }
+  else if (R.boss.hidden) { v.tapSeq = (v.tapSeq || 0) + 1; hit = { dmg: 0, miss: true }; }
   else {
     // The host decides the real hit; show a fair estimate straight away so tapping feels instant.
-    v.out.taps++;
+    v.tapSeq = (v.tapSeq || 0) + 1;
     const swing = mine.swing > 0;
-    hit = { dmg: (20 + mine.g.power * 4) * mine.stride * G.RULES.lineMult * (1 + mine.combo / (G.RULES.comboMax * 2)) * (swing ? 3 : 1), crit: false, swing };
+    hit = { dmg: G.tapBase(mine) * (1 + (mine.combo / G.RULES.comboMax) * mine.e.combo) * (swing ? 3 : 1), crit: false, swing };
   }
   if (hit.miss) { FX.number(x, y, "Miss", { size: 18, color: "#b9c8ff" }); FX.play("blocked"); return; }
   FX.tapHit(x, y, { crit: hit.crit, dmg: hit.dmg, color: hit.swing ? "#ff9f43" : "#ffd166" });
@@ -2951,7 +3217,7 @@ function raidAct(kind, val) {
     if (kind === "sp") v.out.sp = true;
     if (kind === "move") v.out.move = val;
     if (kind === "ans") {
-      v.out.ans = val; v.sentAns = true;
+      v.out.ans = val; v.pendingAns = val; v.sentAns = true;
       // Check it here too, so you see straight away whether it counts.
       const p = v.R.trivia?.per[v.my];
       if (p) { v.localAns = { text: val, ...p.q.check(val) }; return v.localAns; }
@@ -2980,24 +3246,38 @@ function renderResult() {
     const nm = (id) => (id === my ? "you" : out.names?.[id] || out.shares.find((x) => x.id === id)?.name || "someone");
     won = out.how === "won";
     title = { won: "Victory", timeout: "Time up", wiped: "Defeat" }[out.how];
-    sub = `${esc(out.boss)} · ${Math.round(out.frac * 100)}% dealt`;
-    body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed.</b><span class="small muted">Everyone who fought starts tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></section>` : ""}
-      <section class="panel"><table class="rtable"><tr><th>Squad</th><th>Steps</th><th>Damage</th><th>Loot</th><th>Tax</th></tr>
-        ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === my ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}${esc(s.id === my ? "You" : s.name)}</td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmt(s.dmg)}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
-        ${out.settle ? `<p class="small muted" style="margin:10px 0 0">${ic("coins")} Weekly settlement: ${esc(nm(out.settle.from))} (lowest walker) paid ${esc(nm(out.settle.to))} ${fmt(out.settle.amount)} Efforts.</p>` : ""}</section>
+    sub = `${esc(out.boss)} · ${Math.round(out.frac * 100)}% dealt${out.secs ? ` · ${mmss(out.secs)}` : ""}`;
+    // Ranked by damage: the MVP is whoever hit hardest (loot follows damage too). Empty columns are left out.
+    const rows = [...out.shares].sort((a, b) => b.dmg - a.dmg), top = Math.max(1, rows[0]?.dmg || 0), total = Math.max(1, rows.reduce((s, x) => s + x.dmg, 0));
+    const look = res.R ? squadLook(res.R, my) : {}, colOf = (id) => look[id]?.col || "var(--gold)";
+    const cols = [["dmg", "Damage", true], ["tps", "Taps/s", rows.some((s) => s.tps != null)], ["steps", "Steps", rows.some((s) => s.weekSteps)], ["loot", "Loot", true], ["tax", "Tax", rows.some((s) => s.tax)]].filter((c) => c[2]);
+    const cell = (s, k) => k === "dmg" ? `<b>${fmtShort(s.dmg)}</b>` : k === "tps" ? (s.tps != null ? s.tps.toFixed(1) : "–") : k === "steps" ? `${fmt(s.weekSteps / 1000)}k` : k === "loot" ? fmt(s.reward)
+      : `<span style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</span>`;
+    const mvp = rows[0] && rows[0].dmg > 0 ? rows[0] : null;
+    body = `${out.paralysed ? `<section class="panel" style="border-color:var(--red)"><div class="row">${ic("bolt")}<b class="disp">Paralysed</b><span class="small muted">−${fmt(G.RULES.paralysedSteps)} steps tomorrow</span></div></section>` : ""}
+      ${mvp ? `<section class="mvp" style="--mc:${colOf(mvp.id)}"><div class="mface">${face(mvp.id, 64)}</div>
+        <div class="mtx"><span class="mtag">${ic("crown")} MVP</span><b>${esc(mvp.id === my ? "You" : frameName(mvp.name).w)}</b><small>${fmtShort(mvp.dmg)} damage · ${Math.round((mvp.dmg / total) * 100)}% of the squad's</small></div>
+        <div class="mloot">${coin(18)}<b>${fmt(mvp.reward)}</b></div></section>` : ""}
+      <section class="panel dboard" style="--dc:${cols.length}"><div class="dhead"><span>Squad</span>${cols.map((c) => `<span>${c[1]}</span>`).join("")}</div>
+        ${rows.map((s, i) => `<div class="drow ${s.id === my ? "me" : ""}" style="--mc:${colOf(s.id)}"><span class="dn"><em>${i === 0 && mvp ? ic("crown") : i + 1}</em><b style="font-size:${frameName(s.name).w.length > 8 && s.id !== my ? 10.5 : 13}px">${esc(s.id === my ? "You" : frameName(s.name).w)}</b><i class="dbar"><s data-w="${(s.dmg / top) * 100}"></s></i></span>${cols.map((c) => `<span>${cell(s, c[0])}</span>`).join("")}</div>`).join("")}
+        ${out.settle ? `<div class="settle">${ic("coins")}<span>${esc(nm(out.settle.from).replace(/^you$/, "You"))} → ${esc(nm(out.settle.to))}</span><b>${fmt(out.settle.amount)}</b><small>weekly settlement</small></div>` : ""}</section>
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
         ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
       <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
         ${!mine ? `<div class="small muted">You weren't in this one.</div>` : ""}${won && !out.hunt && !G.isEventTier(out.tier) ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(out.tier + 1).name)}</div>` : ""}${out.prize ? `<div class="small" style="margin-top:6px">${ic("star")} Won the <b>${esc(G.wardrobeById(out.prize)?.name || "")}</b>. Wear it from Me → Wardrobe.</div>` : ""}</section>`;
   }
+  // The level bar starts where you were before this fight; Collect pulls the new total and fills it from there.
+  res.xpBefore ??= S.D?.xp || 0;
+  const p0 = G.levelProgress(res.xpBefore);
   $("#app").innerHTML = `<div class="results ${won ? "" : "lost"}" id="arena"><div class="inner">
-    <div class="ribbon ol">${title}</div>
-    <div class="subline">${sub}</div>
+    <div class="vhead"><i class="rays"></i><h1 class="vtitle">${title}</h1><div class="subline">${sub}</div></div>
     <div class="stack">${body}
-      <section class="panel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${res.lvlBefore}</b></div><div class="xp big"><i style="width:0%"></i><span class="xpt"></span></div><div id="lvlup"></div></section>
-      <button class="btn gold xl block" data-act="collect">${ic("coins")} Collect</button>
+      <section class="panel lvlpanel"><div class="row spread"><b class="disp" style="font-size:17px" id="lvl-now">Level ${p0.lvl}</b><span class="xpgain" id="xp-gain"></span></div><div class="xp big"><i style="width:${p0.pct * 100}%"></i><span class="xpt">${fmt(p0.into)} / ${fmt(p0.need)} XP</span></div><div id="lvlup"></div></section>
+      <div class="collect-dock"><button class="btn gold xl block" data-act="collect">${ic("coins")} Collect</button></div>
     </div></div></div>`;
   if (res.kind === "raid") { const mine = res.out.shares.find((s) => s.id === me().id); countUp($("#count"), mine ? mine.total : 0); }
+  // Damage bars grow in, top to bottom.
+  setTimeout(() => document.querySelectorAll(".dbar s").forEach((s, i) => { s.style.transitionDelay = `${i * 70}ms`; s.style.width = `${s.dataset.w}%`; }), 60);
   FX.init($("#arena"));
   if (won) setTimeout(() => FX.confetti(140), 250);
 }
@@ -3016,11 +3296,20 @@ async function collect() {
   btn.disabled = true;
   try { await load(); } catch (e) { toast(e.message); }
   btn.disabled = false;
-  const p = G.levelProgress(S.D.xp);
-  $(".results .xp i").style.width = `${p.pct * 100}%`;
-  $(".results .xp .xpt").textContent = `${fmt(p.into)} / ${fmt(p.need)} XP`;
-  $("#lvl-now").textContent = `Level ${p.lvl}`;
-  if (p.lvl > res.lvlBefore) { $("#lvlup").innerHTML = `<div class="lvlup ol">Level ${p.lvl}!</div>`; FX.play("levelup"); FX.confetti(100); }
+  // Fill the bar from where it was: to the end and round again for each level gained, then on to the new total.
+  const xp = S.D?.xp || 0, p = G.levelProgress(xp), p0 = G.levelProgress(res.xpBefore || 0), bar = $(".results .xp i");
+  const gain = xp - (res.xpBefore || 0);
+  if (gain > 0) { const g = $("#xp-gain"); g.textContent = `+${fmt(gain)} XP`; g.classList.add("on"); }
+  const settle = () => {
+    bar.style.width = `${p.pct * 100}%`;
+    $(".results .xp .xpt").textContent = `${fmt(p.into)} / ${fmt(p.need)} XP`;
+    $("#lvl-now").textContent = `Level ${p.lvl}`;
+    if (p.lvl > p0.lvl) { $("#lvlup").innerHTML = `<div class="lvlup ol">Level ${p.lvl}!</div>`; FX.play("levelup"); FX.confetti(100); }
+  };
+  if (p.lvl > p0.lvl) {
+    bar.style.width = "100%";
+    setTimeout(() => { bar.style.transition = "none"; bar.style.width = "0%"; void bar.offsetWidth; bar.style.transition = ""; settle(); }, 650);
+  } else settle();
   btn.innerHTML = `Continue ${ic("arrowRight")}`;
   btn.dataset.act = "back";
 }

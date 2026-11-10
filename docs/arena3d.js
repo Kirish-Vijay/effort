@@ -10,7 +10,9 @@ let buildWalker = null;
 try { ({ buildWalker } = await import("./ninja3d.js")); } catch { /* falls back to simple walkers */ }
 
 const INK = 0x1f2a24;
-const ROWS = { front: -0.4, mid: 1.1, back: 2.6 };
+// Rows sit well forward of the boss and the camera looks down on them from higher up, so the squad fills the bottom
+// third of a portrait screen and their heads stay below the boss instead of over its lower half.
+const ROWS = { front: 0.9, mid: 2.4, back: 3.9 };
 const BOSS_Z = -5.2;
 // Ground warning colour for each boss move, and the colour of each class's special.
 const WARN = { swipe: 0xff3b3b, stomp: 0xff3b3b, scream: 0xff3b3b, ooze: 0x5cff4a, spores: 0xffa13d, gust: 0x7ff0ff, grab: 0x9b5cff, slam: 0xff2a00, breath: 0xff7a1a };
@@ -81,33 +83,148 @@ function buildAlgorithm() {
   antenna.position.set(0, 5.35, 0); root.add(antenna);
   return { root, height: 5.4, parts: { body, armL, armR, legL, legR, antenna, screen }, drawFace };
 }
-// The Taxman's nose: long, drooping, with a red bulb on the end. `face` is how far forward his face is.
-function bigNose(face, s = 1) {
-  const nose = new THREE.Group(), skin = toon(0xe8b08e), tip = toon(0xd9786a);
-  const bridge = outlined(new THREE.CapsuleGeometry(0.06, 0.36, 6, 12), skin); bridge.rotation.x = Math.PI / 2 - 0.6; bridge.position.set(0, -0.09, 0.16); nose.add(bridge);
-  const bulb = outlined(new THREE.SphereGeometry(0.095, 16, 12), tip); bulb.scale.set(1.1, 0.95, 1); bulb.position.set(0, -0.21, 0.32); nose.add(bulb);
-  for (const x of [-0.045, 0.045]) { const n = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), toon(0x5a2a24)); n.position.set(x, -0.28, 0.33); nose.add(n); }
-  nose.position.set(0.06, 0.24, face); nose.scale.setScalar(s);
+// The Taxman's nose: long and big, but a real human one, in his own skin (pass the face's material). It's one smooth
+// surface, not stuck-on balls: a distance field of the parts of a nose (a narrow bridge with a slight hump, a rounded
+// tip, the wings either side with a soft crease behind them, the column under the tip, and wide sidewalls that run
+// back into the cheeks) blended together, with the nostrils carved out underneath. A sphere is shrink-wrapped onto it
+// and lit with the field's own normals, so it shades smoothly. It hangs from the top of the bridge (0,0,0): -y runs
+// down the nose, +z out of the face. About 0.25 long and 0.15 out from the face at s = 1.
+const NOSE_GEO = new Map();
+function noseGeometry() {
+  if (NOSE_GEO.has("v")) return NOSE_GEO.get("v");
+  const V = THREE.Vector3;
+  // Ellipsoid (centre c, radii r): a good-enough signed distance (Quilez's bound).
+  const ell = (p, c, r) => {
+    const x = (p.x - c[0]) / r[0], y = (p.y - c[1]) / r[1], z = (p.z - c[2]) / r[2];
+    const k0 = Math.hypot(x, y, z), k1 = Math.hypot(x / r[0], y / r[1], z / r[2]);
+    return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -Math.min(...r);
+  };
+  // Capsule from a to b with the radius running ra -> rb, squeezed sideways by sx (narrower bridge).
+  const cap = (p, a, b, ra, rb, sx = 1) => {
+    const px = p.x / sx, ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [px - a[0], p.y - a[1], p.z - a[2]];
+    const h = Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / (ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2)));
+    return Math.hypot(ap[0] - ab[0] * h, ap[1] - ab[1] * h, ap[2] - ab[2] * h) - (ra + (rb - ra) * h);
+  };
+  const smin = (a, b, k) => { const h = Math.max(0, Math.min(1, 0.5 + (0.5 * (b - a)) / k)); return b + (a - b) * h - k * h * (1 - h); };
+  const smax = (a, b, k) => -smin(-a, -b, k);
+  const field = (p) => {
+    // The bridge: narrow at the top, a slight hump a third of the way down, filling out towards the tip.
+    let d = cap(p, [0, 0.01, -0.004], [0, -0.19, 0.11], 0.021, 0.036, 0.92);
+    d = smin(d, ell(p, [0, -0.085, 0.052], [0.027, 0.05, 0.022]), 0.03);
+    // Sidewalls: wide and shallow, so the nose rises out of the cheeks instead of sitting on them.
+    d = smin(d, ell(p, [0, -0.118, -0.03], [0.066, 0.122, 0.05]), 0.045);
+    // The tip (two domes, barely parted) and the column under it.
+    d = smin(d, ell(p, [-0.012, -0.203, 0.106], [0.037, 0.04, 0.039]), 0.03);
+    d = smin(d, ell(p, [0.012, -0.203, 0.106], [0.037, 0.04, 0.039]), 0.03);
+    d = smin(d, cap(p, [0, -0.232, 0.092], [0, -0.24, 0.02], 0.018, 0.016), 0.02);
+    // The wings, with a softer join so a faint crease shows where they meet the tip.
+    for (const x of [-1, 1]) d = smin(d, ell(p, [x * 0.054, -0.214, 0.032], [0.036, 0.033, 0.05]), 0.018);
+    // Nostrils, carved up into the underside and angled out.
+    for (const x of [-1, 1]) d = smax(d, -ell(p, [x * 0.027, -0.247, 0.056], [0.015, 0.012, 0.028]), 0.008);
+    return d;
+  };
+  const geo = new THREE.SphereGeometry(1, 76, 60), pos = geo.attributes.position, nrm = geo.attributes.normal;
+  const C = new V(0, -0.14, 0.062), dir = new V(), q = new V(), e = 0.0007;
+  for (let i = 0; i < pos.count; i++) {
+    dir.fromBufferAttribute(pos, i); dir.set(dir.x, dir.y * 2.3, dir.z * 1.15).normalize();
+    // March out from inside to the first point that leaves the surface, then bisect.
+    let lo = 0, hi = 0;
+    for (let t = 0.0025; t < 0.45; t += 0.0025) { if (field(q.copy(dir).multiplyScalar(t).add(C)) > 0) { hi = t; break; } lo = t; }
+    if (!hi) hi = lo;
+    for (let k = 0; k < 10; k++) { const m = (lo + hi) / 2; if (field(q.copy(dir).multiplyScalar(m).add(C)) > 0) hi = m; else lo = m; }
+    q.copy(dir).multiplyScalar((lo + hi) / 2).add(C);
+    pos.setXYZ(i, q.x, q.y, q.z);
+    const n = new V(field(new V(q.x + e, q.y, q.z)) - field(new V(q.x - e, q.y, q.z)), field(new V(q.x, q.y + e, q.z)) - field(new V(q.x, q.y - e, q.z)), field(new V(q.x, q.y, q.z + e)) - field(new V(q.x, q.y, q.z - e))).normalize();
+    nrm.setXYZ(i, n.x, n.y, n.z);
+  }
+  geo.computeBoundingSphere();
+  NOSE_GEO.set("v", geo);
+  return geo;
+}
+function taxNose(skin, s = 1) {
+  const nose = new THREE.Group();
+  nose.add(new THREE.Mesh(noseGeometry(), skin));
+  // The dark inside of each nostril, up in the carved hollow: seen from below, only a shadow from the front.
+  for (const x of [-1, 1]) {
+    const hole = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), toon(0x5a2e26));
+    hole.scale.set(0.009, 0.005, 0.017); hole.position.set(x * 0.027, -0.236, 0.056); hole.rotation.y = -x * 0.35; nose.add(hole);
+  }
+  nose.scale.setScalar(s);
   return nose;
 }
-// The Taxman: a tall grey suit with a top hat, monocle, a very big nose and a sack of your money.
+// Toon material with a cool rim of light round its silhouette, so dark things (the Taxman's top hat) still read
+// against the dark green arena.
+function rimToon(color, rim = 0x93a3bf, power = 2.4, strength = 0.42) {
+  const m = toon(color), rc = new THREE.Color(rim);
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.rimColor = { value: rc.multiplyScalar(strength) };
+    sh.fragmentShader = sh.fragmentShader.replace("void main() {", `uniform vec3 rimColor;\nvoid main() {`)
+      .replace("#include <dithering_fragment>", `#include <dithering_fragment>\n  float rimK = pow(1.0 - clamp(abs(dot(normalize(vNormal), normalize(vViewPosition))), 0.0, 1.0), ${power.toFixed(2)});\n  gl_FragColor.rgb += rimColor * rimK;`);
+  };
+  m.customProgramCacheKey = () => `rim${rim}:${power}:${strength}`;
+  return m;
+}
+// The hat both Taxmen wear: a charcoal topper with a rim light, a lighter edge to the brim and a red band.
+// Sized so the brim is radius 1 at s = 1, sitting on y = 0.
+function topHat(s = 1) {
+  const hat = new THREE.Group(), felt = rimToon(0x1d212c), edge = toon(0x4b5266), red = toon(0xd9483b);
+  const brim = outlined(new THREE.CylinderGeometry(1, 1, 0.1, 36), felt, 1.04); hat.add(brim);
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(0.985, 0.045, 8, 48), edge); lip.rotation.x = Math.PI / 2; hat.add(lip);
+  const crown = outlined(new THREE.CylinderGeometry(0.62, 0.66, 1.13, 32), felt, 1.04); crown.position.y = 0.61; hat.add(crown);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.67, 0.672, 0.19, 32), red); band.position.y = 0.16; hat.add(band);
+  const top = new THREE.Mesh(new THREE.CircleGeometry(0.6, 32), toon(0x2b3140)); top.rotation.x = -Math.PI / 2; top.position.y = 1.18; hat.add(top);
+  hat.scale.setScalar(s);
+  return hat;
+}
+// A sack of your money, gathered at the neck: the neck sits at (0,0,0) for a fist to close round, the sack hangs
+// down -y. Wrinkles bunch up towards the tie, a frill sticks out above it, and the £ is printed on the front.
+function moneySack(r = 0.44) {
+  const sack = new THREE.Group(), cloth = toon(0xd8a640), cord = toon(0x6b4420);
+  const prof = [[0, -2.25], [0.5, -2.2], [0.82, -1.98], [1, -1.62], [0.98, -1.2], [0.8, -0.82], [0.5, -0.5], [0.2, -0.25], [0.14, -0.08], [0.15, 0.08], [0.24, 0.24], [0.33, 0.36], [0.2, 0.4], [0, 0.36]]
+    .map(([x, y]) => new THREE.Vector2(x * r, y * r));
+  const geo = new THREE.LatheGeometry(prof, 36), p = geo.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const a = Math.atan2(v.z, v.x), y = v.y / r, near = Math.exp(-(((y + 0.35) / 0.45) ** 2)) + (y > 0.05 ? 0.8 : 0);
+    const k = 1 + 0.07 * near * Math.sin(a * 9 + y * 3) + 0.025 * Math.sin(a * 4 - y * 5);
+    p.setXYZ(i, v.x * k, v.y, v.z * k);
+  }
+  geo.computeVertexNormals();
+  sack.add(new THREE.Mesh(geo, cloth));
+  const tie = new THREE.Mesh(new THREE.TorusGeometry(0.165 * r, 0.05 * r, 8, 20), cord); tie.rotation.x = Math.PI / 2; tie.position.y = -0.17 * r; sack.add(tie);
+  const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
+  x.fillStyle = "#3d2a10"; x.font = "900 92px Georgia, serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("£", 64, 70);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(0.9 * r, 0.9 * r), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }));
+  label.position.set(0, -1.6 * r, 1.08 * r); sack.add(label);
+  return sack;
+}
+// The Taxman: a tall grey suit with a top hat, monocle, a very big nose and a sack of your money in his right hand.
 function buildTaxman() {
   const root = new THREE.Group();
   const suit = toon(0x7d8a82), dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x332200 }), skin = toon(0xe9d8c4);
   const body = outlined(new THREE.CapsuleGeometry(1.0, 1.8, 8, 20), suit, 1.04); body.position.y = 2.0; body.scale.set(1, 1, 0.85); root.add(body);
   const head = outlined(new THREE.SphereGeometry(0.75, 24, 18), skin); head.position.y = 3.9; root.add(head);
-  const brim = outlined(new THREE.CylinderGeometry(1.0, 1.0, 0.1, 28), dark); brim.position.y = 4.5; root.add(brim);
-  const hat = outlined(new THREE.CylinderGeometry(0.62, 0.66, 1.1, 24), dark); hat.position.y = 5.05; root.add(hat);
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.665, 0.67, 0.18, 24), red); band.position.y = 4.65; root.add(band);
-  const eye = (x) => { const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.0, 0.66); const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), dark); p.position.set(0, 0, 0.12); e.add(p); return e; };
+  const hat = topHat(1); hat.position.y = 4.47; root.add(hat);
+  // Eyes with a dark iris and a glint of light, so he looks at you rather than past you.
+  const glint = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const eye = (x) => {
+    const e = outlined(new THREE.SphereGeometry(0.16, 16, 12), toon(0xffffff)); e.position.set(x, 4.08, 0.64);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 10), toon(0x3b2a1e)); iris.scale.z = 0.6; iris.position.set(0, -0.005, 0.12); e.add(iris);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 8), dark); p.scale.z = 0.6; p.position.set(0, -0.005, 0.165); e.add(p);
+    const g = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), glint); g.position.set(0.035, 0.035, 0.17); e.add(g);
+    return e;
+  };
   const eL = eye(-0.26), eR = eye(0.26); root.add(eL, eR);
-  const mono = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 24), gold); mono.position.set(0.26, 4.0, 0.74); root.add(mono);
-  const nose = bigNose(0, 2.2); nose.position.set(0, 3.82, 0.62); root.add(nose);
+  const mono = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 24), gold); mono.position.set(0.26, 4.08, 0.74); root.add(mono);
+  // Same material as the head: the bridge starts between the eyes and the nose runs down over the front of the face.
+  const nose = taxNose(skin, 2.15); nose.position.set(0, 4.14, 0.69); nose.rotation.x = 0.06; root.add(nose);
   const tie = outlined(new THREE.ConeGeometry(0.18, 0.9, 4), red); tie.position.set(0, 2.9, 0.86); tie.rotation.x = Math.PI; root.add(tie);
   const armL = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armL.position.set(-1.25, 2.4, 0); armL.rotation.z = -0.35; root.add(armL);
   const armR = outlined(new THREE.CapsuleGeometry(0.22, 1.3, 6, 12), suit, 1.08); armR.position.set(1.25, 2.4, 0); armR.rotation.z = 0.35; root.add(armR);
-  const bag = outlined(new THREE.SphereGeometry(0.7, 20, 16), gold); bag.position.set(1.9, 1.3, 0.3); bag.scale.set(1, 1.15, 1); root.add(bag);
-  const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.25, 0.3, 12), gold); knot.position.set(1.9, 2.15, 0.3); root.add(knot);
+  // His right fist at the end of the arm, closed round the sack's neck. The sack swings from there (see updateBoss).
+  const fist = outlined(new THREE.SphereGeometry(0.26, 16, 12), skin); fist.position.y = -1.0; fist.scale.set(1, 0.9, 1.05); armR.add(fist);
+  const bag = moneySack(0.62); bag.position.y = -1.02; armR.add(bag);
   const legL = outlined(new THREE.CapsuleGeometry(0.26, 0.6, 6, 12), dark); legL.position.set(-0.45, 0.55, 0); root.add(legL);
   const legR = outlined(new THREE.CapsuleGeometry(0.26, 0.6, 6, 12), dark); legR.position.set(0.45, 0.55, 0); root.add(legR);
   return { root, height: 5.6, parts: { body, head, hat, armL, armR, bag, legL, legR } };
@@ -143,6 +260,7 @@ function prepareModel(gltf, spec) {
     // Re-light the model with the same toon ramp as everything else, keeping its colours/textures.
     const paint = spec.paint?.[src.name];
     o.material = toon(paint ? new THREE.Color(paint) : src.color ? src.color.clone() : 0xffffff, { map: src.map || null, vertexColors: !!src.vertexColors, transparent: !!src.transparent, opacity: src.opacity ?? 1 });
+    o.material.name = src.name || ""; // so accessories can borrow a part's material (the Taxman's nose wears his skin)
     if (spec.tint) o.material.color.lerp(new THREE.Color(spec.tint), 0.35);
   });
   const mixer = new THREE.AnimationMixer(obj), clips = {};
@@ -152,48 +270,101 @@ function prepareModel(gltf, spec) {
     const clip = names.map((n) => byName.get(n.toLowerCase())).find(Boolean);
     if (clip) clips[role] = mixer.clipAction(clip);
   }
-  if (spec.taxman) dressTaxman(obj);
+  if (spec.taxman) dressTaxman(obj, byName.get("punch_right"));
   return { obj, mixer, clips, k };
 }
-// The Business Man model gets the Taxman's top hat, monocle, big nose and a sack of your money, pinned to his bones.
-function dressTaxman(obj) {
+// The Business Man model gets the Taxman's top hat (rim-lit, so it holds up against the dark arena), monocle and big
+// nose (in the model's own skin), a glint in each eye, and a head a fifth bigger so he reads next to the heroes. His right hand
+// closes into a fist round the neck of a sack of your money. punch: the model's Punch_Right clip, which holds a fist
+// the whole way through; that pose is held on his fingers every frame. obj.userData.tick() keeps the sack in the fist
+// and hanging under it: call it after each mixer update.
+function dressTaxman(obj, punch) {
   const bones = [];
   obj.traverse((o) => { if (o.isBone) bones.push(o); });
   const find = (...res) => bones.find((b) => res.some((re) => re.test(b.name)));
   const head = find(/^head$/i, /head/i), hand = find(/fist.?r$/i, /hand.?r$/i, /wrist.?r$/i, /lowerarm.?r$/i);
-  // Bones carry their own scale and rotation; undo both so accessories are sized and oriented in arena units.
+  let skin = null;
+  obj.traverse((o) => { if (o.isMesh && /skin/i.test(o.material?.name || "")) skin = o.material; });
+  // Bones carry their own scale and rotation; undo both so accessories are sized in arena units and line up with the
+  // model (whichever way the model itself is turned).
   obj.updateMatrixWorld(true);
   const pin = (bone, group) => {
     const ws = bone.getWorldScale(new THREE.Vector3()).x;
     group.scale.setScalar(1 / ws);
-    group.quaternion.copy(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
+    group.quaternion.copy(bone.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(obj.getWorldQuaternion(new THREE.Quaternion())));
     bone.add(group);
   };
   if (head) {
-    const hat = new THREE.Group();
-    const dark = toon(0x1f2a24), red = toon(0xd9483b), gold = toon(0xf2b51d, { emissive: 0x221100 });
-    const brim = outlined(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 28), dark); hat.add(brim);
-    const crown = outlined(new THREE.CylinderGeometry(0.38, 0.41, 0.7, 24), dark); crown.position.y = 0.38; hat.add(crown);
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.415, 0.42, 0.12, 24), red); band.position.y = 0.1; hat.add(band);
-    hat.position.set(0, 0.62, 0); hat.rotation.z = -0.08;
-    const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.14, 0.32, 0.38);
-    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.24, 0.12, 0.36); chain.rotation.z = 0.4;
-    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain, bigNose(0.3, 2.4)); inner.scale.setScalar(0.75); wrap.add(inner);
-    pin(head, wrap);
-  }
-  if (hand) {
     const gold = toon(0xf2b51d, { emissive: 0x221100 });
-    const bag = new THREE.Group();
-    const sack = outlined(new THREE.SphereGeometry(0.42, 20, 16), gold); sack.scale.set(1, 1.15, 1); sack.position.y = -0.5; bag.add(sack);
-    const knot = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, 0.22, 12), gold); knot.position.y = -0.05; bag.add(knot);
-    const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d");
-    x.fillStyle = "#1f2a24"; x.font = "900 96px Arial"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("£", 64, 70);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    const label = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), new THREE.MeshBasicMaterial({ map: t, transparent: true }));
-    label.position.set(0, -0.5, 0.43); bag.add(label);
-    const wrap = new THREE.Group(); wrap.add(bag);
-    pin(hand, wrap);
+    const hat = topHat(0.84); hat.position.set(0, 0.6, 0.04); hat.rotation.set(-0.04, 0, -0.08);
+    const mono = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 8, 20), gold); mono.position.set(0.13, 0.37, 0.5);
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.4, 4), gold); chain.position.set(0.22, 0.18, 0.47); chain.rotation.z = 0.4;
+    const wrap = new THREE.Group(), inner = new THREE.Group(); inner.add(hat, mono, chain); inner.scale.setScalar(0.75); wrap.add(inner);
+    // The nose (in head units: the model's eyes sit at y 0.28, its face is z 0.36 down the middle) starts between his
+    // eyes and runs down to just above his top lip.
+    const nose = taxNose(skin || toon(0xe8c4a0), 1.1); nose.position.set(0, 0.345, 0.356); wrap.add(nose);
+    pin(head, wrap);
+    // The model's eyes are plain dark boxes: find each one and give it a catchlight, up and out, on its front.
+    const eyeMesh = [];
+    obj.traverse((o) => { if (o.isMesh && /^eye$/i.test(o.material?.name || "")) eyeMesh.push(o); });
+    const glint = new THREE.MeshBasicMaterial({ color: 0xffffff }), hp = new THREE.Vector3(), v = new THREE.Vector3();
+    for (const m of eyeMesh) {
+      const pos = m.geometry.attributes.position, sides = [[], []];
+      head.updateWorldMatrix(true, false); wrap.updateWorldMatrix(true, false);
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i); if (m.isSkinnedMesh) m.applyBoneTransform(i, v);
+        wrap.worldToLocal(v.applyMatrix4(m.matrixWorld)); sides[v.x < 0 ? 0 : 1].push(v.clone());
+      }
+      sides.forEach((pts, k) => {
+        if (!pts.length) return;
+        const c = pts.reduce((a, p) => a.add(p), hp.set(0, 0, 0)).divideScalar(pts.length), front = Math.max(...pts.map((p) => p.z));
+        const out = k ? 1 : -1, g = new THREE.Mesh(new THREE.SphereGeometry(0.0115, 10, 8), glint);
+        g.position.set(c.x + out * 0.012, c.y + 0.014, front + 0.004); wrap.add(g);
+      });
+      m.material = m.material.clone(); m.material.color.setHex(0x2b1a12);
+    }
+    head.scale.multiplyScalar(1.22);
+    obj.userData.headroom = 0.9; // the hat now stands above the height the model was fitted to (portraits frame it in)
   }
+  if (!hand) return;
+  const fist = [];
+  for (const tr of punch?.tracks || []) {
+    const dot = tr.name.lastIndexOf("."), b = bones.find((x) => x.name === tr.name.slice(0, dot));
+    if (b && tr.name.slice(dot + 1) === "quaternion" && /^(index|middle|ring|pinky|thumb)\d.?r$/i.test(b.name)) fist.push([b, new THREE.Quaternion().fromArray(tr.values, 0)]);
+  }
+  const grip = bones.filter((b) => /^(index2|middle2|ring2|thumb2).?r$/i.test(b.name));
+  const R = 0.36, sack = moneySack(R), len = 2.25 * R;
+  hand.add(sack);
+  const at = new THREE.Vector3(), tmp = new THREE.Vector3(), out = new THREE.Vector3(), axis = new THREE.Vector3(), ws = new THREE.Vector3();
+  const face = new THREE.Quaternion(), hq = new THREE.Quaternion(), lay = new THREE.Quaternion(), sway = new THREE.Quaternion();
+  let last = null, ang = 0, vel = 0;
+  obj.userData.tick = (dt = 0) => {
+    for (const [b, q] of fist) b.quaternion.copy(q);
+    obj.updateWorldMatrix(true, true);
+    // The neck sits in the middle of the closed fingers.
+    at.set(0, 0, 0);
+    if (grip.length) { for (const b of grip) at.add(b.getWorldPosition(tmp)); at.divideScalar(grip.length); } else hand.getWorldPosition(at);
+    // A little swing when his hand moves (a damped pendulum, pushed by the hand's sideways speed).
+    obj.getWorldQuaternion(face);
+    if (last && dt > 0) {
+      const push = tmp.subVectors(at, last).applyQuaternion(face.clone().invert()).x / dt;
+      vel += (-ang * 60 - vel * 7 - push * 3) * dt; ang = Math.max(-0.7, Math.min(0.7, ang + vel * dt));
+    }
+    last = (last || new THREE.Vector3()).copy(at);
+    // Straight down in the world, label facing the way he faces. Near the floor (knocked down) it lies out flat,
+    // away from his body, instead of sinking through.
+    const ground = obj.parent ? obj.parent.getWorldPosition(tmp).y : 0, h = at.y - ground;
+    lay.identity();
+    if (h < len) {
+      out.subVectors(at, obj.getWorldPosition(tmp)).setY(0);
+      if (out.lengthSq() > 1e-6) { axis.crossVectors(new THREE.Vector3(0, 1, 0), out.normalize()).normalize(); lay.setFromAxisAngle(axis, -Math.acos(Math.max(0, h) / len)); }
+    }
+    sway.setFromAxisAngle(new THREE.Vector3(0, 0, 1), ang);
+    sack.position.copy(hand.worldToLocal(at.clone()));
+    sack.quaternion.copy(hand.getWorldQuaternion(hq).invert().multiply(lay).multiply(face).multiply(sway));
+    sack.scale.setScalar(1 / hand.getWorldScale(ws).x);
+  };
+  obj.userData.tick();
 }
 
 // ---------- menu portraits ----------
@@ -232,9 +403,10 @@ function portrait(kind, id, answers, { w = 256, h = 256, frame = "full" } = {}) 
         m.clips.idle?.play(); m.mixer.update(0.45);
         obj = m.obj; height = spec.height || 5.5;
         obj.rotation.y = (spec.rotY || 0) - 0.35;
+        obj.userData.tick?.();
         // Skinned meshes report bounds from an unposed skeleton, so frame from the size we normalised to.
         const hv = spec.hover || 0;
-        known = new THREE.Box3(new THREE.Vector3(-height * 0.42, hv, -height * 0.3), new THREE.Vector3(height * 0.42, hv + height, height * 0.3));
+        known = new THREE.Box3(new THREE.Vector3(-height * 0.42, hv, -height * 0.3), new THREE.Vector3(height * 0.42, hv + height + (obj.userData.headroom || 0), height * 0.3));
       } else {
         const b = (BUILT_IN[id] || BUILT_IN.algorithm)();
         obj = b.root; height = b.height; obj.rotation.y = -0.35;
@@ -701,8 +873,8 @@ class Arena {
     this.scene.fog = new THREE.Fog(this.pal.fog, 18, 40);
     this.camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
     this.scene.add(this.camera); // the flash overlay rides on it
-    this.camBase = opts.mode === "tax" ? V3(0.7, 2.9, 7.6) : V3(0, 4.0, 9.2);
-    this.lookAt = opts.mode === "tax" ? V3(-0.2, 2.5, this.bossZ + 2) : V3(0, 2.9, this.bossZ + 1.5);
+    this.camBase = opts.mode === "tax" ? V3(0.7, 2.9, 7.6) : V3(0, 6.4, 10.0);
+    this.lookAt = opts.mode === "tax" ? V3(-0.2, 2.5, this.bossZ + 2) : V3(0, 1.6, this.bossZ + 1.5);
     this.baseFov = 48;
     // Time: real time drives the camera and the clock; game time (frozen by hit-stop, slowed on the K.O.) drives everything else.
     this.shakeAmt = 0; this.t = 0; this.realT = 0; this.fx = []; this.heroes = new Map();
@@ -842,10 +1014,13 @@ class Arena {
     this.capMat.color.copy(L.ring).multiplyScalar(2.2);
     this.skyMat.color.copy(L.tint); this.floorMat.color.copy(L.tint);
     this.motes.material.uniforms.uBoost.value = L.boost;
+    // The K.O.: bloom eases down and the vignette closes in, so the dying boss stands out instead of glowing white.
+    const koT = this.koAt != null && this.mode !== "tax" ? 1 : 0;
+    this.koK = (this.koK || 0) + (koT - (this.koK || 0)) * (1 - Math.exp(-real * 4));
     if (this.post) {
       const u = this.post.grade.uniforms;
-      u.uLift.value.copy(L.lift); u.uGain.value.copy(L.gain); u.uSat.value = L.sat; u.uVig.value = L.vig;
-      this.post.bloom.strength = L.bloom;
+      u.uLift.value.copy(L.lift); u.uGain.value.copy(L.gain); u.uSat.value = L.sat; u.uVig.value = L.vig + this.koK * 0.35;
+      this.post.bloom.strength = L.bloom * (1 - this.koK * 0.55);
     }
   }
 
@@ -939,7 +1114,7 @@ class Arena {
       const m = prepareModel(gltf, spec);
       const old = this.boss.holder, wasDead = this.boss.dead;
       this.scene.remove(old); freeObj(old);
-      this.boss = { mixer: m.mixer, clips: m.clips, hover: spec.hover || 0 };
+      this.boss = { mixer: m.mixer, clips: m.clips, hover: spec.hover || 0, tick: m.obj.userData.tick };
       place(m.obj, spec.height || 5.5);
       this.collectMats(m.obj);
       this.bossPlay("idle");
@@ -1001,7 +1176,7 @@ class Arena {
     for (const h of this.heroes.values()) byRow[h.pos].push(h);
     // Spacing follows each neighbour pair's size; on a narrow (portrait) screen a long row closes up to fit,
     // but never tighter than the walkers' own width, so nobody overlaps.
-    const r = this.host.getBoundingClientRect(), aspect = r.width / Math.max(1, r.height), tanH = Math.tan(((aspect < 0.7 ? 58 : 48) * Math.PI) / 360) * aspect;
+    const r = this.host.getBoundingClientRect(), aspect = r.width / Math.max(1, r.height), tanH = Math.tan((this.fovFor(aspect) * Math.PI) / 360) * aspect;
     for (const [row, list] of Object.entries(byRow)) {
       const n = list.length, gap = row === "front" ? 1.9 : 1.75; if (!n) continue;
       const sc = list.map((h) => h.scaleTo ?? 1), want = [], min = [];
@@ -1064,10 +1239,11 @@ class Arena {
     this.flashAmt = Math.max(this.flashAmt, amt * (CALM ? 0.5 : 1));
   }
   // A camera move: offsets for position, look target, FOV and roll, eased in, held, eased out. Tagged moves replace each other.
-  camMove({ pos = [0, 0, 0], look = [0, 0, 0], fov = 0, roll = 0, inT = 0.25, dur = 1, outT = 0.5, hold = false, tag = null } = {}) {
+  // free: the shot is about the boss, so don't pull back to keep the squad in frame (the intro, the K.O.).
+  camMove({ pos = [0, 0, 0], look = [0, 0, 0], fov = 0, roll = 0, inT = 0.25, dur = 1, outT = 0.5, hold = false, tag = null, free = false } = {}) {
     const k = CALM ? 0.35 : 1;
     if (tag) this.releaseCam(tag, true);
-    const m = { p: V3(...pos).multiplyScalar(k), l: V3(...look).multiplyScalar(k), fov: fov * k, roll: roll * k, inT, dur: Math.max(dur, inT + outT), outT, hold, tag, t: 0 };
+    const m = { p: V3(...pos).multiplyScalar(k), l: V3(...look).multiplyScalar(k), fov: fov * k, roll: roll * k, inT, dur: Math.max(dur, inT + outT), outT, hold, tag, free, t: 0 };
     this.moves.push(m); return m;
   }
   releaseCam(tag, quick = false) {
@@ -1122,7 +1298,7 @@ class Arena {
     }
     // Keep the squad on screen: scale the move back until everyone fits (or fits as well as the base framing does).
     let w = 1;
-    if (this.heroes.size && (off.p.lengthSq() > 1e-6 || off.l.lengthSq() > 1e-6 || Math.abs(off.fov) > 0.01)) {
+    if (this.heroes.size && !this.moves.some((m) => m.free) && (off.p.lengthSq() > 1e-6 || off.l.lengthSq() > 1e-6 || Math.abs(off.fov) > 0.01)) {
       this.placeCamera(off, 0); const allow = Math.max(0.86, this.squadSpread() + 0.01); // centres; leaves room for the walkers' own width
       for (w = 1; w > 0.05; w -= 0.35) { this.placeCamera(off, w); if (this.squadSpread() <= allow) break; }
       w = Math.max(0, w);
@@ -1141,19 +1317,22 @@ class Arena {
     const h = this.heroes.get(id); if (!h || h.down) return;
     h.w.play(big ? "big" : "attack");
     const from = h.w.group.position.clone().add(V3(0, 1.1 * h.w.group.scale.y, -0.3));
-    const to = this.bossPoint(0.45 + Math.random() * 0.3, (Math.random() - 0.5) * 1.2);
+    // Shots land on the body and flanks, below the face, so the boss's expression stays readable mid-fight.
+    const to = this.bossPoint(0.28 + Math.random() * 0.24, (Math.random() - 0.5) * 1.6);
     const strong = crit || big;
     // Mythic and House skins shoot (and land) in their own spark colour, a touch brighter on the strong ones.
     const sk = h.w.skinFx?.spark ? new THREE.Color(h.w.skinFx.spark).getHex() : null;
     const col = sk ?? (strong ? 0xff9f43 : h.m.you ? 0xffd166 : 0x9fd0ff);
-    this.projectile(from, to, col, strong ? 0.22 : 0.13, strong, () => {
-      if (sk != null && !strong) this.flare(to, sk, 1.4);
-      if (!strong) return;
+    // Teammates' shots are smaller than yours, so five people tapping at once still leave the boss in view.
+    const mine = !!h.m.you;
+    this.projectile(from, to, col, (strong ? 0.22 : 0.13) * (mine ? 1 : 0.7), strong, () => {
+      if (sk != null && !strong && mine) this.flare(to, sk, 1.2);
+      if (!strong || !this.impactOk(mine ? 0.12 : 0.3)) return;
       // Your own hits already got their hit-stop from bossHit; teammates' big ones get a lighter one on landing.
-      if (!h.m.you) this.hitStop(big ? 70 : 45, { punch: big ? 0.5 : 0.25, minor: true });
-      this.flare(to, sk ?? 0xffc37a, big ? 3.2 : 2.2);
-      if (sk != null) this.shockwave(to, sk, big ? 2.8 : 1.8, 0.35, true);
-    });
+      if (!mine) this.hitStop(big ? 70 : 45, { punch: big ? 0.5 : 0.25, minor: true });
+      this.flare(to, sk ?? 0xffc37a, (big ? 2.6 : 1.8) * (mine ? 1 : 0.7));
+      if (sk != null && mine) this.shockwave(to, sk, big ? 2.4 : 1.6, 0.3, true);
+    }, mine);
   }
   bossHit(crit) {
     const B = this.boss; if (!B) return;
@@ -1388,6 +1567,30 @@ class Arena {
     for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 4, r = 0.7;
       this.sparks.emit({ x: at.x + Math.cos(a) * r, y: 0.2 + (i / n) * 0.8, z: at.z + Math.sin(a) * r, vx: -Math.sin(a) * 1.2, vy: rnd(3, 5), vz: Math.cos(a) * 1.2, c, life: rnd(0.5, 0.8), size: rnd(0.08, 0.13), stretch: 0.05, drag: 1.2, shape: 1, core: 0.8, delay: i * 0.012 }); }
   }
+  // Back to rest: no wind-up glow, danger light, raise or fade. The app calls this whenever the fight says the boss
+  // isn't winding up, so a missed event (a dropped snapshot, a blocked attack) can't leave a glow on it.
+  calm() {
+    const B = this.boss; if (!B) return;
+    if (B.windup || B.raise || B.inhale || this.danger.intensity) { B.windup = 0; B.raise = 0; B.inhale = 0; this.danger.intensity = 0; this.releaseCam("area"); }
+  }
+  unghost() { if (this.boss) this.boss.ghost = false; }
+  // The entrance: start close on the boss, a roar, then pull back to the squad. Taps are locked by the app meanwhile.
+  intro(secs = 3.5) {
+    const B = this.boss; if (!B) return;
+    // From the raid camera (high, behind the squad) down to the boss's eye level, close in; the Taxman's is already low.
+    const lo = this.mode === "tax" ? { pos: [0, -0.6, -4.2], look: [0, 0.9, -1.2] } : { pos: [0, -3.0, -5.0], look: [0, 2.2, -1.2] };
+    this.camMove({ ...lo, fov: -8, inT: 0.01, hold: true, outT: Math.min(1.4, secs * 0.4), tag: "intro", free: true });
+    setTimeout(() => {
+      if (this.disposed || this.boss?.dead) return;
+      const B2 = this.boss;
+      if (B2.mixer && B2.clips.roar) this.bossPlay("roar", { once: true }); else { B2.squash = 0.2; B2.act = "atk-scream"; B2.actT = 0; }
+      const at = this.bossPoint(0.5, 0);
+      this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 10, 1.1);
+      this.charge(at, this.look.ring.getHex(), 30, 4);
+      this.shake(0.45);
+    }, 450);
+    setTimeout(() => { if (!this.disposed) this.releaseCam("intro"); }, Math.max(600, (secs - 1.2) * 1000));
+  }
   // The middle row knocked it off balance.
   stagger(stopped) {
     const B = this.boss; if (!B) return;
@@ -1404,6 +1607,7 @@ class Arena {
   }
   // An attack that bounced off the whole squad.
   blocked() {
+    this.calm();
     for (const h of this.heroes.values()) if (!h.down) this.shockwave(this.chest(h, 1), 0x8fd8ff, 1.8 * h.w.group.scale.y, 0.6, true);
     this.shockwave(V3(0, 0.06, ROWS.front - 0.8), 0x8fd8ff, 7, 0.6);
     this.flare(V3(0, 1.2, ROWS.front - 0.8), 0xbfe8ff, 3);
@@ -1455,21 +1659,31 @@ class Arena {
   bossKO() {
     const B = this.boss; if (!B || B.dead) return;
     B.dead = true; B.act = "ko"; B.actT = 0;
+    B.windup = 0; B.raise = 0; B.inhale = 0; B.ghost = false; B.feastGlow = 0; B.flash = 0; this.danger.intensity = 0;
     if (B.mixer && B.clips.death) this.bossPlay("death", { once: true, then: null });
     this.shake(0.7);
     for (const h of this.heroes.values()) if (!h.down) h.w.play("cheer");
     // The finisher, once per fight (a model arriving late re-runs bossKO on the new body): freeze, slow motion, push in, dissolve.
+    // No white-out: the flash is faint and warm, the rings take the stage colour, and bloom eases down (see
+    // updateLook) so the boss's silhouette stays readable while it shudders, topples and burns away.
     if (this.koAt == null) {
       this.koAt = this.realT;
       this.moves.length = 0;
-      this.hitStop(130, { flash: 0.45, color: 0xffffff, punch: 1 });
-      this.slowmo = { t: 0, hold: 0.85, out: 0.6, scale: 0.3 };
-      this.camMove({ pos: [0, -0.3, -1.5], look: [0, 0.7, 0], fov: -5, inT: 0.6, dur: 3, outT: 0.9, tag: "ko" });
-      const at = this.bossPoint(0.5, 0);
-      this.shockwave(at, 0xffffff, 9, 0.9, true); this.shockwave(V3(0, 0.06, this.bossZ), this.look.ring.getHex(), 14, 1.2);
-      this.burst(at, 0xfff3a0, 70, 8); this.flare(at, 0xffffff, 9);
+      const ring = this.look.ring.getHex();
+      this.hitStop(150, { flash: 0.14, color: 0xffd9a0, punch: 1 });
+      this.slowmo = { t: 0, hold: 0.8, out: 0.6, scale: 0.3 };
+      this.camMove({ ...(this.mode === "tax" ? { pos: [0, 0.5, -1.1], look: [0, 0.9, 0] } : { pos: [0, -1.7, -1.8], look: [0, 2.0, 0] }), fov: -4, inT: 0.6, dur: 3.4, outT: 0.9, tag: "ko", free: true });
+      const at = this.bossPoint(0.45, 0);
+      this.shockwave(at, ring, 4.5, 0.7, true); this.shockwave(V3(0, 0.06, this.bossZ), ring, 12, 1.2);
+      this.burst(at, 0xffd36b, 40, 7); this.flare(at, ring, 3);
+      // Three hit-flickers while it shudders (game time is slowed, so these are spaced in real time).
+      for (const ms of [0, 260, 520]) setTimeout(() => { if (!this.disposed && this.boss === B) { B.flash = 0.55; B.squash = 0.06; } }, ms);
       // The Taxman stays down so you can go through his pockets; a raid boss burns away.
-      if (this.mode === "tax") this.lootStart(); else this.dissolveAt = this.realT + 0.5;
+      if (this.mode === "tax") this.lootStart();
+      else {
+        this.dissolveAt = this.realT + 1.25;
+        setTimeout(() => { if (!this.disposed) { this.dustRing(V3(0, 0.05, this.bossZ + 0.8), 3.5, 0x8a7a6a, 22); this.shockwave(V3(0, 0.06, this.bossZ + 0.8), ring, 6, 0.8); this.shake(0.35); } }, 1150);
+      }
     }
   }
   // ---------- the Taxman's K.O.: rob him ----------
@@ -1526,13 +1740,18 @@ class Arena {
     const B = this.boss;
     return new THREE.Vector3(dx, (B?.height || 5) * heightFrac * (B?.holder?.scale.y || 1), this.bossZ + 0.8);
   }
+  // At most one big landing flash every `gap` seconds: stacked additive flares turn into a white blob over the boss.
+  impactOk(gap) {
+    if (this.realT - (this.lastImpact ?? -9) < gap) return false;
+    this.lastImpact = this.realT; return true;
+  }
   // A glowing shot on a curved path, leaving a continuous trail; bursts on landing.
-  projectile(from, to, color, size, big, onHit) {
-    const head = new THREE.Sprite(spriteMat(color, big ? 3.2 : 2.6)); head.geometry.userData.keep = true;
+  projectile(from, to, color, size, big, onHit, mine = true) {
+    const head = new THREE.Sprite(spriteMat(color, big ? 2.4 : 2.1)); head.geometry.userData.keep = true;
     const core = new THREE.Sprite(spriteMat(0xffffff, 2)); core.scale.setScalar(0.42); head.add(core);
     head.scale.setScalar(size * 5.5); head.position.copy(from); this.scene.add(head);
     const mid = from.clone().lerp(to, 0.5).add(V3(0, big ? 1.6 : 0.8, 0));
-    const trailC = hdr(color, big ? 2.2 : 1.6), prev = from.clone(), a = V3(), b = V3();
+    const trailC = hdr(color, (big ? 1.5 : 1.3) * (mine ? 1 : 0.7)), prev = from.clone(), a = V3(), b = V3(); // trails stay under the bloom white point
     this.fx.push({ obj: head, life: big ? 0.38 : 0.26, t: 0,
       update: (f) => {
         const k = Math.min(1, f.t / f.life);
@@ -1541,31 +1760,35 @@ class Arena {
         const n = Math.min(8, Math.ceil(prev.distanceTo(head.position) / (big ? 0.12 : 0.18)));
         for (let i = 1; i <= n; i++) {
           a.copy(prev).lerp(head.position, i / n);
-          this.sparks.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-0.3, 0.3), vy: rnd(-0.1, 0.4), vz: rnd(-0.3, 0.3), c: trailC, life: big ? 0.32 : 0.2, size: size * (big ? 3 : 2.4), end: 0.1, shape: 0, core: 0.3 });
+          this.sparks.emit({ x: a.x, y: a.y, z: a.z, vx: rnd(-0.3, 0.3), vy: rnd(-0.1, 0.4), vz: rnd(-0.3, 0.3), c: trailC, life: (big ? 0.32 : 0.2) * (mine ? 1 : 0.7), size: size * (big ? 3 : 2.4), end: 0.1, shape: 0, core: 0.3 });
         }
         prev.copy(head.position);
       },
       done: () => {
         this.scene.remove(head);
-        this.burst(to, color, big ? 22 : 10, big ? 5 : 3);
-        if (big) this.shockwave(to, color, 2.4, 0.35, true);
+        // Small landings throw sparks only; the slow glowing embers are kept for the big ones.
+        this.burst(to, color, big ? (mine ? 16 : 8) : mine ? 6 : 3, big ? 4.5 : 3, big && mine);
+        if (big && mine && this.impactOk(0.25)) this.shockwave(to, color, 2.2, 0.3, true);
         onHit?.();
       } });
   }
   // A star-shaped flash where something lands.
+  // Clamped in size and brightness: a Big Swing or a special used to throw a flare big and hot enough for the bloom
+  // to wash out the boss's face.
   flare(at, color, size = 2.5) {
-    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 2.4), life: 0.22, size, end: 1.5, shape: 3, core: 1 });
-    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 1.0), life: 0.3, size: size * 0.55, end: 1.8, shape: 0, core: 0.3 });
+    size = Math.min(size, 2.4);
+    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 1.7), life: 0.2, size, end: 1.4, shape: 3, core: 0.85 });
+    this.sparks.emit({ x: at.x, y: at.y, z: at.z + 0.2, c: hdr(color, 0.7), life: 0.28, size: size * 0.5, end: 1.6, shape: 0, core: 0.25 });
   }
   // Sparks that streak and fall, plus slower glowing embers.
-  burst(at, color, n, speed) {
+  burst(at, color, n, speed, embers = true) {
     n = Math.min(80, Math.round(n * this.fxScale));
     const c = hdr(color, 2.4), w = hdr(color, 0.9);
     for (let i = 0; i < n; i++) {
       this.sparks.emit({ x: at.x, y: at.y, z: at.z, vx: (Math.random() - 0.5) * speed * 1.3, vy: Math.random() * speed * 1.2, vz: (Math.random() - 0.2) * speed * 1.3,
         c, life: rnd(0.3, 0.6), size: rnd(0.06, 0.11), end: 0.3, grav: 9, drag: 1.2, stretch: 0.045, shape: 1, core: 0.8 });
     }
-    for (let i = 0; i < n / 5; i++) {
+    for (let i = 0; i < (embers ? n / 5 : 0); i++) {
       this.sparks.emit({ x: at.x, y: at.y, z: at.z, vx: (Math.random() - 0.5) * speed * 0.5, vy: Math.random() * speed * 0.5, vz: (Math.random() - 0.3) * speed * 0.5,
         c: w, life: rnd(0.5, 0.9), size: rnd(0.22, 0.4), end: 1.6, grav: -0.6, drag: 2, shape: 0, core: 0.2 });
     }
@@ -1652,12 +1875,13 @@ class Arena {
   }
 
   // ---------- frame ----------
+  // Portrait phones need a wider view to fit the boss and the squad (the raid camera sits higher, so a little less).
+  fovFor(aspect) { return aspect < 0.7 ? (this.mode === "tax" ? 58 : 50) : 48; }
   resize() {
     const r = this.host.getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    // Portrait phones need a wider view to fit the boss and the squad.
-    this.baseFov = this.camera.aspect < 0.7 ? 58 : 48;
+    this.baseFov = this.fovFor(this.camera.aspect);
     this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
     if (this.post) { this.post.composer.setPixelRatio(this.renderer.getPixelRatio()); this.post.composer.setSize(w, h); }
@@ -1713,6 +1937,7 @@ class Arena {
     const B = this.boss; if (!B || !B.holder) return;
     B.actT = (B.actT || 0) + dt;
     B.mixer?.update(dt);
+    B.tick?.(dt);
     const H = B.holder;
     const grow = B.grow || 1;
     // Built-in bosses are animated by hand; models use their clips plus these extras.
@@ -1736,6 +1961,15 @@ class Arena {
         x = B.blink.x * k * 0.85; z += (B.blink.z - z) * k * 0.55;
         if (B.blink.t <= 0) B.blink = null;
       }
+    } else if (this.mode !== "tax" && this.koAt != null) {
+      // Raid boss death, in real time so it reads through the slow motion: a shudder on the killing blow (0–0.7s),
+      // then it buckles, sags and topples back (0.5–1.7s) as the burn-away starts from the top (1.25s on).
+      const kr = this.realT - this.koAt, own = B.mixer && B.clips.death;
+      const shud = Math.max(0, 1 - kr / 0.7);
+      x = Math.sin(this.realT * 55) * 0.09 * shud; ry = Math.sin(this.realT * 41) * 0.05 * shud;
+      const f = easeIO(Math.max(0, Math.min(1, (kr - 0.5) / 1.2)));
+      if (!own) { rx = -f * 0.85; y = -f * 0.55; sy = 1 - f * 0.12; sx = 1 + f * 0.06; }
+      if (B.squash) { sx += B.squash; sy -= B.squash; B.squash *= Math.pow(0.001, real * 6); if (B.squash < 0.002) B.squash = 0; }
     } else {
       const k = Math.min(1, B.actT / 1.2);
       if (!B.mixer || !B.clips.death) { rx = -k * 1.4; y = -k * 0.4; }
@@ -1758,14 +1992,15 @@ class Arena {
     H.rotation.set(rx, ry, 0);
     // K.O. dissolve: the boss burns away from the top down into rising particles.
     if (this.dissolveAt != null && B.dis) {
-      const k = Math.max(0, Math.min(1, (this.realT - this.dissolveAt) / 1.25));
+      const k = Math.max(0, Math.min(1, (this.realT - this.dissolveAt) / 1.4));
       if (k > 0) {
         if (!B.disStarted) { B.disStarted = true; for (const o of B.shells || []) o.visible = false; }
         const h = (B.height || 5) * H.scale.y;
         B.dis.dis.value = k * 1.05; B.dis.h.value = h; B.dis.base.value = H.position.y + (B.hover || 0);
         if (k < 1) {
-          const front = B.dis.base.value + h * (1 - k * 0.9), r = h * 0.22, c1 = hdr(this.look.ring.getHex(), 2.6), c2 = hdr(0xffffff, 1.6);
-          for (let i = 0; i < Math.ceil(real * 220 * this.fxScale); i++) {
+          // Embers in the stage colour, kept under the bloom's white point so the burning edge, not a glare, is what reads.
+          const front = B.dis.base.value + h * (1 - k * 0.9), r = h * 0.22, c1 = hdr(this.look.ring.getHex(), 1.7), c2 = hdr(0xffe2b0, 1.1);
+          for (let i = 0; i < Math.ceil(real * 160 * this.fxScale); i++) {
             const a = Math.random() * Math.PI * 2, rr = r * Math.sqrt(Math.random());
             this.sparks.emit({ x: H.position.x + Math.cos(a) * rr, y: front + rnd(-0.6, 0.3), z: H.position.z + 0.6 + Math.sin(a) * rr * 0.6,
               vx: rnd(-0.8, 0.8), vy: rnd(1.2, 3), vz: rnd(-0.4, 0.8), c: Math.random() < 0.8 ? c1 : c2, life: rnd(0.8, 1.5), size: rnd(0.07, 0.14), drag: 0.6, grav: -0.8, shape: Math.random() < 0.3 ? 1 : 0, stretch: 0.03, core: 0.7 });
@@ -1777,8 +2012,8 @@ class Arena {
     if (B.flash > 0) B.flash = Math.max(0, B.flash - Math.max(dt, real * 0.5) * 6); // still fades (slower) through a hit-stop
     const feast = B.feastGlow > 0 ? (B.feastGlow -= dt, 0.25 + Math.sin(this.t * 10) * 0.15) : 0;
     const wind = B.windup ? 0.18 + Math.sin(this.t * 20) * 0.08 : 0;
-    const fl = B.flash * 0.28; // with bloom on, a full-white flash blows the whole boss out
-    for (const m of B.mats || []) m.emissive.setRGB(fl + feast + wind, fl * 0.9 + feast * 0.7, fl * 0.8);
+    const fl = B.flash * 0.15; // a hit tint, not a white-out: at six taps a second a stronger flash kept the whole boss pale
+    for (const m of B.mats || []) m.emissive.setRGB(fl + feast + wind, fl * 0.6 + feast * 0.7, fl * 0.45);
     // Built-in limbs.
     const parts = B.built?.parts;
     if (parts && !B.dead) {
@@ -1786,7 +2021,7 @@ class Arena {
       if (parts.armL) parts.armL.rotation.z = -0.5 - Math.sin(this.t * 2.2) * 0.12 - (B.windup ? 0.8 : 0);
       if (parts.armR) parts.armR.rotation.z = 0.5 + Math.sin(this.t * 2.2) * 0.12 + (B.windup ? 0.8 : 0) + swing;
       if (parts.antenna) parts.antenna.userData.main.material.emissive.setRGB(0.4 + Math.sin(this.t * 6) * 0.3, 0.05, 0.05);
-      if (parts.bag) parts.bag.rotation.z = Math.sin(this.t * 3) * 0.12;
+      if (parts.bag) parts.bag.rotation.z = -(parts.armR?.rotation.z || 0) + Math.sin(this.t * 3) * 0.12; // hangs from the fist
       if (B.built.drawFace && (Math.floor(this.t * 4) !== B.lastFaceTick)) {
         B.lastFaceTick = Math.floor(this.t * 4);
         B.built.drawFace(B.windup || B.act.startsWith("atk") ? 1 : 0, Math.random() < 0.06);
