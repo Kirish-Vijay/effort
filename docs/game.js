@@ -26,6 +26,9 @@ const DEFAULT_RULES = {
   slackerTax: 0.1,          // the week's lowest walker pays 10% of their week's Efforts to the top walker
   slackerAggro: 2.5,        // the boss goes for the lowest walker this many times as often
   windowHour: 18,           // the Taxman's in from 6pm...
+  // A Sunday raid run on another day instead (that Sunday: the day it's on). That day is the Taxman's day off too, so
+  // its steps go in untaxed like a Sunday's, and the week isn't settled until the moved raid's done.
+  raidMoved: { "2026-11-15": "2026-11-16" },
   windowCloseHour: 23,      // ...till 11pm: start your fight any time in between (never on Sundays: no tax that day)
   dailyWindowMin: 5,        // a Taxman fight lasts this long
   raidMin: 15,
@@ -350,7 +353,9 @@ const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RUL
 // What the shop pays for gear you sell back: a share of everything you spent on it.
 const sellPrice = (paid) => Math.max(0, Math.round((Number(paid) || 0) * RULES.sellBack));
 // The Taxman takes Sundays off: no fight, and no tax on Sunday's steps.
-const taxDayOff = (day) => new Date(day + "T12:00:00Z").getUTCDay() === 0;
+const taxDayOff = (day) => new Date(day + "T12:00:00Z").getUTCDay() === 0 || Object.values(RULES.raidMoved || {}).includes(day);
+// What to call a day off: "Sunday", or "Raid day" when a moved raid's on.
+const dayOffName = (day) => (new Date(day + "T12:00:00Z").getUTCDay() === 0 ? "Sunday" : "Raid day");
 
 // ---------- 6pm to 11pm (not Sundays): the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
@@ -1648,7 +1653,7 @@ root.Game = {
   xpFor, levelOf, levelProgress,
   pace, weekTable,
   STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex, statFill,
-  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff,
+  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff, dayOffName,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
   BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidHold, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,

@@ -95,10 +95,14 @@ async function evening(players: Any[], now: number, late: boolean) {
   ]);
   const stepsOn = (id: string, day: string) => steps?.find((r: Any) => r.player_id === id && r.day === day)?.steps ?? 0;
   // Squads whose Sunday raid has started or finished don't need telling about the lobby.
-  const { data: raided } = late && groupIds.length ? await db.from("raids").select("group_id").in("group_id", groupIds).eq("slot", today).neq("status", "lobby") : { data: [] };
+  // (A Sunday raid moved to today keeps its Sunday's slot.)
+  const slot = (Object.entries(G.RULES.raidMoved || {}) as [string, string][]).find(([, moved]) => moved === today)?.[0] ?? today;
+  const { data: raided } = late && groupIds.length ? await db.from("raids").select("group_id").in("group_id", groupIds).eq("slot", slot).neq("status", "lobby") : { data: [] };
   const raidDone = new Set((raided ?? []).map((r: Any) => r.group_id));
   return players.map((p) => {
-    const L = local(now, p.tz || SQUAD_TZ), g = groupOf[p.id];
+    const L0 = local(now, p.tz || SQUAD_TZ), g = groupOf[p.id];
+    // A raid moved off its Sunday turns that day into a Sunday: raid pings, no Taxman.
+    const L = { ...L0, sunday: L0.sunday || G.taxDayOff(L0.day) };
     const squadIds = g ? (mates ?? []).filter((m: Any) => m.group_id === g.group_id).map((m: Any) => m.player_id) : [p.id];
     const s = stepsOn(p.id, L.day), E = G.effortsFromSteps(s);
     const sc = scroll?.find((r: Any) => r.player_id === p.id && r.day === L.day);

@@ -1088,7 +1088,7 @@ function dayTiles() {
   const T = taxSetup(), stake = Math.round(T.efforts * T.taxRate), sc = S.D.today.scroll, off = taxState() === "off";
   return `<div class="tiles">
       <button class="tile gold tilebtn" data-act="steps-week"><div class="k">${ic("coin")} Earned today ${ic("arrowRight")}</div><div class="v">${effortTag(T.efforts)}<small>${S.D.today.debt ? `<s class="was">${fmt(S.D.today.rawSteps)}</s> <span class="cut-t">${fmt(S.D.today.steps)}</span>` : fmt(S.D.today.steps)} steps</small></div></button>
-      ${off ? `<div class="tile green"><div class="k">${ic("check")} Tax today</div><div class="v">0%<small>Sunday</small></div></div>
+      ${off ? `<div class="tile green"><div class="k">${ic("check")} Tax today</div><div class="v">0%<small>${G.dayOffName ? G.dayOffName(S.D.today.day) : "Sunday"}</small></div></div>
       <div class="tile"><div class="k">${ic("clock")} Taxman</div><div class="v">Off<small>Back Monday 6pm</small></div></div>`
       : `<div class="tile red"><div class="k">${ic("warning")} At stake</div><div class="v">${Math.round(T.taxRate * 100)}%<small>${stake} Efforts</small></div></div>
       <div class="tile"><div class="k">${ic("heart")} Taxman health</div><div class="v num">${fmt(T.hp)}</div></div>`}
@@ -1115,8 +1115,8 @@ function taxHero() {
     btn = `<div class="rline total" style="margin-top:12px"><span>Banked today</span><span class="rv">${paid ? signedEfforts(paid.amount + Math.max(0, pendingToday().n)) : "–"}</span></div>
       ${w.test ? "" : `<p class="tiny faint" style="margin:6px 0 0">Next fight in <span data-count="${w.next}">${countdown(w.next - now())}</span></p>`}`;
   } else if (st === "off") {
-    chip = `<span class="chip cyan">${ic("star")} Sunday · day off</span>`;
-    line = "He takes Sundays off. No tax on today's steps: they go straight in.";
+    chip = `<span class="chip cyan">${ic("star")} ${G.dayOffName ? G.dayOffName(S.D.today.day) : "Sunday"} · day off</span>`;
+    line = "He's off today. No tax on today's steps: they go straight in.";
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Back <span data-count="${w.next}">${countdown(w.next - now())}</span></button>`;
   } else if (st === "soon") {
     chip = `<span class="chip gold">${ic("clock")} Tonight · 6pm to 11pm</span>`;
@@ -1177,7 +1177,7 @@ function nowStrip() {
   const tx = taxState(), rs = raidState(), H = S.D.hunt, pct = Math.round(taxSetup().taxRate * 100);
   const [txt, hot] = rs === "live" ? ["The raid's on", 1] : rs === "open" ? ["Raid lobby's open till 11pm", 1]
     : ["open", "live"].includes(tx) ? [`The Taxman's in till 11pm · wants ${pct}%`, 1] : H?.open && !H.done ? ["Midweek Hunt's on till 11pm", 1]
-    : tx === "off" ? (rs === "soon" ? ["No Taxman today · raid lobby at 6pm", 0] : ["No Taxman on Sundays · no tax today", 0])
+    : tx === "off" ? (rs === "soon" ? ["No Taxman today · raid lobby at 6pm", 0] : ["No Taxman today · no tax today", 0])
     : tx === "soon" ? [`Taxman at 6pm · wants ${pct}%`, 0] : tx === "done" ? ["Taxman done for today", 0] : ["Taxman's gone for today", 0];
   return `<button class="panel nowstrip ${hot ? "hot" : ""}" data-tab="raid">${ic(hot ? "sword" : "clock")}<span class="grow">${txt}</span>${ic("arrowRight")}</button>`;
 }
@@ -1263,7 +1263,7 @@ function raidHero() {
     chip = `<span class="chip">${ic("check")} This week's raid is done</span>`;
     btn = `<button class="btn blue block" style="margin-top:14px" data-act="raid-result">${ic("chest")} ${r.how === "won" ? "Won" : r.how === "wiped" ? "Wiped" : "Out of time"} · see results</button>`;
   } else {
-    chip = `<span class="chip red">${ic("raid")} Sunday · 6–11pm</span>`;
+    chip = `<span class="chip red">${ic("raid")} ${new Date(w.opens).toDateString() === new Date(now()).toDateString() ? "Tonight" : "Sunday"} · 6–11pm</span>`;
     btn = `<button class="btn xl block" style="margin-top:14px" disabled>${ic("clock")} Opens in <span data-count="${w.opens}">${countdown(w.opens - now())}</span></button>`;
   }
   return `<section class="panel hero">

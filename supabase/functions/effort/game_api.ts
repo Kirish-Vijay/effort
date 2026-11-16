@@ -79,6 +79,12 @@ function taxWindow(now: number, tz: string, test: number | null) {
 const RAID_FROM = 18, RAID_UNTIL = 23;
 function raidWindow(now: number, test: number | null) {
   const today = localDate(now, SQUAD_TZ);
+  // A Sunday raid moved to another day (Game.RULES.raidMoved): from that Sunday until 11pm on the day it moved to,
+  // the window is that day's 6-11pm, for the Sunday's slot and week.
+  if (!(test && test > now)) for (const [orig, moved] of Object.entries(G.RULES.raidMoved || {}) as [string, string][]) {
+    const o = zoned(moved, RAID_FROM, 0, SQUAD_TZ), c = zoned(moved, RAID_UNTIL, 0, SQUAD_TZ);
+    if (today >= orig && today <= moved && now < c) return { slot: orig, weekStart: addDays(orig, -6), opens: o, closes: c, open: now >= o, test: false };
+  }
   let sunday = addDays(today, (7 - dow(today)) % 7);
   let opens = zoned(sunday, RAID_FROM, 0, SQUAD_TZ), closes = zoned(sunday, RAID_UNTIL, 0, SQUAD_TZ);
   if (now >= closes) { sunday = addDays(sunday, 7); opens = zoned(sunday, RAID_FROM, 0, SQUAD_TZ); closes = zoned(sunday, RAID_UNTIL, 0, SQUAD_TZ); }
@@ -232,7 +238,7 @@ async function settleDays(db: Any, player: Any, squad: Any, L: Any, now: number)
     const s = steps[player.id][day] ?? 0, E = G.effortsFromSteps(s);
     const f = fightOn[day];
     let net, how;
-    if (G.taxDayOff(day)) { net = f ? Math.max(E, netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct))) : E; how = "Sunday, no tax"; }
+    if (G.taxDayOff(day)) { net = f ? Math.max(E, netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct))) : E; how = `${G.dayOffName ? G.dayOffName(day) : "Sunday"}, no tax`; }
     else if (f) { net = netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct)); how = Number(f.knocked) >= 1 ? "knocked him out" : `fought, ${Math.round(Number(f.rate) * (1 - Number(f.knocked)) * 100)}% tax`; }
     else {
       const rate = G.taxRate(s, G.scrollCounted(s, scroll[day], scrollLinked(player)), avgOf(ids.map((id: string) => steps[id][day] ?? 0)));
@@ -270,7 +276,7 @@ async function bankToday(db: Any, player: Any, squad: Any, now: number) {
   ]);
   const s = steps[player.id][day] ?? 0, E = G.effortsFromSteps(s);
   let net: number, note: string;
-  if (off) { net = f ? Math.max(E, netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct))) : E; note = "Sunday: the Taxman's off, no tax"; }
+  if (off) { net = f ? Math.max(E, netOf(E, Number(f.rate), Number(f.knocked), Number(f.steal_pct))) : E; note = `${G.dayOffName ? G.dayOffName(day) : "Sunday"}: the Taxman's off, no tax`; }
   else if (f) {
     const knocked = Number(f.knocked), rate = Number(f.rate);
     net = netOf(E, rate, knocked, Number(f.steal_pct));
@@ -431,7 +437,8 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const settled = (await settleDays(db, player, squad, L, now)) + (await bankToday(db, player, squad, now) ? 1 : 0);
       // Last week's table, if nobody's settled it yet (no raid happened).
       const thisMonday = mondayOf(localDate(now, SQUAD_TZ));
-      if (squad && squad.members.length >= 2 && Date.parse(squad.group.created_at) < zoned(thisMonday, 0, 0, SQUAD_TZ)) await settleWeek(db, squad, addDays(thisMonday, -7));
+      // (Not while last week's raid has been moved to today and is still to come: that raid settles it.)
+      if (squad && squad.members.length >= 2 && Date.parse(squad.group.created_at) < zoned(thisMonday, 0, 0, SQUAD_TZ) && raidWindow(now, test).slot !== addDays(thisMonday, -1)) await settleWeek(db, squad, addDays(thisMonday, -7));
       if (settled || squad) L = (await ledgerFor(db, [player.id]))[player.id];
       const today = localDate(now, tz);
       const tw = taxWindow(now, tz, test), rw = raidWindow(now, test);
@@ -488,7 +495,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
 
     case "tax_start": {
       const w = taxWindow(now, tz, test);
-      if (w.off) return fail("The Taxman takes Sundays off. No tax on today's steps");
+      if (w.off) return fail("The Taxman's off today. No tax on today's steps");
       const { data: old } = await db.from("tax_fights").select("*").eq("player_id", player.id).eq("day", w.day).maybeSingle();
       if (old?.finished_at) return fail("You've already fought the Taxman today");
       if (old && now < Date.parse(old.ends_at)) return json({ ok: true, fight: old, now, resumed: true, inputs: await taxInputs(db, player, squad, w.day) });
@@ -558,7 +565,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         // Four or more here and every one of them ready: it starts, with exactly them, and the week's goal locked in.
         if (here.length >= G.RULES.raidSquadSize && here.every((r: Any) => r.ready)) {
           const { data: fresh } = await sel();
-          const roster = await rosterFor(db, squad, w.weekStart, localDate(now, SQUAD_TZ));
+          const roster = await rosterFor(db, squad, w.weekStart, [localDate(now, SQUAD_TZ), w.slot].sort()[0]);
           const g = G.squadGoal(fresh.tier, roster), so = G.seasonOn(gameDay(squad, now));
           const affix = so && !so.upcoming ? so.season.affix : null, den = (await denFor(db, squad)).levels;
           await db.from("raids").update({ status: "live", started_at: new Date(now).toISOString(), ends_at: new Date(now + G.RULES.raidMin * 60000).toISOString(),
@@ -577,7 +584,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const raid = await currentRaid(db, squad, w.slot);
       if (!raid || raid.status === "lobby") return fail("The raid hasn't started yet. Join the lobby");
       if (raid.status !== "done" && !(raid.fighters || []).includes(player.id)) return fail("This raid started without you. Next week!");
-      const roster = (await rosterFor(db, squad, raidWeek(raid), localDate(Date.parse(raid.started_at), SQUAD_TZ))).filter((m: Any) => !raid.fighters || raid.fighters.includes(m.id));
+      const roster = (await rosterFor(db, squad, raidWeek(raid), raidTo(raid))).filter((m: Any) => !raid.fighters || raid.fighters.includes(m.id));
       return json({ ok: true, now, me: player.id, raid, roster, boss: G.bossFor(raid.tier) });
     }
 
@@ -897,6 +904,9 @@ async function currentRaid(db: Any, squad: Any, slot: string, cols = "*") {
 }
 // The Monday of the week a raid belongs to (its Sunday's week; a test raid's own week).
 const raidWeek = (raid: Any) => raid.slot.startsWith("test:") ? mondayOf(localDate(Date.parse(raid.started_at), SQUAD_TZ)) : addDays(raid.slot, -6);
+// The last day of a raid's week that counts: the day it started, but never past its Sunday (a moved raid's steps
+// table is still Monday to Sunday).
+const raidTo = (raid: Any) => [localDate(Date.parse(raid.started_at), SQUAD_TZ), raid.slot].sort()[0];
 // A host snapshot the server can pay from: a boss with real numbers and a list of members.
 const goodSnap = (s: Any) => !!s && typeof s === "object" && s.boss && Number.isFinite(Number(s.boss.hp)) && Number(s.boss.max) > 0 && Array.isArray(s.members);
 
@@ -928,7 +938,7 @@ function fightReport(R: Any, report: Record<string, Any>, body: Any, how: string
 // The host's phone reports how the fight went; the server works out the pay itself from the squad's real
 // gear and steps (so the boss's level and everyone's share can't be fiddled), then pays everyone.
 async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
-  const roster = await rosterFor(db, squad, raidWeek(raid), localDate(Date.parse(raid.started_at), SQUAD_TZ));
+  const roster = await rosterFor(db, squad, raidWeek(raid), raidTo(raid));
   const report: Record<string, Any> = Object.fromEntries((Array.isArray(body.members) ? body.members : []).filter((m: Any) => m && typeof m.id === "string").map((m: Any) => [m.id, m]));
   // Everyone who started the fight is in it, whether or not the host's report names them (a missing fighter counts as
   // no damage, and a won fight's missing damage is shared out to whoever had room); an old raid without a fighter list
