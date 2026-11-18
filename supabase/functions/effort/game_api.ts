@@ -965,8 +965,9 @@ async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
       note: `${R.boss.name}: ${{ won: "won", timeout: "out of time", wiped: "wiped" }[how as "won"]}`,
     })), { onConflict: "player_id,kind,ref", ignoreDuplicates: true });
     if (R.paralysed) {
+      // Paralysis hits the whole squad, not just whoever turned up to fight.
       const tomorrow = addDays(localDate(now, SQUAD_TZ), 1);
-      await db.from("step_adjust").upsert(fighters.map((m: Any) => ({ player_id: m.id, day: tomorrow, steps: G.RULES.paralysedSteps, reason: "paralysed" })),
+      await db.from("step_adjust").upsert(squad.members.map((m: Any) => ({ player_id: m.id, day: tomorrow, steps: G.RULES.paralysedSteps, reason: "paralysed" })),
         { onConflict: "player_id,day,reason", ignoreDuplicates: true });
     }
   }
