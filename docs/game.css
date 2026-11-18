@@ -266,6 +266,10 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .item .meta { padding: 9px 10px 0; }
 .item h4 { margin: 0; font: 400 14.5px/1.12 var(--display); min-height: 2.24em; overflow-wrap: anywhere; }
 .item .stats { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+/* DPS meter: damage a second wearing it, and the change from what's in that slot now. */
+.dps { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; font: 700 12px/1 var(--ui); color: #ffd166; }
+.dps .n { font: 400 15px/1 var(--display); color: #ffe39a; }
+.dps .d { font-size: 11.5px; } .dps .d.up { color: var(--green-hi); } .dps .d.down { color: var(--red-hi); } .dps .d.eq { color: var(--text-3, #8a96b8); }
 .item .st { display: inline-flex; align-items: center; gap: 3px; font: 700 11.5px/1 var(--ui); padding: 3px 6px 3px 4px; border-radius: 8px; background: rgba(255,255,255,.07); }
 .item .st .ic { font-size: 12px; }
 .item .perk { margin: 6px 10px 0; font-size: 11.5px; line-height: 1.3; color: color-mix(in srgb, var(--rc) 55%, #fff); font-weight: 600; }
@@ -460,6 +464,20 @@ input[type=number]:focus, input[type=text]:focus { border-color: var(--cyan); }
 .trivia form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .trivia input { height: 50px; font-size: 18px; font-weight: 600; background: #06122a; border-color: var(--ink); box-shadow: inset 0 2px 4px rgba(0,0,0,.5), 0 0 0 2px rgba(76,195,255,.35); }
 .trivia .btn { min-height: 50px; }
+/* The fight stands still under the question: dim it. */
+#trivia:has(.trivia)::before { content: ""; position: absolute; inset: 0; z-index: 29; background: rgba(4, 8, 24, .55); pointer-events: auto; }
+.tv-paused { display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 99px; background: rgba(255, 209, 102, .18); color: #ffd166; font: 700 10.5px/1.4 var(--ui); letter-spacing: .04em; text-transform: uppercase; }
+.tv-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tv-opt { display: flex; align-items: center; gap: 9px; min-height: 54px; padding: 8px 11px; border-radius: 14px; border: 2px solid var(--ink); background: #10224a; color: #fff;
+  box-shadow: inset 0 -3px 0 rgba(0,0,0,.35), 0 0 0 2px rgba(76,195,255,.28); text-align: left; font: 700 15px/1.15 var(--ui); cursor: pointer; }
+.tv-opt b { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: rgba(255,255,255,.12); font: 400 15px/1 var(--display); }
+.tv-opt span { min-width: 0; overflow-wrap: anywhere; text-transform: capitalize; }
+.tv-opt:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 -1px 0 rgba(0,0,0,.35), 0 0 0 2px rgba(76,195,255,.45); }
+.tv-opt:disabled { cursor: default; opacity: .55; }
+.tv-opt.pick { opacity: 1; box-shadow: 0 0 0 3px #a8e4ff; }
+.tv-opt.ok { opacity: 1; background: #1d6b3d; box-shadow: 0 0 0 3px #4fd67f; }
+.tv-opt.no { opacity: 1; background: #7a1f2b; box-shadow: 0 0 0 3px #ff4d5e; }
+@media (max-width: 360px) { .tv-opts { grid-template-columns: 1fr; } }
 .votes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .vote { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 99px; font: 700 11.5px/1 var(--ui); background: rgba(255,255,255,.1); }
 .vote.ok { background: rgba(79,214,127,.22); color: #b8f5cb; } .vote.no { background: rgba(255,77,94,.22); color: #ffb3b9; }

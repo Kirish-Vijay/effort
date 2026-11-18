@@ -813,12 +813,11 @@ function paintTrivia() {
   const mineP = T.per.me, Q = mineP.q, key = `${R.triviaRuns}`;
   if (v.q !== key) {
     v.q = key; v.ticked = 0;
-    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}</div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
+    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}<span class="tv-paused">Fight paused</span></div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
       <h3 class="ol-sm">${esc(Q.q)}</h3>
-      <form data-form="answer"><input id="tv-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Name one…" maxlength="40" aria-label="Your answer"><button class="btn green">Go</button></form>
+      <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? Number(o).toLocaleString("en-GB") : o)}</span></button>`).join("")}</div>
       <div class="verdict" id="tv-verdict"></div>
       <div class="votes" id="tv-votes"></div></div>`;
-    setTimeout(() => $("#tv-in")?.focus(), 50);
   }
   const left = Math.max(0, mineP.until - R.t);
   const clock = $("#tv-clock");
@@ -832,10 +831,11 @@ function paintTrivia() {
   }).join("") + `<span class="vote" style="background:none">${wrong} of ${R.members.length} wrong</span>`;
   const mine = mineP.ans;
   if (mine) {
-    const form = $("#trivia form"); if (form) form.remove();
-    $("#tv-verdict").innerHTML = mine.valid
-      ? `<b>${esc(mine.canon)}</b> <span class="rar r${mine.rarity}">${["", "Obvious", "Decent", "Rare"][mine.rarity]}</span> <span class="muted">Waiting for the squad…</span>`
-      : `<b>${esc(mine.text || "No answer")}</b> doesn't count. <span class="muted">Deep cuts: ${esc(Q.examples.join(", "))}</span>`;
+    for (const b of document.querySelectorAll("#tv-opts .tv-opt")) {
+      const o = Q.opts[+b.dataset.i];
+      b.disabled = true; b.classList.toggle("pick", o === mine.text); b.classList.toggle("ok", o === Q.good); b.classList.toggle("no", o === mine.text && !mine.valid);
+    }
+    $("#tv-verdict").innerHTML = `<b>${mine.valid ? "Right." : mine.text ? "Wrong." : "Out of time."}</b> <span class="muted">Waiting for the squad…</span>`;
   }
 }
 function raidTap(e) {
@@ -886,7 +886,7 @@ function renderResult() {
         ${[...out.shares].sort((a, b) => b.weekSteps - a.weekSteps).map((s) => `<tr class="${s.id === "me" ? "me" : ""}"><td>${s.title === "top" ? ic("crown") + " " : s.title === "last" ? ic("warning") + " " : ""}${esc(s.id === "me" ? "You" : s.name)}</td><td>${fmt(s.weekSteps / 1000)}k</td><td>${fmt(s.dmg)}</td><td>${(s.tps ?? 0).toFixed(1)}</td><td>${fmt(s.reward)}</td><td style="color:${s.tax > 0 ? "var(--green)" : s.tax < 0 ? "var(--red)" : "inherit"}">${s.tax > 0 ? "+" : s.tax < 0 ? "−" : ""}${s.tax ? fmt(Math.abs(s.tax)) : "–"}</td></tr>`).join("")}</table>
         ${out.settle ? `<p class="small muted" style="margin:10px 0 0">${ic("coins")} Weekly settlement: ${esc(out.shares.find((x) => x.id === out.settle.from).id === "me" ? "you" : out.shares.find((x) => x.id === out.settle.from).name)} (lowest walker) paid ${esc(out.shares.find((x) => x.id === out.settle.to).id === "me" ? "you" : out.shares.find((x) => x.id === out.settle.to).name)} ${fmt(out.settle.amount)} Efforts.</p>` : ""}</section>
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
-        ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === "me" ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
+        ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === "me" ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}”${!q.ans.valid && q.right ? ` · answer: ${esc(q.right)}` : ""}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
       <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
         ${won ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(R.tier + 1).name)}</div>` : ""}</section>`;
   }
@@ -978,6 +978,11 @@ document.addEventListener("click", (e) => {
   const t = e.target.closest("button");
   if (!t) return;
   const d = t.dataset;
+  if (d.act === "tv-pick" && V.raid?.R?.trivia?.per.me && !V.raid.R.trivia.per.me.ans) {
+    const res = G.raidAnswer(V.raid.R, "me", V.raid.R.trivia.per.me.q.opts[+d.i]);
+    if (res) FX.play(res.valid ? "right" : "wrong");
+    paintTrivia(); return;
+  }
   if (d.tab) { V.tab = d.tab; render(); window.scrollTo(0, 0); FX.play("tap"); return; }
   if (d.pos) { L.pos = d.pos; save(); render(); return; }
   if (d.bots) { L.bots = Number(d.bots); save(); render(); return; }

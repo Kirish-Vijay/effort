@@ -870,11 +870,12 @@ async function taxInputs(db: Any, player: Any, squad: Any, day: string) {
 // A raid whose time is up but nobody paid out (everyone's phone dropped at the end): pay it from the
 // host's last saved snapshot.
 async function finishStale(db: Any, squad: Any, now: number) {
-  // A payout that died part way (a crash or a timed-out function) leaves the raid "settling" for good. Five minutes
+  // A payout that died part way (a crash or a timed-out function) leaves the raid "settling" for good. Ten minutes
   // after its clock ran out, put it back to live so it's paid below. The raid's ledger rows are keyed on the raid,
   // so whatever was paid the first time isn't paid again.
-  await db.from("raids").update({ status: "live" }).eq("group_id", squad.group.id).eq("status", "settling").lt("ends_at", new Date(now - 5 * 60000).toISOString());
-  const { data } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("status", "live").lt("ends_at", new Date(now - 60000).toISOString());
+  await db.from("raids").update({ status: "live" }).eq("group_id", squad.group.id).eq("status", "settling").lt("ends_at", new Date(now - 10 * 60000).toISOString());
+  // Six minutes past its clock: questions pause the fight, so a raid can run a few minutes over and still be going.
+  const { data } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("status", "live").lt("ends_at", new Date(now - 6 * 60000).toISOString());
   for (const raid of data ?? []) {
     const { data: lock } = await db.from("raids").update({ status: "settling" }).eq("id", raid.id).eq("status", "live").select().maybeSingle();
     if (!lock) continue;

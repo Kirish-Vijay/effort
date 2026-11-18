@@ -127,7 +127,7 @@ const DEFAULT_RULES = {
   paralysedStunSec: 12,
   xpPerLevel: 40,           // level n needs xpPerLevel × (n−1)² lifetime XP
   upgradeMax: 10,
-  upgradeStep: 0.1,         // each upgrade adds 10% of an item's base stats
+  upgradeStep: 0.25,        // each upgrade adds 25% of an item's base stats (+10 is 3.5x)
   upgradeCostShare: 0.1,    // upgrade n costs this share of the item's price × n
   dealDiscount: 0.3,
   sellBack: 0.6,            // the shop buys gear back for this share of what it cost you (buying and upgrading)
@@ -305,7 +305,7 @@ function posFit(st, pos, home) {
 const SLOTS = ["weapon", "armour", "trinket"];
 const itemById = (id) => CAT().ITEMS.find((i) => i.id === id);
 const tierOf = (id) => CAT().TIERS.find((t) => t.id === id) || CAT().TIERS[0];
-// Each upgrade adds 10% of the item's base stats (kept to one decimal, so small items still grow every level).
+// Each upgrade adds a quarter of the item's base stats (kept to one decimal, so small items still grow every level).
 // Class gear follows its wearer: pass their quiz stats (st) and its biggest numbers go into whichever of the
 // class's two stats is their best (item.flip names the pair it swaps).
 function itemStats(item, up, st) {
@@ -530,8 +530,36 @@ function mathPrompt(r) {
       return k.ok(n) ? { valid: true, rarity: k.rank(n), canon: n.toLocaleString("en-GB") } : { valid: false };
     },
     sample(r2, good) { const pool = k.list.filter((n) => (good ? k.rank(n) <= 2 : k.rank(n) === 3)); return String(pick(r2, pool.length ? pool : k.list)); },
+    // Wrong answers that look right: numbers a step or two off real ones.
+    near(r2, n = 3) {
+      // Kept inside the range the right answers span, so a wrong one isn't given away by being out of bounds.
+      const out = new Set(), lo = Math.min(...k.list), hi = Math.max(...k.list);
+      for (let t = 0; out.size < n && t < 300; t++) { const v = pick(r2, k.list) + (r2() < 0.5 ? -1 : 1) * (1 + Math.floor(r2() * 6)); if (v > lo && v < hi && !k.ok(v)) out.add(String(v)); }
+      return [...out];
+    },
     examples: k.list.filter((n) => k.rank(n) === 3).slice(0, 3).map(String),
   };
+}
+// Each question is multiple choice: one right answer and three wrong ones. The wrong ones come from neighbouring
+// prompts in the bank (it's grouped by topic, so a noble-gas question gets other elements, not moons), and never
+// count for this question. Same seed, same questions and the same four options in the same order on every phone.
+function shuffled(r, xs) { const a = xs.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function choicesFor(r, q, bank, at) {
+  const good = q.sample(r, r() < 0.7);
+  let wrong = [];
+  if (q.kind === "maths") wrong = q.near(r, 3);
+  else {
+    const near = [];
+    for (let d = 1; d <= 8; d++) for (const j of [at - d, at + d]) if (bank[j]) near.push(...bank[j].a.map((x) => x[0]));
+    const all = bank.flatMap((p) => p.a.map((x) => x[0]));
+    const seen = new Set([norm(good)]);
+    for (const w of [...shuffled(r, near), ...shuffled(r, all)]) {
+      if (wrong.length >= 3) break;
+      if (seen.has(norm(w)) || q.check(w).valid) continue;
+      seen.add(norm(w)); wrong.push(w);
+    }
+  }
+  return { good, opts: shuffled(r, [good, ...wrong.slice(0, 3)]) };
 }
 function triviaSet(seed, count = 3) {
   const r = rng(seed);
@@ -539,11 +567,13 @@ function triviaSet(seed, count = 3) {
   const used = new Set(), out = [];
   const asked = new Set();
   for (let tries = 0; out.length < count && tries < 200; tries++) {
-    let q;
+    let q, at = -1;
     if (!bank.length || r() < 0.4) q = mathPrompt(r);
-    else { let i; do { i = Math.floor(r() * bank.length); } while (used.has(i) && used.size < bank.length); used.add(i); q = listPrompt(bank[i]); }
+    else { let i; do { i = Math.floor(r() * bank.length); } while (used.has(i) && used.size < bank.length); used.add(i); at = i; q = listPrompt(bank[i]); }
     if (asked.has(q.q)) continue;
-    asked.add(q.q); out.push(q);
+    asked.add(q.q);
+    Object.assign(q, choicesFor(r, q, bank, at));
+    out.push(q);
   }
   return out;
 }
@@ -708,7 +738,7 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
     members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: affixList(affix).join("+") || null, mods: modsFor(affix, den), atkCount: 0, echo: null,
     // Squad-wide effects from specials (each is a time it lasts until, or a count of attacks).
-    vulnUntil: 0, weakUntil: 0, prophecyUntil: 0, swarmUntil: 0, swarmBy: null, peckAcc: 0, blockNext: 0, feeble: 0, grab: null, combo: null,
+    vulnUntil: 0, weakUntil: 0, prophecyUntil: 0, swarmUntil: 0, swarmBy: null, peckAcc: 0, blockNext: 0, feeble: 0, grab: null, combo: null, paused: 0,
   };
   for (const m of R.members) m.perks.spCharge = (m.perks.spCharge || 0) + (R.mods.spCharge || 0);
   scheduleAttack(R);
@@ -781,7 +811,23 @@ function targetsOf(R, type) {
   return [];
 }
 const alive = (R) => R.members.filter((m) => m.alive && !m.away);
-const canAct = (R, m) => m.alive && R.t >= (R.start || 0) && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
+const canAct = (R, m) => m.alive && !R.trivia && R.t >= (R.start || 0) && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
+// The fight stands still for d seconds (while the squad answers questions): every clock in it moves on by d, so
+// nothing lands, ticks, wears off or charges up, and the fight's own 15 minutes don't run down. R.paused adds them up.
+const MEMBER_CLOCKS = ["cdUntil", "moveUntil", "dodgeUntil", "stunUntil", "shieldUntil", "lastTap", "botNext", "joyUntil", "slimeUntil", "dotUntil", "botBackAt", "movedAt", "fullSince"];
+const RAID_CLOCKS = ["dur", "vulnUntil", "weakUntil", "prophecyUntil", "swarmUntil", "reviveAt"];
+function freeze(R, d) {
+  if (!(d > 0)) return;
+  R.paused = (R.paused || 0) + d;
+  for (const k of RAID_CLOCKS) if (R[k]) R[k] += d;
+  for (const m of R.members) for (const k of MEMBER_CLOCKS) if (m[k]) m[k] += d;
+  const B = R.boss;
+  if (B.next) { B.next.at += d; B.next.warnAt += d; }
+  if (B.feast) B.feast.until += d;
+  if (R.echo) R.echo.at += d;
+  if (R.grab) R.grab.until += d;
+  if (R.combo) R.combo.until += d;
+}
 // `you: true` marks the person playing on this screen, so the log reads "You raise" not "You raises".
 const nm = (m) => (m.you ? "You" : m.name);
 const vb = (m, them, you) => (m.you ? you : them);
@@ -1067,12 +1113,12 @@ function startTrivia(R) {
     per[m.id] = { i, q: qs[i], secs: triviaTime(m, R), until: R.t + triviaTime(m, R), ans: null };
     if (m.bot) {
       const knows = R.r() < 0.45 + 1.4 * m.e.shares.brains;
-      botPlan[m.id] = { at: R.t + 4 + R.r() * 16, text: knows ? qs[i].sample(R.r, R.r() < 0.75) : pick(R.r, ["uhh", "idk", "pass", "42", "the sun?"]) };
+      botPlan[m.id] = { at: R.t + 3 + R.r() * 9, text: knows ? qs[i].good : pick(R.r, qs[i].opts.filter((o) => o !== qs[i].good)) };
     }
   });
   R.trivia = { per, botPlan, started: R.t, n: who.length };
   fx(R, { type: "trivia" });
-  say(R, "Someone's down. Everyone gets a question. 2/3 wrong and you're all paralysed", "warn");
+  say(R, "Someone's down. The fight's paused: everyone gets a question. 2/3 wrong and you're all paralysed", "warn");
 }
 function raidAnswer(R, id, text) {
   const T = R.trivia, p = T && T.per[id];
@@ -1090,7 +1136,7 @@ function resolveTrivia(R) {
   // Rare answers sink deeper: each rarity point knocks a slice off the boss.
   const dive = Math.round(R.boss.max * RULES.rarityBossDmg * rarity);
   if (dive) { R.boss.hp = Math.max(1, R.boss.hp - dive); R.deepDive += dive; }
-  const results = all.map(([id, p]) => ({ id, name: R.members.find((m) => m.id === id).name, q: p.q.q, ans: p.ans, examples: p.q.examples }));
+  const results = all.map(([id, p]) => ({ id, name: R.members.find((m) => m.id === id).name, q: p.q.q, ans: p.ans, right: p.q.good, examples: p.q.examples }));
   fx(R, { type: "triviaDone", failed, wrong, n, dive });
   say(R, `Trivia: ${n - wrong}/${n} right${dive ? `, rare answers hit for ${dive.toLocaleString("en-GB")}` : ""}`, failed ? "bad" : "good");
   if (failed) {
@@ -1162,6 +1208,14 @@ function raidStep(R, dt) {
   if (R.over) return;
   dt = Math.min(dt, 0.25);
   R.t += dt;
+  if (R.trivia) {
+    // Paused for the questions: only their clocks run.
+    freeze(R, dt);
+    const T = R.trivia;
+    for (const [id, plan] of Object.entries(T.botPlan)) if (R.t >= plan.at) { delete T.botPlan[id]; raidAnswer(R, id, plan.text); if (R.trivia !== T) break; }
+    if (R.trivia === T) for (const [id, p] of Object.entries(T.per)) if (!p.ans && R.t >= p.until) { raidAnswer(R, id, ""); if (R.trivia !== T) break; }
+    return;
+  }
   const B = R.boss;
   const phase = B.hp / B.max > 0.6 ? 1 : B.hp / B.max > 0.3 ? 2 : 3;
   if (phase !== B.phase) { B.phase = phase; fx(R, { type: "phase", phase }); say(R, phase === 2 ? "Phase 2: it hits harder and faster" : "Phase 3: it's enraged", "warn"); }
@@ -1230,7 +1284,7 @@ function endRaid(R, how) {
   const weight = (m) => Math.max(0, m.dmg);
   const totalW = R.members.reduce((s, m) => s + weight(m), 0);
   const part = (m) => (totalW > 0 ? weight(m) / totalW : (m.stride || 1) / R.members.reduce((s, x) => s + (x.stride || 1), 0));
-  const secs = Math.max(1, Math.min(R.t, R.dur) - (R.start || 0));
+  const secs = Math.max(1, Math.min(R.t, R.dur) - (R.start || 0) - (R.paused || 0));
   // Weekly settlement, win or lose: the lowest walker pays a cut of their week's Efforts to the top walker.
   const top = R.members.find((m) => m.title === "top"), last = R.members.find((m) => m.title === "last");
   const settle = top && last ? { from: last.id, to: top.id, amount: Math.round(RULES.slackerTax * last.weekSteps / RULES.stepsPerEffort) } : null;
@@ -1578,6 +1632,13 @@ function bountyProgress(code, weekStart, d) {
 // dmgCapHits times that for everything that isn't a plain tap (Big Swings, specials and their combos, openings, pigeons).
 // The host's phone reports everyone's damage; the server holds each report to this. A generous ceiling, not a guess:
 // honest players never reach it.
+// Damage a second for a walker in some gear: the average hit with a full combo and crits, at the tap cap. Steps
+// (stride) and the boss aren't in it, so the shop compares gear on its own.
+function gearDps(stats, equipped, inv) {
+  const m = makeMember({ stats, equipped, inv, stride: 1 });
+  const crit = Math.min(1, (m.e.crit || 0) + (m.perks.critChance || 0)), critX = 2.5 + (m.perks.critDmg || 0);
+  return Math.round(tapBase(m) * (1 + m.e.combo) * (1 + crit * (critX - 1)) * RULES.tapCap);
+}
 function raidDmgCap(R, m, secs) {
   const crit = Math.min(1, (m.e.crit || 0) + (m.perks.critChance || 0) + RULES.prophecyCrit);
   const critX = 2.5 + (m.perks.critDmg || 0) + Math.max(0, R.mods?.crit || 0);
@@ -1652,7 +1713,7 @@ root.Game = {
   hash, rng, effortsFromSteps, money, scrollBudget, scrollCounted, overBudget, taxRate,
   xpFor, levelOf, levelProgress,
   pace, weekTable,
-  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex, statFill,
+  STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex, gearDps, statFill,
   SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff, dayOffName,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,

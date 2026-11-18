@@ -1318,7 +1318,7 @@ function howRaids() {
         <div class="hrow"><span class="hic">${ic("bigSwing")}</span><div><b>Stagger the wind-ups</b><span>Hit hard together while he winds up (Big Swing helps) and the attack lands at half strength, or not at all.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>It charges as you tap, use your ability and take hits. Fire it when it glows. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>Everyone gets one question: name a thing in ${G.RULES.triviaSeconds}s. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("brains")}</span><div><b>When someone falls</b><span>The fight pauses and everyone gets a four-option question, ${G.RULES.triviaSeconds}s each. If ${Math.round(G.RULES.triviaFailShare * 100)}% of the squad gets theirs wrong, you're all paralysed and start tomorrow ${fmt(G.RULES.paralysedSteps)} steps down.</span></div></div>
         <div class="hrow"><span class="hic">${ic("upgrade")}</span><div><b>Gear wins it</b><span>The boss is the same however many turn up. Tougher bosses need better gear.</span></div></div>
         <div class="hrow"><span class="hic">${ic("squad")}</span><div><b>The lobby</b><span>Sunday 6–11pm. ${G.RULES.raidSquadSize} or more of you, everyone ready. One raid a week.</span></div></div>
       </div>
@@ -1326,6 +1326,15 @@ function howRaids() {
 }
 
 // ---------- Shop ----------
+// DPS meter: damage a second (Game.gearDps: average hit with a full combo and crits, at the tap cap) wearing this item at
+// upgrade `up` (what you own it at, or +0) in place of whatever's in its slot, and what you do now.
+const dpsNow = () => (G.gearDps ? G.gearDps(myStats(), me().gear, S.D.inv) : 0);
+const dpsWith = (item, up) => (G.gearDps ? G.gearDps(myStats(), { ...me().gear, [item.slot]: item.id }, { ...S.D.inv, [item.id]: up ?? S.D.inv[item.id] ?? 0 }) : 0);
+function dpsMeter(item, up) {
+  if (!G.gearDps) return "";
+  const v = dpsWith(item, up), d = v - dpsNow(), on = me().gear[item.slot] === item.id && up == null;
+  return `<div class="dps">${ic("sword")}<span class="n">${fmt(v)}</span>DPS${on ? `<span class="d eq">wearing</span>` : `<span class="d ${d > 0 ? "up" : d < 0 ? "down" : "eq"}">${d > 0 ? "+" : ""}${fmt(d)}</span>`}</div>`;
+}
 function itemCard(item, { deal = false } = {}) {
   const inv = S.D.inv, t = G.tierOf(item.tier), own = item.id in inv, on = me().gear[item.slot] === item.id, locked = !own && t.lvl > level();
   const gone = !own && !G.onSale(item, S.D.today.day);
@@ -1335,7 +1344,7 @@ function itemCard(item, { deal = false } = {}) {
       ${own && inv[item.id] ? `<span class="upb">+${inv[item.id]}</span>` : ""}${on ? `<span class="eq">${ic("check")}</span>` : ""}${deal && !own ? `<span class="deal">−${Math.round((1 - price / G.priceOf(item, false)) * 100)}%</span>` : ""}
       ${locked ? `<span class="lockover">${ic("lock")}</span>` : ""}</div>
     <div class="meta"><h4>${esc(item.name)}</h4>
-      <div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div></div>
+      <div class="stats">${Object.entries(st).map(([k, v]) => `<span class="st" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])}+${v}</span>`).join("")}</div>${locked ? "" : dpsMeter(item)}</div>
     ${item.perk ? `<div class="perk">${esc(perkText(item.perk))}</div>` : item.set ? `<div class="perk">${esc(I.SETS[item.set]?.what || "")}</div>` : "<div></div>"}
     <div class="foot">${gone ? `<span class="buy">${G.seasonById(item.season) && S.D.today.day < G.seasonById(item.season).start ? `From ${new Date(G.seasonById(item.season).start + "T12:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "Gone"}</span>` : locked ? `<span class="buy">Level ${t.lvl}</span>` : own ? `<span class="buy owned">${on ? "Equipped" : "Owned"}</span>` : `<span class="buy ${S.D.wallet < price ? "poor" : ""}">${coin(18)}${fmt(price)}</span>`}</div>
   </button>`;
@@ -1761,6 +1770,7 @@ function itemSheet(id, deal) {
     <h2 class="ol-sm">${esc(item.name)}</h2>
     <p class="flavour">${esc(item.text)}</p>
     <div class="tiles">${Object.entries(st).map(([k, v]) => `<div class="tile"><div class="k" style="color:${STAT_LOOK[k][1]}">${ic(STAT_LOOK[k][0])} ${statLabel(k)}</div><div class="v">+${v}${own && !maxed ? `<small>→ +${next[k]}</small>` : ""}</div></div>`).join("")}</div>
+    ${dpsMeter(item)}
     ${item.perk ? `<div class="perkbox">${ic("star")}<span>${esc(perkText(item.perk))}</span></div>` : ""}
     ${swapLine(item)}
     ${item.set ? `<div class="perkbox">${ic("star")}<span>${esc(I.SETS[item.set]?.name || "")}. ${esc(I.SETS[item.set]?.what || "")}</span></div>` : ""}
@@ -1768,7 +1778,7 @@ function itemSheet(id, deal) {
       ${!own && !G.onSale(item, S.D.today.day) ? `<button class="btn block" disabled>${G.seasonById(item.season) && S.D.today.day < G.seasonById(item.season).start ? `On sale from ${longDate(G.seasonById(item.season).start)}` : "Only sold during its season"}</button>` : locked ? `<button class="btn block" disabled>${ic("lock")} Unlocks at level ${t.lvl}</button>`
         : !own ? `<button class="btn green xl block" data-buy="${id}" data-deal="${deal ? 1 : ""}" ${wallet < price ? "disabled" : ""}>Buy ${priceTag(price)}</button>`
         : `${on ? `<button class="btn" data-unequip="${item.slot}">Take off</button>` : `<button class="btn blue" data-equip="${id}">Equip</button>`}
-           ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} ${priceTag(cost)}</button>`}`}
+           ${maxed ? `<button class="btn" disabled>Max level</button>` : `<button class="btn gold" data-upgrade="${id}" ${wallet < cost ? "disabled" : ""}>${ic("upgrade")} +${up + 1} <small>(+${fmt(dpsWith(item, up + 1) - dpsWith(item, up))} DPS)</small> ${priceTag(cost)}</button>`}`}
     </div>
     ${own && sellFor ? `<button class="btn sm block" style="margin-top:10px" data-sell="${id}">Sell to the shop ${priceTag(sellFor)}</button>
       <p class="tiny faint" style="text-align:center;margin:6px 0 0">${Math.round(G.RULES.sellBack * 100)}% of ${S.D.won?.includes(id) ? `its ${fmt(S.D.paid[id])} shop price (from a bucket)` : `the ${fmt(S.D.paid[id])} you spent on it`}${up ? ", upgrades included" : ""}.</p>` : ""}
@@ -2690,7 +2700,8 @@ function onInput(p) {
   if (p.ab) G.raidAbility(R, p.id);
   if (p.sp) G.raidSpecial(R, p.id);
   if (p.move) G.raidMove(R, p.id, p.move);
-  if (p.ans != null) G.raidAnswer(R, p.id, String(p.ans).slice(0, 40));
+  // ar: which round of questions the answer was for (an answer to an old question never lands on a new one).
+  if (p.ans != null && (p.ar == null || p.ar === R.triviaRuns)) G.raidAnswer(R, p.id, String(p.ans).slice(0, 40));
 }
 function onSnapshot(p) {
   const v = V.raid; if (!v || v.ended || !p?.R) return;
@@ -2742,14 +2753,14 @@ function raidTick() {
   } else {
     // Not the host: taps go as a running total about three times a second; a Dodge, special or answer straight away.
     // An answer is re-sent until the host has it (a dropped message used to lose it).
-    const o = v.out, gap = t - v.lastSent, T = v.R?.trivia, ans = o.ans ?? (v.pendingAns != null && T?.per[v.my] && !T.per[v.my].ans ? v.pendingAns : null);
+    const o = v.out, gap = t - v.lastSent, T = v.R?.trivia, ans = o.ans ?? (v.pendingAns != null && v.pendingRound === v.R?.triviaRuns && T?.per[v.my] && !T.per[v.my].ans ? v.pendingAns : null);
     const act = o.ab || o.sp || o.move || o.ans != null;
     if ((act && gap >= 100) || ((v.tapSeq || 0) > v.tapSent && gap >= 300) || (ans != null && gap >= 600)) {
       // n: the running total (this version's hosts read it); taps: the batch since the last message, for a host still
       // on the old version during a rollout (it only reads taps, and ignores n).
       const batch = Math.max(0, (v.tapSeq || 0) - (v.tapSent || 0));
       v.lastSent = t; v.tapSent = v.tapSeq || 0;
-      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, n: v.tapSeq || 0, taps: batch, ab: o.ab, sp: o.sp, move: o.move, ans } });
+      v.ch?.send({ type: "broadcast", event: "in", payload: { id: v.my, n: v.tapSeq || 0, taps: batch, ab: o.ab, sp: o.sp, move: o.move, ans, ar: ans != null ? v.pendingRound : undefined } });
       v.out = { ab: false, sp: false, move: null, ans: null };
     }
     // The host has gone quiet: work out who takes over (maybe us, from the last snapshot).
@@ -2805,7 +2816,7 @@ function raidResultSoon(result, v) {
   setTimeout(() => showRaidResult(result, v), wait);
 }
 // How long the fight ran, from the entrance to the end (for taps a second).
-const fightSecs = (R) => Math.max(0, Math.round(Math.min(R.t, R.dur) - (R.start || 0)));
+const fightSecs = (R) => Math.max(0, Math.round(Math.min(R.t, R.dur) - (R.start || 0) - (R.paused || 0))); // paused: time spent on questions
 async function reportRaid(R) {
   const v = V.raid; if (!v) return null;
   v.finishing = true;
@@ -3156,13 +3167,12 @@ function paintTrivia() {
   if (!T || !mineP) { if (box.innerHTML) box.innerHTML = ""; v.q = null; return; }
   const Q = mineP.q, key = `${R.triviaRuns}`;
   if (v.q !== key) {
-    v.q = key; v.ticked = 0; v.sentAns = false;
-    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}</div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
+    v.q = key; v.ticked = 0; v.sentAns = false; v.localAns = null; v.pendingAns = null; v.pendingRound = null;
+    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}<span class="tv-paused">Fight paused</span></div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
       <h3 class="ol-sm">${esc(Q.q)}</h3>
-      <form data-form="answer"><input id="tv-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="Name one…" maxlength="40" aria-label="Your answer"><button class="btn green">Go</button></form>
+      <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? fmt(Number(o)) : o)}</span></button>`).join("")}</div>
       <div class="verdict" id="tv-verdict"></div>
       <div class="votes" id="tv-votes"></div></div>`;
-    setTimeout(() => $("#tv-in")?.focus(), 50);
   }
   const left = Math.max(0, mineP.until - R.t);
   const clock = $("#tv-clock");
@@ -3176,16 +3186,21 @@ function paintTrivia() {
   }).join("") + `<span class="vote" style="background:none">${wrong} of ${Object.keys(T.per).length} wrong</span>`;
   const mine = mineP.ans || v.localAns;
   if (mine) {
-    const form = $("#trivia form"); if (form) form.remove();
-    $("#tv-verdict").innerHTML = mine.valid
-      ? `<b>${esc(mine.canon)}</b> <span class="rar r${mine.rarity}">${["", "Obvious", "Decent", "Rare"][mine.rarity]}</span> <span class="muted">Waiting for the squad…</span>`
-      : `<b>${esc(mine.text || "No answer")}</b> doesn't count. <span class="muted">Deep cuts: ${esc(Q.examples.join(", "))}</span>`;
+    // Lock the four in: yours lit up right or wrong, and the right one shown if you missed it.
+    for (const b of document.querySelectorAll("#tv-opts .tv-opt")) {
+      const o = Q.opts[+b.dataset.i];
+      b.disabled = true;
+      b.classList.toggle("pick", o === mine.text);
+      b.classList.toggle("ok", o === Q.good);
+      b.classList.toggle("no", o === mine.text && !mine.valid);
+    }
+    $("#tv-verdict").innerHTML = mine.valid ? `<b>Right.</b> <span class="muted">Waiting for the squad…</span>` : `<b>${mine.text ? "Wrong." : "Out of time."}</b> <span class="muted">Waiting for the squad…</span>`;
   }
 }
 function raidTapEvent(e) {
   const v = V.raid; if (!v?.R) return;
   const R = v.R, mine = R.members.find((m) => m.id === v.my);
-  if (!mine || !mine.alive || v.intro || R.t < (R.start || 0) || R.t < mine.stunUntil || R.t < mine.moveUntil || R.over) return;
+  if (!mine || !mine.alive || v.intro || R.trivia || R.t < (R.start || 0) || R.t < mine.stunUntil || R.t < mine.moveUntil || R.over) return;
   if (!tapGate(v, "me", 1)) return; // past the cap: drumming, not tapping
   const [x, y] = FX.local(e.clientX, e.clientY);
   v.taps++;
@@ -3217,7 +3232,7 @@ function raidAct(kind, val) {
     if (kind === "sp") v.out.sp = true;
     if (kind === "move") v.out.move = val;
     if (kind === "ans") {
-      v.out.ans = val; v.pendingAns = val; v.sentAns = true;
+      v.out.ans = val; v.pendingAns = val; v.pendingRound = v.R.triviaRuns; v.sentAns = true;
       // Check it here too, so you see straight away whether it counts.
       const p = v.R.trivia?.per[v.my];
       if (p) { v.localAns = { text: val, ...p.q.check(val) }; return v.localAns; }
@@ -3262,7 +3277,7 @@ function renderResult() {
         ${rows.map((s, i) => `<div class="drow ${s.id === my ? "me" : ""}" style="--mc:${colOf(s.id)}"><span class="dn"><em>${i === 0 && mvp ? ic("crown") : i + 1}</em><b style="font-size:${frameName(s.name).w.length > 8 && s.id !== my ? 10.5 : 13}px">${esc(s.id === my ? "You" : frameName(s.name).w)}</b><i class="dbar"><s data-w="${(s.dmg / top) * 100}"></s></i></span>${cols.map((c) => `<span>${cell(s, c[0])}</span>`).join("")}</div>`).join("")}
         ${out.settle ? `<div class="settle">${ic("coins")}<span>${esc(nm(out.settle.from).replace(/^you$/, "You"))} → ${esc(nm(out.settle.to))}</span><b>${fmt(out.settle.amount)}</b><small>weekly settlement</small></div>` : ""}</section>
       ${T ? `<section class="panel"><div class="ptitle"><h2 class="ol-sm">Last trivia · ${T.n - T.wrong}/${T.n} right</h2>${T.failed ? `<span class="side chip red">Paralysed</span>` : `<span class="side chip green">Passed</span>`}</div>
-        ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}” · deep cuts: ${esc(q.examples.join(", "))}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
+        ${T.results.map((q) => `<div class="rline"><span class="grow"><b>${esc(q.id === my ? "You" : q.name)}</b> · ${esc(q.q)}<br><span class="small muted">“${esc(q.ans.text || "no answer")}”${!q.ans.valid && q.right ? ` · answer: ${esc(q.right)}` : ""}</span></span><span class="rv" style="color:${q.ans.valid ? "var(--green)" : "var(--red)"}">${ic(q.ans.valid ? "check" : "close")}</span></div>`).join("")}</section>` : ""}
       <section class="panel"><div class="rline total" style="border-top:0;margin-top:0"><span class="disp" style="font-size:18px">Your share</span><span class="rv">${coin(26)}<span id="count">0</span></span></div>
         ${!mine ? `<div class="small muted">You weren't in this one.</div>` : ""}${won && !out.hunt && !G.isEventTier(out.tier) ? `<div class="small muted">Next Sunday: ${esc(G.bossFor(out.tier + 1).name)}</div>` : ""}${out.prize ? `<div class="small" style="margin-top:6px">${ic("star")} Won the <b>${esc(G.wardrobeById(out.prize)?.name || "")}</b>. Wear it from Me → Wardrobe.</div>` : ""}</section>`;
   }
@@ -3471,6 +3486,14 @@ document.addEventListener("click", async (e) => {
   if (d.move && V.raid) { raidAct("move", d.move); FX.play("tap"); return; }
   switch (d.act) {
     case "close-sheet": closeSheet(); break;
+    case "tv-pick": {
+      const v = V.raid, p = v?.R?.trivia?.per[v.my];
+      if (!p || p.ans || v.sentAns) break;
+      const res = raidAct("ans", p.q.opts[+d.i]);
+      if (res) FX.play(res.valid ? "right" : "wrong");
+      paintTrivia();
+      break;
+    }
     case "push-on": t.disabled = true; await enablePush(); t.disabled = false; break;
     case "signin": S.view = "signin"; S.signin = { step: "code" }; render(); scrollTo(0, 0); break;
     case "signin-again": {
