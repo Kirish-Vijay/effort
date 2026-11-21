@@ -306,7 +306,7 @@ const head2d = (answers) => Walker.svg(answers, { crop: "head", mood: "fresh" })
 const face = (id, size = 52) => `<div class="face has-fallback" style="width:${size}px;height:${size}px"><span class="fb">${head2d(ANS[id])}</span>${portraitImg("walker", id, { w: size * 2, h: size * 2, frame: "head" })}</div>`;
 
 // ---------- notifications ----------
-// A ping at 5pm before the Taxman's in (the raid lobby on Sunday), and one at 9pm if you haven't fought him. The server sends it;
+// A ping at 6pm when the Taxman's in (the raid lobby on Sunday), and one at 9pm if you haven't fought him. The server sends it;
 // this phone just has to sign up. iPhones only allow it once Effort is on the Home Screen.
 const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 async function callPush(action, body) {
@@ -343,7 +343,7 @@ async function enablePush() {
     await callPush("subscribe", { token: S.token, sub: sub.toJSON() });
     store.set("pushSynced", S.D?.today.day || "");
     S.push = "on"; render(); FX.play("levelup");
-    toast("Pings at 5pm, and 9pm if you haven't fought him");
+    toast("Pings at 6pm, and 9pm if you haven't fought him");
   } catch (e) { toast(`Couldn't turn them on: ${e.message}`); }
 }
 async function disablePush() {
@@ -1831,7 +1831,7 @@ function tabMe() {
     ${wardrobePanel()}
     <section class="panel">
       <div class="ptitle"><span class="ic-badge">${ic("bell")}</span><h2 class="ol-sm">Reminders</h2></div>
-      <p class="small muted" style="margin:0 0 10px">A ping at 5pm, and at 9pm if you haven't fought the Taxman.</p>
+      <p class="small muted" style="margin:0 0 10px">A ping at 6pm, and at 9pm if you haven't fought the Taxman.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -2270,7 +2270,7 @@ function viewSetup() {
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss the Taxman</h1>
-      <p class="muted">The Taxman's in from 6 to 11pm (not Sundays), and the raid's Sunday 6 to 11pm. We'll ping you at 5, and at 9 if you haven't fought him.</p>
+      <p class="muted">The Taxman's in from 6 to 11pm (not Sundays), and the raid's Sunday 6 to 11pm. We'll ping you at 6, and at 9 if you haven't fought him.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}

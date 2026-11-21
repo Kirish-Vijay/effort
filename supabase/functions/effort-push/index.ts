@@ -1,4 +1,4 @@
-// Effort push notifications: 5pm, an hour before the Taxman's in (on Sunday he's off, so it's the raid lobby), and
+// Effort push notifications: 6pm, when the Taxman's in (on Sunday he's off, so it's the raid lobby opening), and
 // 9pm to anyone who hasn't fought him yet, with two hours left (on Sunday, anyone whose squad hasn't raided yet).
 // Nothing in between, and a ping that can't arrive within 15 minutes is dropped, so nobody hears about a fight
 // after it's over.
@@ -6,7 +6,7 @@
 //   POST /subscribe    {token, sub}       this phone wants notifications
 //   POST /unsubscribe  {token, endpoint}  this phone doesn't
 //   POST /test         {token}            send yourself one now
-//   POST /tick         pg_cron calls this on the hour and half hour; it pings everyone whose local time is 5pm or 9pm
+//   POST /tick         pg_cron calls this on the hour and half hour; it pings everyone whose local time is 6pm or 9pm
 //   POST /mention      {ids, title, body}  the effort function, when a chat message @mentions people (or @everyone)
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import webpush from "npm:web-push@3.6.7";
@@ -78,7 +78,7 @@ async function sendTo(subs: Any[], msg: Any, ttl = 15 * 60) {
   return sent;
 }
 
-// What the evening ping says: at 5pm the Taxman's cut on today's steps so far (on Sunday, the raid instead); at 9pm,
+// What the evening ping says: at 6pm the Taxman's cut on today's steps so far (on Sunday, the raid instead); at 9pm,
 // that he's still in till 11 (on Sunday, that the raid lobby is). No message (null) when there's nothing to say.
 async function evening(players: Any[], now: number, late: boolean) {
   const G = await rules();
@@ -111,7 +111,7 @@ async function evening(players: Any[], now: number, late: boolean) {
     if (L.sunday && late) return { player: p, msg: g && !raidDone.has(g.group_id) ? { title: "Raid lobby's open till 11pm", body: `Start the raid with ${G.RULES.raidSquadSize} or more of you before 11.`, tag: "raid", url: APP } : null };
     if (L.sunday && !g) return { player: p, msg: null };
     if (late) return { player: p, msg: { title: "The Taxman's in till 11pm", body: `You haven't fought him yet. He wants ${pct}% of today's Efforts.`, tag: "taxman", url: APP } };
-    const tax = E ? `He'll want ${pct}% of today's ${E} Efforts. 6pm to 11pm.` : "Get today's steps synced before 6.";
+    const tax = E ? `He wants ${pct}% of today's ${E} Efforts. Five minutes to stop him.` : "Sync today's steps, then fight him.";
     if (g && L.sunday) {
       const week = (id: string) => [0, 1, 2, 3, 4, 5, 6].reduce((a, i) => a + stepsOn(id, addDays(mondayOf(L.day), i)), 0);
       const freshAfter = Date.parse(addDays(mondayOf(L.day), 3) + "T00:00:00Z");
@@ -119,9 +119,9 @@ async function evening(players: Any[], now: number, late: boolean) {
       const row = T.rows.find((r: Any) => r.id === p.id);
       const boss = G.bossFor(g.groups?.tier ?? 1);
       const note = row?.title === "top" ? " You're top walker this week." : row?.title === "last" ? " You're the lowest walker. It's coming for you." : "";
-      return { player: p, msg: { title: "Raid lobby at 6pm", body: `Open 6pm to 11pm. Your steps give you ×${(row?.stride ?? 1).toFixed(2)} power.${note} No Taxman today.`, tag: "raid", url: APP } };
+      return { player: p, msg: { title: "Raid lobby's open", body: `Open till 11pm. Your steps give you ×${(row?.stride ?? 1).toFixed(2)} power.${note} No Taxman today.`, tag: "raid", url: APP } };
     }
-    return { player: p, msg: { title: "The Taxman's in at 6pm", body: tax, tag: "taxman", url: APP } };
+    return { player: p, msg: { title: "The Taxman's in till 11pm", body: tax, tag: "taxman", url: APP } };
   });
 }
 
@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
         if (error) return fail("One test a minute");
         const { data: subs } = await db.from("push_subs").select("*").eq("player_id", p.id);
         if (!subs?.length) return fail("This phone isn't signed up for notifications");
-        const sent = await sendTo(subs, { title: "Notifications are on", body: "A ping at 5pm before the Taxman's in, and at 9pm if you haven't fought him yet.", tag: "test", url: APP });
+        const sent = await sendTo(subs, { title: "Notifications are on", body: "A ping at 6pm when the Taxman's in, and at 9pm if you haven't fought him yet.", tag: "test", url: APP });
         return sent ? json({ ok: true, sent }) : fail("Couldn't reach your phone. Try turning notifications off and on again.");
       }
 
@@ -169,11 +169,11 @@ Deno.serve(async (req) => {
         if (!cfg || req.headers.get("x-cron-key") !== cfg.value) return fail("Not allowed", 403);
         const now = Date.now();
         const { data: subs } = await db.from("push_subs").select("endpoint,p256dh,auth,player_id,players(id,name,tz,scroll_source)");
-        // 5pm (an hour before the Taxman) and 9pm (two hours left), each within the first quarter of the hour.
+        // 6pm (the Taxman's in) and 9pm (two hours left), each within the first quarter of the hour.
         const due = { soon: new Map<string, Any>(), missed: new Map<string, Any>() };
         for (const s of (subs ?? []) as Any[]) {
           const L = local(now, s.players?.tz || SQUAD_TZ);
-          const kind = L.hour === 17 && L.minute < 15 ? "soon" : L.hour === 21 && L.minute < 15 ? "missed" : null;
+          const kind = L.hour === 18 && L.minute < 15 ? "soon" : L.hour === 21 && L.minute < 15 ? "missed" : null;
           if (!kind) continue;
           const m = due[kind];
           if (!m.has(s.player_id)) m.set(s.player_id, { player: s.players, day: L.day, subs: [] });

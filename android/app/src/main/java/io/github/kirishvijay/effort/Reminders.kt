@@ -17,7 +17,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZonedDateTime
 
-// Two evening pings: 5pm, an hour before the Taxman's in (on Sunday he's off, so it's the raid lobby), and 9pm if
+// Two evening pings: 6pm, when the Taxman's in (on Sunday he's off, so it's the raid lobby opening), and 9pm if
 // you haven't fought him yet, with two hours left (on Sunday, if your squad hasn't raided). The phone books them itself, so they work without the internet. A sleeping phone can deliver an alarm
 // late, so each ping checks the clock first and stays quiet if its moment has passed. Android forgets an app's
 // alarms when the app is updated or the phone restarts, so they're booked again then, and every time the app opens.
@@ -38,11 +38,11 @@ object Reminders {
     // The game tells the app when today's fight is done (on Sunday, the raid), so the 9pm ping stays quiet.
     fun taxDone(c: Context, day: String) = Sync.prefs(c).edit().putString("taxDone", day).apply()
 
-    // The next 5pm and 9pm on this phone's clock. Inexact on purpose (no special alarm permission needed);
+    // The next 6pm and 9pm on this phone's clock. Inexact on purpose (no special alarm permission needed);
     // they usually land within a minute or so.
     fun schedule(c: Context) {
         if (!enabled(c)) return
-        book(c, SOON, 17, 0)
+        book(c, SOON, 18, 0)
         book(c, MISSED, 21, 0)
     }
 
@@ -59,20 +59,20 @@ object Reminders {
 
     fun show(c: Context, kind: String = SOON, test: Boolean = false) {
         if (!canNotify(c)) return
-        // Late alarms stay quiet: the 5pm one only before the Taxman leaves at 11, the 9pm one only before 11 too.
+        // Late alarms stay quiet: the 6pm one only before the Taxman leaves at 11, the 9pm one only before 11 too.
         val hour = LocalTime.now().hour
-        if (!test && kind == SOON && hour !in 17..22) return
+        if (!test && kind == SOON && hour !in 18..22) return
         if (!test && kind == MISSED && hour !in 21..22) return
         if (kind == MISSED && Sync.prefs(c).getString("taxDone", null) == LocalDate.now().toString()) return
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Evening reminders", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "5pm before the Taxman's in (6pm to 11pm), and 9pm if you haven't fought him"
+            description = "6pm when the Taxman's in (6pm to 11pm), and 9pm if you haven't fought him"
         })
         val sunday = LocalDate.now().dayOfWeek == DayOfWeek.SUNDAY
         val (title, body) = when {
-            test -> "Notifications are on" to "A ping at 5pm before the Taxman's in, and at 9pm if you haven't fought him."
+            test -> "Notifications are on" to "A ping at 6pm when the Taxman's in, and at 9pm if you haven't fought him."
             sunday && kind == MISSED -> "Raid lobby's open till 11pm" to "If your squad hasn't raided yet, there's still time."
-            sunday -> "Raid lobby at 6pm" to "Open 6pm to 11pm. No Taxman on Sundays, and no tax."
+            sunday -> "Raid lobby's open" to "Open till 11pm. No Taxman on Sundays, and no tax."
             kind == MISSED -> "The Taxman's in till 11pm" to "You haven't fought him yet. Five minutes to stop his cut."
             hour >= 18 -> "The Taxman's in till 11pm" to "Five minutes to stop him taking his cut."
             else -> "The Taxman's in at 6pm" to "He's here 6pm to 11pm."
@@ -121,7 +121,7 @@ object Reminders {
     }
 }
 
-// Fires at 5pm and 9pm (shows the ping and books the next), and after a restart or an update (rebooks them).
+// Fires at 6pm and 9pm (shows the ping and books the next), and after a restart or an update (rebooks them).
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, intent: Intent) {
         if (!Reminders.enabled(c)) return
