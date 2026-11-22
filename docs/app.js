@@ -2667,7 +2667,7 @@ function becomeHost() {
   v.R = R; v.hostLast = performance.now();
   syncMembers();
 }
-// A squad member as a fighter, with the stride and title the server worked out for the whole squad.
+// A squad member as a fighter, with the stride and title the server worked out among the fighters.
 function fighter(id) {
   const m = V.raid.roster[id];
   return { id, name: m.name, stats: m.stats, equipped: m.equipped, inv: m.inv, pos: m.pos, weekSteps: m.weekSteps, stride: m.stride, title: m.title };

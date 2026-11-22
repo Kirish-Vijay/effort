@@ -879,6 +879,8 @@ async function finishStale(db: Any, squad: Any, now: number) {
   // Six minutes past its clock: questions pause the fight, so a raid can run a few minutes over and still be going.
   const { data } = await db.from("raids").select("*").eq("group_id", squad.group.id).eq("status", "live").lt("ends_at", new Date(now - 6 * 60000).toISOString());
   for (const raid of data ?? []) {
+    // A host that saved the fight in the last minute is still playing it (the host saves every few seconds).
+    if (raid.snap_at && Date.parse(raid.snap_at) > now - 60000) continue;
     const { data: lock } = await db.from("raids").update({ status: "settling" }).eq("id", raid.id).eq("status", "live").select().maybeSingle();
     if (!lock) continue;
     try {

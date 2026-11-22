@@ -57,7 +57,7 @@ const DEFAULT_RULES = {
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 7500000,      // Brett's health; every boss has its own multiple. Five get all of it, four 80% (raidFullSquad). Tuned so
+  raidHpBase: 7000000,      // Brett's health over a 15-minute reference (a 5-minute raid gets a third). Set by sim against the real squad
                             // five tapping flat out (the 7/s cap) and dodging need 12 to 13 minutes of the 15: five times the
                             // 2.5 minutes a squad took before the cap. Four, or slower tappers, often run out of time.
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
@@ -122,7 +122,9 @@ const DEFAULT_RULES = {
   bountyReward: 25,         // Efforts each for every weekly squad bounty
   triviaSeconds: 25,
   triviaFailShare: 2 / 3,   // when someone dies everyone gets one question; 2/3 of the squad wrong = paralysed
-  rarityBossDmg: 0.001,     // each rarity point in trivia knocks this share off the boss
+  rarityBossDmg: 0.0004,    // each rarity point in trivia knocks this share off the boss (small: falling over shouldn't pay)
+  reviveStunSec: 5,         // a passed question round brings the fallen back up, dazed for this long
+  raidTurnoutMax: 1.1,      // a sixth fighter makes the boss a little bigger (five is the full squad it's tuned for)
   paralysedSteps: 1000,     // step deficit the next day
   paralysedStunSec: 12,
   xpPerLevel: 40,           // level n needs xpPerLevel × (n−1)² lifetime XP
@@ -586,7 +588,12 @@ function triviaSet(seed, count = 3) {
 function weekTable(members) {
   const avg = members.reduce((s, m) => s + (m.weekSteps || 0), 0) / Math.max(1, members.length);
   const rows = members.map((m) => ({ id: m.id, name: m.name, you: !!m.you, fresh: !!m.fresh, weekSteps: m.weekSteps || 0,
-    stride: avg > 0 ? Math.round(clamp((m.weekSteps || 0) / avg, RULES.strideMin, RULES.strideMax) * 100) / 100 : 1, title: null }));
+    stride: avg > 0 ? clamp((m.weekSteps || 0) / avg, RULES.strideMin, RULES.strideMax) : 1, title: null }));
+  // Clamping a huge walker to the top of the range would leave everyone's power adding up to less than the squad; scale
+  // them so the average is always ×1. Walking more than the others still means hitting harder, and an outlier joining
+  // never makes the squad weaker.
+  const sum = rows.reduce((s, r) => s + r.stride, 0), k = sum > 0 ? rows.length / sum : 1;
+  for (const r of rows) r.stride = Math.round(r.stride * k * 100) / 100;
   rows.sort((a, b) => b.weekSteps - a.weekSteps);
   // Someone who joined late in the week (fresh) can't be crowned or blamed for it.
   const ranked = rows.filter((r) => !r.fresh);
@@ -721,7 +728,7 @@ function makeMember(m, row) {
 }
 // scale: the boss's health on top of everything else (the Midweek Hunt fights a smaller one, already sized for its four,
 // so the turnout discount is for Sunday raids only). size: how many started the fight (defaults to everyone passed in).
-const turnout = (n) => clamp((Number(n) || 0) / (RULES.raidFullSquad || 5), RULES.raidTurnoutMin ?? 0.8, 1);
+const turnout = (n) => clamp((Number(n) || 0) / (RULES.raidFullSquad || 5), RULES.raidTurnoutMin ?? 0.8, RULES.raidTurnoutMax ?? 1);
 function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier = 1, enraged = false, affix = null, den = null, scale = 1, size = null } = {}) {
   const r = rng(seed);
   const table = weekTable(members);
@@ -974,7 +981,7 @@ function comboEnd(R) {
 function raidDodge(R, id) {
   const m = R.members.find((x) => x.id === id);
   if (!m || !canAct(R, m) || R.t < m.dodgeUntil) return false;
-  m.movedAt = R.t; m.moveUntil = R.t + 0.6; m.dodgeUntil = R.t + RULES.dodgeCd * (1 + (R.mods?.move || 0)); m.slimeUntil = 0;
+  m.movedAt = R.t; m.moveUntil = R.t + 0.6; m.lastTap = Math.max(m.lastTap, R.t + 0.6); // the combo survives the step m.dodgeUntil = R.t + RULES.dodgeCd * (1 + (R.mods?.move || 0)); m.slimeUntil = 0;
   fx(R, { type: "dodgeStep", id: m.id });
   return true;
 }
@@ -1127,7 +1134,13 @@ function raidAnswer(R, id, text) {
   if (!p || p.ans) return null;
   p.ans = { text: String(text).slice(0, 40), ...p.q.check(text) };
   fx(R, { type: "answered", id, valid: p.ans.valid, rarity: p.ans.rarity || 0 });
-  if (Object.values(T.per).every((x) => x.ans)) resolveTrivia(R);
+  // Done as soon as the result can't change: everyone's answered, enough are wrong to paralyse, or too few are left to.
+  const ps = Object.values(T.per), n = ps.length, need = Math.ceil(n * RULES.triviaFailShare - 1e-9);
+  const wrong = ps.filter((x) => x.ans && !x.ans.valid).length, right = ps.filter((x) => x.ans && x.ans.valid).length;
+  if (ps.every((x) => x.ans) || wrong >= need || right > n - need) {
+    for (const x of ps) if (!x.ans) x.ans = { text: "", valid: false };
+    resolveTrivia(R);
+  }
   return p.ans;
 }
 function resolveTrivia(R) {
@@ -1150,7 +1163,7 @@ function resolveTrivia(R) {
     say(R, `Paralysed. Everyone's stunned ${RULES.paralysedStunSec}s and starts tomorrow ${RULES.paralysedSteps.toLocaleString("en-GB")} steps down`, "bad");
   } else {
     const back = R.members.filter((m) => !m.alive);
-    back.forEach((m) => { m.alive = true; m.hp = Math.round(m.max * 0.4); });
+    back.forEach((m) => { m.alive = true; m.hp = Math.round(m.max * 0.4); m.stunUntil = R.t + (RULES.reviveStunSec ?? 0); });
     fx(R, { type: "revive", ids: back.map((m) => m.id) });
     say(R, "Trivia passed. The fallen are back up", "good");
   }
@@ -1597,7 +1610,7 @@ const baseTier = (t) => (isEventTier(t) ? Number(t) % 1000 : Number(t));
 // fighting beside you as bots. Once a week; you keep your own share.
 // hp: the Hunt's boss has this share of a Sunday boss's health per minute (you and three bots, who don't tap as hard). By sim,
 // you at 6 taps a second in starter gear beat Brett about 70% of the time (0.55: under 60%).
-const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5, hp: 0.53 };
+const HUNT = { weekday: 3, from: 12, to: 23, minutes: 5, hp: 0.48 };
 
 // Miles along the route from the squad's daily average steps (each day only counts people who'd joined by then).
 const journeyMiles = (S, dailyAvgs, bonus = 0) => Math.min(S.miles[S.miles.length - 1], (dailyAvgs.reduce((a, x) => a + x, 0) / RULES.stepsPerMile) * (1 + bonus));
