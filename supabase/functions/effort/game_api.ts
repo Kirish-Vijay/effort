@@ -332,13 +332,15 @@ async function settleWeek(db: Any, squad: Any, weekStart: string) {
   return { from: last.id, to: top.id, amount };
 }
 
-// The squad as raid fighters, with stride and title from the whole squad's week.
-async function rosterFor(db: Any, squad: Any, weekStart: string, to: string) {
+// The squad as raid fighters. among: the players in the fight; their raid power (stride) is their week's steps
+// against the average of the others fighting, so a huge walker who isn't there doesn't drag everyone else down.
+async function rosterFor(db: Any, squad: Any, weekStart: string, to: string, among: string[] | null = null) {
   const ids = squad.members.map((m: Any) => m.id);
   const [rows, ledgers] = await Promise.all([weekRows(db, squad, weekStart, to), ledgerFor(db, ids)]);
-  const T = G.weekTable(rows);
+  const inFight = among?.length ? rows.filter((r: Any) => among.includes(r.id)) : [];
+  const T = G.weekTable(inFight.length ? inFight : rows);
   return squad.members.map((m: Any) => {
-    const row = T.rows.find((r: Any) => r.id === m.id), L = ledgers[m.id];
+    const row = T.rows.find((r: Any) => r.id === m.id) || G.weekTable(rows).rows.find((r: Any) => r.id === m.id), L = ledgers[m.id];
     return {
       id: m.id, name: m.name, answers: m.character || null, wear: m.cosmetics || {}, stats: statsOf(m), equipped: cleanGear(m.gear, L.inv), inv: L.inv,
       pos: m.raid_pos || null, weekSteps: row.weekSteps, stride: row.stride, title: row.title, fresh: row.fresh, goalDays: rows.find((r: Any) => r.id === m.id)?.goalDays ?? 6, level: level(L),
@@ -565,7 +567,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
         // Four or more here and every one of them ready: it starts, with exactly them, and the week's goal locked in.
         if (here.length >= G.RULES.raidSquadSize && here.every((r: Any) => r.ready)) {
           const { data: fresh } = await sel();
-          const roster = await rosterFor(db, squad, w.weekStart, [localDate(now, SQUAD_TZ), w.slot].sort()[0]);
+          const roster = await rosterFor(db, squad, w.weekStart, [localDate(now, SQUAD_TZ), w.slot].sort()[0], here.map((r: Any) => r.player_id));
           const g = G.squadGoal(fresh.tier, roster), so = G.seasonOn(gameDay(squad, now));
           const affix = so && !so.upcoming ? so.season.affix : null, den = (await denFor(db, squad)).levels;
           await db.from("raids").update({ status: "live", started_at: new Date(now).toISOString(), ends_at: new Date(now + G.RULES.raidMin * 60000).toISOString(),
@@ -584,7 +586,7 @@ export async function gameRoute(action: string, body: Any, ctx: { db: Any; json:
       const raid = await currentRaid(db, squad, w.slot);
       if (!raid || raid.status === "lobby") return fail("The raid hasn't started yet. Join the lobby");
       if (raid.status !== "done" && !(raid.fighters || []).includes(player.id)) return fail("This raid started without you. Next week!");
-      const roster = (await rosterFor(db, squad, raidWeek(raid), raidTo(raid))).filter((m: Any) => !raid.fighters || raid.fighters.includes(m.id));
+      const roster = (await rosterFor(db, squad, raidWeek(raid), raidTo(raid), raid.fighters)).filter((m: Any) => !raid.fighters || raid.fighters.includes(m.id));
       return json({ ok: true, now, me: player.id, raid, roster, boss: G.bossFor(raid.tier) });
     }
 
@@ -939,7 +941,7 @@ function fightReport(R: Any, report: Record<string, Any>, body: Any, how: string
 // The host's phone reports how the fight went; the server works out the pay itself from the squad's real
 // gear and steps (so the boss's level and everyone's share can't be fiddled), then pays everyone.
 async function payRaid(db: Any, squad: Any, raid: Any, body: Any, now: number) {
-  const roster = await rosterFor(db, squad, raidWeek(raid), raidTo(raid));
+  const roster = await rosterFor(db, squad, raidWeek(raid), raidTo(raid), raid.fighters);
   const report: Record<string, Any> = Object.fromEntries((Array.isArray(body.members) ? body.members : []).filter((m: Any) => m && typeof m.id === "string").map((m: Any) => [m.id, m]));
   // Everyone who started the fight is in it, whether or not the host's report names them (a missing fighter counts as
   // no damage, and a won fight's missing damage is shared out to whoever had room); an old raid without a fighter list

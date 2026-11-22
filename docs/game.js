@@ -28,10 +28,10 @@ const DEFAULT_RULES = {
   windowHour: 18,           // the Taxman's in from 6pm...
   // A Sunday raid run on another day instead (that Sunday: the day it's on). That day is the Taxman's day off too, so
   // its steps go in untaxed like a Sunday's, and the week isn't settled until the moved raid's done.
-  raidMoved: { "2026-11-15": "2026-11-16" },
+  raidMoved: {},
   windowCloseHour: 23,      // ...till 11pm: start your fight any time in between (never on Sundays: no tax that day)
   dailyWindowMin: 5,        // a Taxman fight lasts this long
-  raidMin: 15,
+  raidMin: 5,               // minutes a raid lasts (boss health scales with it)
   taxmanBaseHp: 35000,
   taxmanHpPerEffort: 100,
   taxmanHpPerOverMin: 80,
@@ -57,7 +57,7 @@ const DEFAULT_RULES = {
   edgeBarge: 2.2,           // Guard: the Taxman Barge
   edgeHp: 1.5,              // Guard: health
   edgeArmour: 1.0,          // Guard: damage shrugged off
-  raidHpBase: 6650000,      // Brett's health; every boss has its own multiple. Five get all of it, four 80% (raidFullSquad). Tuned so
+  raidHpBase: 7500000,      // Brett's health; every boss has its own multiple. Five get all of it, four 80% (raidFullSquad). Tuned so
                             // five tapping flat out (the 7/s cap) and dodging need 12 to 13 minutes of the 15: five times the
                             // 2.5 minutes a squad took before the cap. Four, or slower tappers, often run out of time.
   raidSquadSize: 4,         // the fewest who can start a raid, and the squad size the boss is tuned for
@@ -69,11 +69,11 @@ const DEFAULT_RULES = {
   stepHp: 1.05, stepDmg: 1.02, stepReward: 1.015, // (1: compounds instead; 0: the old ×2 laps)
   raidAtkEvery: 6,          // seconds between boss attacks (phase 1)
   raidTelegraph: 2,
-  raidBossDmg: 72,          // a hit at level 1 (Screams, spores and fire take a share of this)
+  raidBossDmg: 60,          // a hit at level 1 (Screams, spores and fire take a share of this). Tuned by sim for a 5-minute fight
   dodgeHit: 1.4,            // the moves you can dodge (Strikes, Stomps, Ooze, Vanish, Gust, Grab) hit this much harder: an undodged
                             // Strike takes about 40% of a starter's health, so a squad that never dodges usually runs out of time
   raidIntro: 4,             // seconds of entrance before anyone can hit (the boss waits too)
-  tapCap: 7,                // taps a second that count, for everyone (host or not): past this you're drumming, not walking
+  tapCap: 10,               // taps a second that count, for everyone (host or not); more fingers help up to here, past it you're drumming
   feastShare: 0.004,        // Feast: deal this share of the boss's health in 6s or it eats…
   feastHeal: 0.03,          // …and heals this share
   raidRewardPerMember: 150, // Efforts per squad member for beating Brett (other bosses pay their reward multiple)
@@ -123,7 +123,7 @@ const DEFAULT_RULES = {
   triviaSeconds: 25,
   triviaFailShare: 2 / 3,   // when someone dies everyone gets one question; 2/3 of the squad wrong = paralysed
   rarityBossDmg: 0.001,     // each rarity point in trivia knocks this share off the boss
-  paralysedSteps: 2500,     // step deficit the next day
+  paralysedSteps: 1000,     // step deficit the next day
   paralysedStunSec: 12,
   xpPerLevel: 40,           // level n needs xpPerLevel × (n−1)² lifetime XP
   upgradeMax: 10,
@@ -734,7 +734,9 @@ function raidCreate(members, { seed = Date.now(), minutes = RULES.raidMin, tier 
   const R = {
     seed, r, t: 0, dur: minutes * 60, lvl, tier: def.tier, over: false, result: null, start: 0,
     // Short test raids pay proportionally less.
-    sizeDmg: 1, timeShare: Math.min(1, minutes / 15), xpPool: (RULES.raidXpPerKill || 0) * def.hp * Math.min(1, minutes / 15) * scale,
+    // Pay and XP: a full Sunday raid (raidMin long) pays in full; the Hunt (scale under 1) and shorter test fights pay
+    // their share of a 15-minute fight, as they always have.
+    sizeDmg: 1, timeShare: Math.min(1, minutes / (scale === 1 ? RULES.raidMin : 15)), xpPool: (RULES.raidXpPerKill || 0) * def.hp * Math.min(1, minutes / (scale === 1 ? RULES.raidMin : 15)) * scale,
     boss: { ...def, dmg: def.dmg * (enraged ? RULES.enragedDmg : 1), hp: max, max, phase: 1, next: null, feast: null, warned: false, enraged, hidden: false, last: null },
     members: ms, table, trivia: null, triviaRuns: 0, paralysed: false, log: [], fx: [], deepDive: 0, affix: affixList(affix).join("+") || null, mods: modsFor(affix, den), atkCount: 0, echo: null,
     // Squad-wide effects from specials (each is a time it lasts until, or a count of attacks).
@@ -813,7 +815,7 @@ function targetsOf(R, type) {
 const alive = (R) => R.members.filter((m) => m.alive && !m.away);
 const canAct = (R, m) => m.alive && !R.trivia && R.t >= (R.start || 0) && R.t >= m.moveUntil && R.t >= m.stunUntil && !R.over;
 // The fight stands still for d seconds (while the squad answers questions): every clock in it moves on by d, so
-// nothing lands, ticks, wears off or charges up, and the fight's own 15 minutes don't run down. R.paused adds them up.
+// nothing lands, ticks, wears off or charges up, and the fight's own clock doesn't run down. R.paused adds them up.
 const MEMBER_CLOCKS = ["cdUntil", "moveUntil", "dodgeUntil", "stunUntil", "shieldUntil", "lastTap", "botNext", "joyUntil", "slimeUntil", "dotUntil", "botBackAt", "movedAt", "fullSince"];
 const RAID_CLOCKS = ["dur", "vulnUntil", "weakUntil", "prophecyUntil", "swarmUntil", "reviveAt"];
 function freeze(R, d) {

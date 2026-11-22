@@ -812,10 +812,11 @@ function paintTrivia() {
   if (!T) { if (box.innerHTML) box.innerHTML = ""; v.q = null; return; }
   const mineP = T.per.me, Q = mineP.q, key = `${R.triviaRuns}`;
   if (v.q !== key) {
-    v.q = key; v.ticked = 0;
+    v.q = key; v.ticked = 0; v.qAt = performance.now();
+    setTimeout(() => { if (v.q === key) for (const b of document.querySelectorAll("#tv-opts .tv-opt.wait")) b.classList.remove("wait"); }, 1000);
     box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}<span class="tv-paused">Fight paused</span></div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
       <h3 class="ol-sm">${esc(Q.q)}</h3>
-      <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? Number(o).toLocaleString("en-GB") : o)}</span></button>`).join("")}</div>
+      <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt wait" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? Number(o).toLocaleString("en-GB") : o)}</span></button>`).join("")}</div>
       <div class="verdict" id="tv-verdict"></div>
       <div class="votes" id="tv-votes"></div></div>`;
   }
@@ -978,7 +979,7 @@ document.addEventListener("click", (e) => {
   const t = e.target.closest("button");
   if (!t) return;
   const d = t.dataset;
-  if (d.act === "tv-pick" && V.raid?.R?.trivia?.per.me && !V.raid.R.trivia.per.me.ans) {
+  if (d.act === "tv-pick" && V.raid?.R?.trivia?.per.me && !V.raid.R.trivia.per.me.ans && performance.now() - (V.raid.qAt || 0) >= 1000) {
     const res = G.raidAnswer(V.raid.R, "me", V.raid.R.trivia.per.me.q.opts[+d.i]);
     if (res) FX.play(res.valid ? "right" : "wrong");
     paintTrivia(); return;

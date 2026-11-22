@@ -1065,7 +1065,7 @@ function weekPanel() {
           <span class="lbn"><b class="num">${fmt(val(r))}</b><small>${{ today: "today", week: "this week", all: "all time" }[by]}</small>${by === "week" && r.lost ? `<small class="cut-t">${ic("bolt")}−${fmt(r.lost)}</small>` : ""}</span>
         </button>`; }).join("")}</div>
       <button class="invite-row" data-act="invite">${ic("share")}<span class="grow">Invite to ${esc(squad().name)}</span><span class="small muted">Code</span><b class="code-chip">${squad().code}</b></button>
-      <p class="tiny faint" style="margin:10px 0 0">Raid power: your steps ÷ the squad average (×${G.RULES.strideMin}–×${G.RULES.strideMax}). Raid loot splits by damage × raid power. Sunday: the bottom walker pays the top walker ${Math.round(G.RULES.slackerTax * 100)}% of their week.</p>
+      <p class="tiny faint" style="margin:10px 0 0">Raid power: your steps ÷ the average of whoever's raiding (×${G.RULES.strideMin}–×${G.RULES.strideMax}). Raid loot splits by damage × raid power. Sunday: the bottom walker pays the top walker ${Math.round(G.RULES.slackerTax * 100)}% of their week.</p>
     </section>`;
 }
 function noSquadPanel() {
@@ -2191,7 +2191,7 @@ function viewWelcome() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Your steps are money</b><span>Every 100 steps is an Effort. Walk more than the squad and you hit harder, earn more and get taxed less.</span></div></div>
         <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: the Taxman</b><span>Five minutes, once a day, Monday to Saturday. Beat him or he takes his cut.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Fifteen minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Five minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
       </div>
     </section>
     <button class="btn gold xl block" data-act="start">${inv ? `Join ${esc(inv.name)}` : "Make my walker"}</button>
@@ -3161,16 +3161,19 @@ function paintRaid() {
   }
   paintTrivia();
 }
+const QUESTION_GRACE_MS = 1000;
 function paintTrivia() {
   const v = V.raid, R = v.R, T = R.trivia, box = $("#trivia");
   const mineP = T?.per[v.my];
   if (!T || !mineP) { if (box.innerHTML) box.innerHTML = ""; v.q = null; return; }
   const Q = mineP.q, key = `${R.triviaRuns}`;
   if (v.q !== key) {
-    v.q = key; v.ticked = 0; v.sentAns = false; v.localAns = null; v.pendingAns = null; v.pendingRound = null;
+    v.q = key; v.ticked = 0; v.sentAns = false; v.localAns = null; v.pendingAns = null; v.pendingRound = null; v.qAt = performance.now();
+    // A second before the options take a tap: the card pops up mid-fight and a tap meant for the boss would land on one.
+    setTimeout(() => { if (v.q === key) for (const b of document.querySelectorAll("#tv-opts .tv-opt.wait")) b.classList.remove("wait"); }, QUESTION_GRACE_MS);
     box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}<span class="tv-paused">Fight paused</span></div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
       <h3 class="ol-sm">${esc(Q.q)}</h3>
-      <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? fmt(Number(o)) : o)}</span></button>`).join("")}</div>
+      <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt wait" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? fmt(Number(o)) : o)}</span></button>`).join("")}</div>
       <div class="verdict" id="tv-verdict"></div>
       <div class="votes" id="tv-votes"></div></div>`;
   }
@@ -3488,7 +3491,7 @@ document.addEventListener("click", async (e) => {
     case "close-sheet": closeSheet(); break;
     case "tv-pick": {
       const v = V.raid, p = v?.R?.trivia?.per[v.my];
-      if (!p || p.ans || v.sentAns) break;
+      if (!p || p.ans || v.sentAns || performance.now() - (v.qAt || 0) < QUESTION_GRACE_MS) break;
       const res = raidAct("ans", p.q.opts[+d.i]);
       if (res) FX.play(res.valid ? "right" : "wrong");
       paintTrivia();
