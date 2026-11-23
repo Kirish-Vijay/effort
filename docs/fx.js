@@ -282,6 +282,8 @@ const SOUNDS = {
   },
   blocked() { tone(1900, { type: "square", dur: 0.04, vol: 0.1 }); tone(1300, { type: "square", dur: 0.05, vol: 0.09, at: 0.04 }); tone(2600, { dur: 0.25, vol: 0.05, at: 0.02, send: 0.5 }); },
   weak() { click(0, 0.35, 5000); tone(880, { type: "triangle", dur: 0.08, vol: 0.28 }); tone(1320, { type: "triangle", dur: 0.18, vol: 0.26, at: 0.05, send: 0.3 }); noise({ dur: 0.1, vol: 0.35, freq: 2600 }); thump(110, 50, 0.15, 0.35); },
+  // Moving a story on: a tiny bright square-wave pip, the handheld text-box kind (short, high, no tail).
+  advance() { tone(1318.5, { type: "square", dur: 0.045, vol: 0.075, attack: 0.002 }); tone(2637, { type: "square", dur: 0.025, vol: 0.02, attack: 0.002 }); },
   coin() { tone(988, { type: "square", dur: 0.07, vol: 0.11 }); tone(1319, { type: "square", dur: 0.24, vol: 0.11, at: 0.07, send: 0.25 }); },
   combo() { [523, 659, 784, 1047].forEach((f, i) => tone(f, { type: "triangle", dur: 0.14, vol: 0.17, at: i * 0.05, send: 0.25 })); },
   ko() {

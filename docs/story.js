@@ -858,11 +858,13 @@ function onTap(e) {
   if (e.target.closest && (e.target.closest(".es-choice") || e.target.closest(".es-skip"))) return;
   tap();
 }
+// The pip every time the story moves on (FX is the app's sound kit; the story runs without it too).
+const pip = () => { try { window.FX?.play?.("advance"); } catch { /* sound is a nice-to-have */ } };
 function tap() {
   const S = P; if (!S || S.lock || now() < S.readyAt) return;
-  if (S.mode === "typing") { finishTyping(); return; }
-  if (S.mode === "line") { advance(); return; }
-  if (S.mode === "card") { S.$(".es-card").classList.remove("es-show"); S.el.classList.remove("es-carding"); advance(); return; }
+  if (S.mode === "typing") { pip(); finishTyping(); return; }
+  if (S.mode === "line") { pip(); advance(); return; }
+  if (S.mode === "card") { pip(); S.$(".es-card").classList.remove("es-show"); S.el.classList.remove("es-carding"); advance(); return; }
   // choice: tapping elsewhere does nothing
 }
 
@@ -1029,6 +1031,7 @@ function renderChoices() {
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       if (P !== S || S.mode !== "choice") return;
+      pip();
       wrap.innerHTML = "";
       if (o.flag) { S.flags[o.flag] = true; saveFlags(S.flagKey, S.flags); }
       S.mode = "idle"; push(o.then); advance();
