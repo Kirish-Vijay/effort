@@ -216,7 +216,7 @@ async function load() {
   S.D = D;
   ANS[D.me.id] = answersOf(D.me);
   nat("setToken", S.token);
-  if (D.fight?.finished_at || (D.windows.tax.off && ["done", "live", "settling"].includes(D.raid?.status))) nat("taxDone", D.today.day);
+  if (D.fight?.finished_at || (D.windows.tax.off && (["done", "live", "settling"].includes(D.raid?.status) || D.hunt?.done))) nat("taxDone", D.today.day);
   if (D.squad) setTimeout(chatPrefetch, 800);
   for (const m of D.squad?.members || []) ANS[m.id] = answersOf(m);
   return D;
@@ -1177,7 +1177,7 @@ function nowStrip() {
   const tx = taxState(), rs = raidState(), H = S.D.hunt, pct = Math.round(taxSetup().taxRate * 100);
   const [txt, hot] = rs === "live" ? ["The raid's on", 1] : rs === "open" ? ["Raid lobby's open till 11pm", 1]
     : ["open", "live"].includes(tx) ? [`The Taxman's in till 11pm · wants ${pct}%`, 1] : H?.open && !H.done ? ["Midweek Hunt's on till 11pm", 1]
-    : tx === "off" ? (rs === "soon" ? ["No Taxman today · raid lobby at 6pm", 0] : ["No Taxman today · no tax today", 0])
+    : tx === "off" ? (G.isHuntDay?.(S.D.today.day) ? ["No Taxman today · the Midweek Hunt's on", 0] : rs === "soon" ? ["No Taxman today · raid lobby at 6pm", 0] : ["No Taxman today · no tax today", 0])
     : tx === "soon" ? [`Taxman at 6pm · wants ${pct}%`, 0] : tx === "done" ? ["Taxman done for today", 0] : ["Taxman's gone for today", 0];
   return `<button class="panel nowstrip ${hot ? "hot" : ""}" data-tab="raid">${ic(hot ? "sword" : "clock")}<span class="grow">${txt}</span>${ic("arrowRight")}</button>`;
 }
@@ -1187,7 +1187,7 @@ function howDay() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("coin")}</span><div><b>Walk to earn</b><span>Every ${fmt(G.RULES.stepsPerEffort)} steps is 1 Effort, up to ${G.RULES.dailyEffortCap} a day. Gear costs Efforts.</span></div></div>
         <div class="hrow"><span class="hic">${ic("trophy")}</span><div><b>Out-walk your mates</b><span>Beat the squad's average today and the Taxman takes ${Math.round(G.RULES.paceTax * 100)} points less; fall 10% behind and he takes ${Math.round(G.RULES.paceTax * 100)} more.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: five minutes to fight</b><span>Not on Sundays: he's off, and there's no tax. Other days he takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it. Knock him out to keep it all, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: five minutes to fight</b><span>Not on Wednesdays (the Hunt) or Sundays (the raid): he's off, and there's no tax. Other days he takes ${Math.round(G.RULES.baseTax * 100)}% (more if you scrolled over budget). Every hit cuts it. Knock him out to keep it all, then keep tapping to steal up to ${Math.round(taxSetup().stealCap * 100)}% extra.</span></div></div>
         <div class="hrow"><span class="hic">${ic("target")}</span><div><b>Audits and receipts</b><span>When he Audits you only the moving target takes damage. Golden receipts knock 3% off his health.</span></div></div>
       </div>
     </details>`;
@@ -1314,7 +1314,7 @@ function howRaids() {
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Steps are power</b><span>Your week's steps against the squad's set how hard you hit. Loot splits by damage dealt. The lowest walker gets hunted and pays ${Math.round(G.RULES.slackerTax * 100)}% of their week to the top walker, raid or no raid.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Squad combos</b><span>Fire specials within ${G.RULES.comboWindow}s of each other and they combo: ×${G.comboMult(2)} for two, ×${G.comboMult(3)} for three, ×${G.comboMult(4)} for four or more. Call it in chat. His Scream drains everyone's charge, so don't sit on it too long.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("arrowRight")}</span><div><b>Dodge</b><span>Marked by an attack? Tap Dodge before it lands and it misses you.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("arrowRight")}</span><div><b>Dodge</b><span>When an attack's coming for you, Dodge lights up: tap it (or swipe anywhere) before it lands and it misses you.</span></div></div>
         <div class="hrow"><span class="hic">${ic("bigSwing")}</span><div><b>Stagger the wind-ups</b><span>Hit hard together while he winds up (Big Swing helps) and the attack lands at half strength, or not at all.</span></div></div>
         <div class="hrow"><span class="hic">${ic("star")}</span><div><b>Your class special</b><span>It charges as you tap, use your ability and take hits. Fire it when it glows. ${esc(G.specialOf({ cls: myClass().id }).name)}: ${esc(G.specialOf({ cls: myClass().id }).what)}.</span></div></div>
         <div class="hrow"><span class="hic">${ic("warning")}</span><div><b>Read the warnings</b><span>Every attack is called a couple of seconds early, and each boss has a signature move.</span></div></div>
@@ -1865,7 +1865,7 @@ function reminderButtons() {
   const gcal = (text, start, mins, rule) => `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(text)}&dates=${gstamp(start)}/${gstamp(start + mins * 60000)}&ctz=Europe/London&recur=${encodeURIComponent("RRULE:" + rule)}&details=${encodeURIComponent(APP_URL)}`;
   const taxAt = w.tax.test ? w.tax.next : w.tax.opens > now() ? w.tax.opens : w.tax.next;
   return `<a class="btn sm block" href="reminders.ics">${ic("calendar")} Add both to my calendar</a>
-    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman (6–11pm)", taxAt, 300, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR,SA")}">Google: 6pm, not Sundays</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–11pm)", w.raid.test ? w.raid.closes : w.raid.opens, 300, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
+    <div class="btn-row" style="margin-top:8px"><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: the Taxman (6–11pm)", taxAt, 300, "FREQ=WEEKLY;BYDAY=MO,TU,TH,FR,SA")}">Google: 6pm, not Wed or Sun</a><a class="btn xs" target="_blank" rel="noopener" href="${gcal("Effort: squad raid lobby (6–11pm)", w.raid.test ? w.raid.closes : w.raid.opens, 300, "FREQ=WEEKLY;BYDAY=SU")}">Google: Sunday raid</a></div>`;
 }
 
 // ---------- sheets ----------
@@ -2190,7 +2190,7 @@ function viewWelcome() {
     <section class="panel">
       <div class="how">
         <div class="hrow"><span class="hic">${ic("steps")}</span><div><b>Your steps are money</b><span>Every 100 steps is an Effort. Walk more than the squad and you hit harder, earn more and get taxed less.</span></div></div>
-        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: the Taxman</b><span>Five minutes, once a day, Monday to Saturday. Beat him or he takes his cut.</span></div></div>
+        <div class="hrow"><span class="hic">${ic("sword")}</span><div><b>6pm to 11pm: the Taxman</b><span>Five minutes, once a day, except Wednesdays and Sundays. Beat him or he takes his cut.</span></div></div>
         <div class="hrow"><span class="hic">${ic("raid")}</span><div><b>Sunday: the raid</b><span>Five minutes, the whole squad, one boss. The laziest walker gets hunted, and pays the top walker.</span></div></div>
       </div>
     </section>
@@ -2270,7 +2270,7 @@ function viewSetup() {
       <p id="sync-status" class="small muted" style="text-align:center;margin:10px 0"></p>` : `<div style="height:14px"></div>`}
       <div class="btn-row"><button class="btn" data-act="setup-next">Do it later</button><button class="btn gold" data-act="setup-next">Next ${ic("arrowRight")}</button></div>`
     : `<h1 class="ol disp ob-title">Don't miss the Taxman</h1>
-      <p class="muted">The Taxman's in from 6 to 11pm (not Sundays), and the raid's Sunday 6 to 11pm. We'll ping you at 6, and at 9 if you haven't fought him.</p>
+      <p class="muted">The Taxman's in from 6 to 11pm (not Wednesdays or Sundays), and the raid's Sunday 6 to 11pm. We'll ping you at 6, and at 9 if you haven't fought him.</p>
       ${pushBlock()}
       <span class="field-label">Or put them in your calendar</span>
       ${reminderButtons()}
@@ -3002,7 +3002,7 @@ function raidFx(e) {
       if (A) A.bossWindup(e.attack, e.ids || []);
       FX.play(e.attack === "vanish" ? "vanish" : "warn");
       const mine = R.members.find((m) => m.id === my);
-      if ((e.ids || []).includes(my) && ["swipe", "vanish", "grab", "ooze", "gust"].includes(e.attack)) hint(`${ic("arrowRight")} It's coming for you: Dodge!`);
+      if ((e.ids || []).includes(my) && ["swipe", "vanish", "grab", "ooze", "gust"].includes(e.attack)) hint(`${ic("arrowRight")} Coming for you: tap Dodge or swipe!`);
       else if (mine && G.ATTACKS[e.attack]?.cut) hint(`${ic("bigSwing")} ${G.ATTACKS[e.attack].stop ? "Stop it" : "Stagger it"}: hit hard now`);
       break;
     }
@@ -3137,10 +3137,14 @@ function paintRaid() {
     // Ready: the button lights up and chimes (no toast: it used to sit over the results screen).
     if (spReady && !v.spToast) { v.spToast = true; FX.play("combo"); }
     if (!spReady) v.spToast = false;
-    const dg = $("#dg"), dcd = Math.max(0, mine.dodgeUntil - R.t), marked = B.warned && (B.next?.ids || []).includes(mine.id);
-    dg.disabled = dcd > 0 || !mine.alive || R.t < mine.stunUntil;
-    dg.querySelector("em").textContent = dcd > 0 ? Math.ceil(dcd) : "";
-    dg.classList.toggle("hot", marked && dcd <= 0);
+    // Dodge lights up only when an attack is coming for you (G.dodgeNow), with the seconds left to get out of the way;
+    // the rest of the time it sits dim, so there's never a wrong moment to press it.
+    const dg = $("#dg"), now = G.dodgeNow ? G.dodgeNow(R, mine) : B.warned && (B.next?.ids || []).includes(mine.id);
+    const slimed = R.t < mine.slimeUntil, ok = mine.alive && R.t >= mine.stunUntil && R.t >= mine.dodgeUntil, can = (now || slimed) && ok;
+    dg.disabled = !can;
+    dg.querySelector("em").textContent = now && ok ? Math.max(0, B.next.at - R.t).toFixed(1) : "";
+    dg.classList.toggle("hot", now && ok);
+    $("#arena")?.classList.toggle("incoming", now && ok);
     if (!mine.alive) hint(`${ic("skull")} You're down. Answer your question`);
     else if (R.t < mine.stunUntil) hint(`${ic("bolt")} Paralysed`);
     else if (R.grab?.id === mine.id) hint(`${ic("lock")} Grabbed! Your squad has to hit it to free you`);
@@ -3349,8 +3353,20 @@ document.addEventListener("pointerdown", (e) => {
   if (!e.target.closest("#stage")) return;
   e.preventDefault();
   if (S.view === "tax") taxTap(e);
-  else if (S.view === "raid") raidTapEvent(e);
+  else if (S.view === "raid") { raidTapEvent(e); swipes.set(e.pointerId, { x: e.clientX, y: e.clientY, done: false }); }
 });
+// A quick sideways swipe anywhere on the fight dodges too (only does anything when an attack's coming for you).
+const swipes = new Map();
+document.addEventListener("pointermove", (e) => {
+  const s = swipes.get(e.pointerId); if (!s || s.done || S.view !== "raid") return;
+  const dx = e.clientX - s.x, dy = e.clientY - s.y;
+  if (Math.abs(dx) > 34 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+    s.done = true;
+    const v = V.raid, mine = v?.R?.members.find((m) => m.id === v.my);
+    if (mine && (G.dodgeNow?.(v.R, mine) || v.R.t < mine.slimeUntil)) { raidAct("move", "dodge"); FX.play("tap"); }
+  }
+});
+for (const t of ["pointerup", "pointercancel"]) document.addEventListener(t, (e) => swipes.delete(e.pointerId));
 document.addEventListener("submit", async (e) => {
   const f = e.target.closest("form[data-form]"); if (!f) return;
   e.preventDefault();

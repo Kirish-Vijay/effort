@@ -101,7 +101,7 @@ const DEFAULT_RULES = {
   comboMult: [1, 1, 1.5, 2, 3], // …and the specials' damage lands again at ×1.5 for two, ×2 for three, ×3 for four or more
   comboFloor: 100,          // each special counts as at least this many taps' worth towards a combo (buffs included)
   roarDrain: 0.25,          // the boss's Scream knocks this much off everyone's special charge
-  dodgeCd: 8,               // Dodge: step out of a marked attack, then wait this long to do it again
+  dodgeCd: 1,               // Dodge: a moment before you can step again (it only works when an attack is coming for you)
   lineMult: 1.2,            // everyone fights from one line now; taps are scaled to where the rows used to average
   openingBonus: 0.4,        // hit harder while the boss winds up on someone else (it's looking the other way)
   formationBonus: 0.1,
@@ -355,9 +355,11 @@ const priceOf = (item, deal) => wholeE(tierOf(item.tier).price * (deal ? 1 - RUL
 // What the shop pays for gear you sell back: a share of everything you spent on it.
 const sellPrice = (paid) => Math.max(0, Math.round((Number(paid) || 0) * RULES.sellBack));
 // The Taxman takes Sundays off: no fight, and no tax on Sunday's steps.
-const taxDayOff = (day) => new Date(day + "T12:00:00Z").getUTCDay() === 0 || Object.values(RULES.raidMoved || {}).includes(day);
-// What to call a day off: "Sunday", or "Raid day" when a moved raid's on.
-const dayOffName = (day) => (new Date(day + "T12:00:00Z").getUTCDay() === 0 ? "Sunday" : "Raid day");
+// Sundays (the raid), the Midweek Hunt's day once it's running, and any day a raid's been moved to.
+const isHuntDay = (day) => new Date(day + "T12:00:00Z").getUTCDay() === HUNT.weekday && featureOn("hunt", day);
+const taxDayOff = (day) => new Date(day + "T12:00:00Z").getUTCDay() === 0 || isHuntDay(day) || Object.values(RULES.raidMoved || {}).includes(day);
+// What to call a day off: "Sunday", "Hunt day", or "Raid day" when a moved raid's on.
+const dayOffName = (day) => (new Date(day + "T12:00:00Z").getUTCDay() === 0 ? "Sunday" : isHuntDay(day) ? "Hunt day" : "Raid day");
 
 // ---------- 6pm to 11pm (not Sundays): the Taxman ----------
 // Can't die. He wins back health whenever you stop tapping, raises an Audit shield every ~22s
@@ -978,10 +980,21 @@ function comboEnd(R) {
   say(R, `Combo ×${mult}! ${who.map(nm).join(", ")} for ${Math.round(total).toLocaleString("en-GB")}`, "good");
 }
 // Dodge: step out of the way. If the boss had marked you, the hit misses (and a dodge shakes off slime).
+// The moves you can step out of. Strikes, Ooze, Vanish, Gust and Grab go for the people they mark; Stomp and Slam hit
+// everyone, so anyone can jump them.
+const DODGEABLE = ["swipe", "stomp", "slam", "ooze", "vanish", "gust", "grab"];
+// Is a dodgeable attack coming for m right now (warned, not landed yet)? That's the only time Dodge does anything,
+// so the button lights up exactly then and there's nothing to time or waste.
+function dodgeNow(R, m) {
+  const B = R.boss, N = B.next;
+  return !!(m && N && B.warned && R.t < N.at && DODGEABLE.includes(N.type) && (N.type === "stomp" || N.type === "slam" || (N.ids || []).includes(m.id)));
+}
 function raidDodge(R, id) {
   const m = R.members.find((x) => x.id === id);
-  if (!m || !canAct(R, m) || R.t < m.dodgeUntil) return false;
-  m.movedAt = R.t; m.moveUntil = R.t + 0.6; m.lastTap = Math.max(m.lastTap, R.t + 0.6); // the combo survives the step m.dodgeUntil = R.t + RULES.dodgeCd * (1 + (R.mods?.move || 0)); m.slimeUntil = 0;
+  // Only when it does something: an attack coming for you, or slime to shake off.
+  if (!m || !canAct(R, m) || R.t < m.dodgeUntil || !(dodgeNow(R, m) || R.t < m.slimeUntil)) return false;
+  m.movedAt = R.t; m.moveUntil = R.t + 0.6; m.lastTap = Math.max(m.lastTap, R.t + 0.6); // the combo survives the step
+  m.dodgeUntil = R.t + RULES.dodgeCd * (1 + (R.mods?.move || 0)); m.slimeUntil = 0;
   fx(R, { type: "dodgeStep", id: m.id });
   return true;
 }
@@ -1210,7 +1223,7 @@ function botAct(R, m) {
   }
   const B = R.boss, warned = B.next && B.warned;
   // Marked for a single-target hit: sometimes step out of the way, like a person watching the warnings would.
-  if (warned && ["swipe", "vanish", "grab", "ooze", "gust", "stomp", "slam"].includes(B.next.type) && (B.next.ids || []).includes(m.id) && !m.dodgeTry) {
+  if (dodgeNow(R, m) && !m.dodgeTry) {
     m.dodgeTry = true;
     if (R.r() < (m.dodgeP ?? 0.35) && raidDodge(R, m.id)) return;
   }
@@ -1732,10 +1745,10 @@ root.Game = {
   xpFor, levelOf, levelProgress,
   pace, weekTable,
   STATS, STAT_TOTAL, stats, classOf, POSITIONS, posOf, suggestedPosition, posFit, HOME_ROW, homeRow, edges, statEffects, statTotal, hitIndex, gearDps, statFill,
-  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff, dayOffName,
+  SLOTS, itemById, tierOf, itemStats, upgradeCost, loadout, dealsFor, priceOf, sellPrice, taxDayOff, dayOffName, isHuntDay,
   taxmanSetup, taxmanStart, taxmanDone, taxmanStep, taxmanTap, taxmanResult,
   norm, triviaSet, mathPrompt, listPrompt,
-  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidHold, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
+  BOSSES, bossFor, raidGoal, squadGoal, ATTACKS, raidCreate, raidHold, raidAddMember, raidExport, raidImport, raidEnd: endRaid, raidTap, raidAbility, raidMove, raidDodge, dodgeNow, DODGEABLE, comboMult, raidAnswer, raidStep, abilityCd, triviaTime,
   SPECIALS, specialOf, raidSpecial, interruptNeed, tapBase, setsWorn, stepScale, raidDmgCap, raidClampReport, turnout,
   AFFIXES, affixList, affixInfo, seasonOn, seasonById, seasonDef, onSale, tierOut, addSeasonGear, FEATURES, featureOn,
   DEN_ROOMS, DEN_MAX, denCost, denLevel, denNext, denMods, modsFor, WARDROBE, wardrobeById, SKIN_TIERS, SKINS, skinById, skinTier, pounds, GAMBA, gambaReturn, gambaRoll, crateOdds, cratePool, crateValue, HOUSE_LINKS, houseItem, TEST_END, EVENTS, eventOn, eventTier, isEventTier, baseTier, EVENT_BOSSES, HUNT, LEGS, journeyMiles, chapterOpen, trackTier, trackReward, TRACK_TITLES, BOUNTIES, bountiesFor, bountyProgress, dayNo, dayOf,

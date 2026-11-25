@@ -99,10 +99,19 @@ async function evening(players: Any[], now: number, late: boolean) {
   const slot = (Object.entries(G.RULES.raidMoved || {}) as [string, string][]).find(([, moved]) => moved === today)?.[0] ?? today;
   const { data: raided } = late && groupIds.length ? await db.from("raids").select("group_id").in("group_id", groupIds).eq("slot", slot).neq("status", "lobby") : { data: [] };
   const raidDone = new Set((raided ?? []).map((r: Any) => r.group_id));
+  // Hunt days: who's already hunted (the 9pm ping is only for those who haven't).
+  const huntDay = G.isHuntDay ? G.isHuntDay(today) : false;
+  const { data: hunted } = late && huntDay ? await db.from("ledger").select("player_id").eq("kind", "hunt").eq("ref", today).in("player_id", ids) : { data: [] };
+  const huntDone = new Set((hunted ?? []).map((r: Any) => r.player_id));
   return players.map((p) => {
     const L0 = local(now, p.tz || SQUAD_TZ), g = groupOf[p.id];
-    // A raid moved off its Sunday turns that day into a Sunday: raid pings, no Taxman.
-    const L = { ...L0, sunday: L0.sunday || G.taxDayOff(L0.day) };
+    // A raid moved off its Sunday turns that day into a Sunday: raid pings, no Taxman. Hunt days: no Taxman either,
+    // the pings are about the Hunt.
+    const L = { ...L0, sunday: L0.sunday || Object.values(G.RULES.raidMoved || {}).includes(L0.day) };
+    const hunt = !L.sunday && (G.isHuntDay ? G.isHuntDay(L0.day) : false);
+    if (hunt) return { player: p, msg: !g || (late && huntDone.has(p.id)) ? null : late
+      ? { title: "The Hunt's open till 11pm", body: "You haven't hunted yet this week. No Taxman today.", tag: "hunt", url: APP }
+      : { title: "The Midweek Hunt's on", body: "No Taxman today. You and your squad's stand-ins, till 11pm.", tag: "hunt", url: APP } };
     const squadIds = g ? (mates ?? []).filter((m: Any) => m.group_id === g.group_id).map((m: Any) => m.player_id) : [p.id];
     const s = stepsOn(p.id, L.day), E = G.effortsFromSteps(s);
     const sc = scroll?.find((r: Any) => r.player_id === p.id && r.day === L.day);

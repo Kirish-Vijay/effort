@@ -69,9 +69,13 @@ object Reminders {
             description = "6pm when the Taxman's in (6pm to 11pm), and 9pm if you haven't fought him"
         })
         val sunday = LocalDate.now().dayOfWeek == DayOfWeek.SUNDAY
+        // Wednesdays are the Midweek Hunt: no Taxman.
+        val wednesday = LocalDate.now().dayOfWeek == DayOfWeek.WEDNESDAY
         val (title, body) = when {
             test -> "Notifications are on" to "A ping at 6pm when the Taxman's in, and at 9pm if you haven't fought him."
             sunday && kind == MISSED -> "Raid lobby's open till 11pm" to "If your squad hasn't raided yet, there's still time."
+            wednesday && kind == MISSED -> "The Hunt's open till 11pm" to "If you haven't hunted yet, there's still time. No Taxman today."
+            wednesday -> "The Midweek Hunt's on" to "No Taxman today. You and your squad's stand-ins, till 11pm."
             sunday -> "Raid lobby's open" to "Open till 11pm. No Taxman on Sundays, and no tax."
             kind == MISSED -> "The Taxman's in till 11pm" to "You haven't fought him yet. Five minutes to stop his cut."
             hour >= 18 -> "The Taxman's in till 11pm" to "Five minutes to stop him taking his cut."
