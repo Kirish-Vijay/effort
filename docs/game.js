@@ -1112,10 +1112,13 @@ function bossAttack(R, echo = null) {
 
 function triviaTime(m, R) { return RULES.triviaSeconds + m.e.trivia + (m.perks.trivia || 0) + (R?.mods?.trivia || 0); }
 // Someone's down: every squad member (the fallen too) gets their own question. If 2/3 of the squad
-// get theirs wrong, everyone is paralysed. Rare valid answers knock a slice off the boss either way.
+// get theirs wrong, everyone is paralysed. Only real people answer: in the Hunt your squad-mates are bots standing
+// in for the others, so it's your question alone (a bot getting one wrong would cost you the fight). A fight of nothing
+// but bots (the sims) has them all answer. Rare valid answers knock a slice off the boss either way.
 function startTrivia(R) {
   R.triviaRuns++;
-  const who = R.members.filter((m) => !m.away);
+  const present = R.members.filter((m) => !m.away), people = present.filter((m) => !m.bot);
+  const who = people.length ? people : present;
   const qs = triviaSet(R.seed + R.triviaRuns * 7919, who.length);
   const per = {}, botPlan = {};
   who.forEach((m, i) => {
@@ -1127,7 +1130,7 @@ function startTrivia(R) {
   });
   R.trivia = { per, botPlan, started: R.t, n: who.length };
   fx(R, { type: "trivia" });
-  say(R, "Someone's down. The fight's paused: everyone gets a question. 2/3 wrong and you're all paralysed", "warn");
+  say(R, who.length === 1 ? "Someone's down. The fight's paused: answer right to get them back up, wrong and you're paralysed" : "Someone's down. The fight's paused: everyone gets a question. 2/3 wrong and you're all paralysed", "warn");
 }
 function raidAnswer(R, id, text) {
   const T = R.trivia, p = T && T.per[id];

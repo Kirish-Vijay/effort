@@ -3171,7 +3171,7 @@ function paintTrivia() {
     v.q = key; v.ticked = 0; v.sentAns = false; v.localAns = null; v.pendingAns = null; v.pendingRound = null; v.qAt = performance.now();
     // A second before the options take a tap: the card pops up mid-fight and a tap meant for the boss would land on one.
     setTimeout(() => { if (v.q === key) for (const b of document.querySelectorAll("#tv-opts .tv-opt.wait")) b.classList.remove("wait"); }, QUESTION_GRACE_MS);
-    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}<span class="tv-paused">Fight paused</span></div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed</div></div><div class="ring" id="tv-clock"><span></span></div></div>
+    box.innerHTML = `<div class="trivia"><div class="tt"><div><div class="caps">Squad question · ${esc(Q.kind === "maths" ? "Maths" : "Science")}<span class="tv-paused">Fight paused</span></div><div class="tiny" style="color:rgba(255,255,255,.7);margin-top:3px">${Object.keys(T.per).length === 1 ? "Right: they're back up. Wrong: you're paralysed" : `${Math.round(G.RULES.triviaFailShare * 100)}% of the squad wrong = everyone paralysed`}</div></div><div class="ring" id="tv-clock"><span></span></div></div>
       <h3 class="ol-sm">${esc(Q.q)}</h3>
       <div class="tv-opts" id="tv-opts">${(Q.opts || []).map((o, i) => `<button type="button" class="tv-opt wait" data-act="tv-pick" data-i="${i}"><b>${"ABCD"[i]}</b><span>${esc(Q.kind === "maths" ? fmt(Number(o)) : o)}</span></button>`).join("")}</div>
       <div class="verdict" id="tv-verdict"></div>
