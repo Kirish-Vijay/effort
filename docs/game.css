@@ -878,6 +878,10 @@ body.typing .chatview .ccomposer { padding-bottom: calc(env(safe-area-inset-bott
 .chips-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
 .fchip { height: 30px; padding: 0 12px; border-radius: 99px; border: 2px solid var(--ink); background: var(--inset); color: var(--text-2); font: 700 12px/1 var(--ui); cursor: pointer; }
 .fchip[aria-pressed="true"] { background: var(--panel-hi); color: #fff; box-shadow: 0 0 0 2px var(--cyan) inset; }
+/* Rarity chips: each carries its rarity's colour (the same one the item cards use). */
+.rchip { display: inline-flex; align-items: center; gap: 6px; }
+.rchip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--rc); box-shadow: 0 0 0 1.5px rgba(0,0,0,.45); flex: none; }
+.rchip[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--rc, var(--cyan)) inset; }
 /* the gear picker */
 .gearpick { display: grid; gap: 6px; }
 .gp { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; border: 2px solid var(--ink); background: var(--inset); color: inherit; text-align: left; cursor: pointer; box-shadow: inset 4px 0 0 var(--rc); }

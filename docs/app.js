@@ -1371,6 +1371,10 @@ function tabShop() {
     bag: I.ITEMS.filter((i) => i.id in inv).sort(sort),
   };
   const tab = lists[S.shopTab] || S.shopTab === "gamba" || S.shopTab === "house" ? S.shopTab : "class";
+  // Rarity filter: the rarities this list actually has (lowest first), and the list cut to the one picked.
+  const base = lists[tab] || [], rarities = I.TIERS.filter((t) => base.some((i) => i.tier === t.id));
+  const rarity = rarities.some((t) => t.id === S.shopRarity) ? S.shopRarity : "any";
+  const shown = rarity === "any" ? base : base.filter((i) => i.tier === rarity);
   const next = I.TIERS.find((t) => t.lvl > lvl);
   const slotName = { weapon: "Weapon", armour: "Armour", trinket: "Trinket" };
   return `
@@ -1390,7 +1394,8 @@ function tabShop() {
       `<button data-shoptab="${k}" aria-pressed="${tab === k}">${esc(l)}${n ? `<span class="cnt">${n}</span>` : ""}</button>`).join("")}</div>
     ${tab === "all" ? `<div class="chips-row">${[["any", "All"], ["weapon", "Weapons"], ["armour", "Armour"], ["trinket", "Trinkets"]].map(([k, l]) => `<button class="fchip" data-shopslot="${k}" aria-pressed="${(S.shopSlot || "any") === k}">${l}</button>`).join("")}</div>
       <div class="chips-row">${[["any", "Any style"], ["power", "Power"], ["guard", "Guard"], ["speed", "Speed"], ["brains", "Brains"], ["luck", "Luck"]].map(([k, l]) => `<button class="fchip" data-shopstyle="${k}" aria-pressed="${(S.shopStyle || "any") === k}">${l}</button>`).join("")}</div>` : ""}
-    ${tab === "gamba" ? gambaPanel() : tab === "house" ? housePanel() : `<div class="items">${lists[tab].length ? lists[tab].map((i) => itemCard(i)).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`}`;
+    ${lists[tab] && rarities.length > 1 ? `<div class="chips-row">${[{ id: "any", label: "All rarities" }, ...rarities].map((t) => `<button class="fchip rchip" data-shoprarity="${t.id}" aria-pressed="${rarity === t.id}"${t.color ? ` style="--rc:${t.color}"` : ""}>${t.color ? `<i class="dot"></i>` : ""}${esc(t.label)}</button>`).join("")}</div>` : ""}
+    ${tab === "gamba" ? gambaPanel() : tab === "house" ? housePanel() : `<div class="items">${shown.length ? shown.map((i) => itemCard(i)).join("") : `<p class="muted small" style="grid-column:1/-1;text-align:center;padding:20px 0">${tab === "bag" ? "Nothing yet. Gear you buy lives here." : "Nothing here yet."}</p>`}</div>`}`;
 }
 
 // ---------- Winny's Gamba Bucket ----------
@@ -3489,6 +3494,7 @@ document.addEventListener("click", async (e) => {
   if (d.shoptab) { S.shopTab = d.shoptab; render(); return; }
   if (d.shopslot) { S.shopSlot = d.shopslot; render(); return; }
   if (d.shopstyle) { S.shopStyle = d.shopstyle; render(); return; }
+  if (d.shoprarity) { S.shopRarity = d.shoprarity; render(); return; }
   if (d.profile) { profileSheet(d.profile); FX.play("tap"); return; }
   if (d.steps) { stepsSheet(d.steps); FX.play("tap"); return; }
   if (d.item) { itemSheet(d.item, d.deal === "1"); FX.play("tap"); return; }
